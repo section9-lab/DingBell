@@ -1,0 +1,17 @@
+{
+  "name": "dingbell-flue-schema8-probe",
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "FlueHistoricalProbeAgent"
+      ]
+    }
+  ]
+}

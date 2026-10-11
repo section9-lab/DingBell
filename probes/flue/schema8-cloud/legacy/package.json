@@ -1,0 +1,18 @@
+{
+  "name": "dingbell-schema8-cloud-legacy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@flue/runtime": "2.0.0-nightly.202607240825",
+    "@flue/vite": "2.0.0-nightly.202607240825",
+    "@earendil-works/pi-ai": "0.81.1",
+    "agents": "0.20.1",
+    "hono": "4.12.32"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.49.0",
+    "vite": "8.1.2",
+    "wrangler": "4.116.0"
+  }
+}

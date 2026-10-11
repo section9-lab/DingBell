@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-09 06:16:54 UTC",
+  "fileKey": "MxGVlbwWuKiSreWQrxru3n",
+  "purpose": "Stage 1 read-only design baseline recheck",
+  "requestedNodes": [
+    "5:55",
+    "94:12817",
+    "94:13176",
+    "94:14612",
+    "94:14971",
+    "96:20384",
+    "96:24824"
+  ],
+  "readOnly": true,
+  "calls": [
+    {
+      "tool": "figma_get_metadata",
+      "nodeId": "5:55",
+      "outcome": "SUCCESS",
+      "evidenceKind": "Summary of observed XML metadata; not a full response export or screenshot",
+      "frame": {
+        "id": "5:55",
+        "name": "04 消息中心 · 人工接管",
+        "width": 1440,
+        "height": 1000
+      },
+      "observed": [
+        {
+          "id": "94:15572",
+          "name": "Conversation workspace",
+          "width": 1176,
+          "height": 806
+        },
+        {
+          "id": "94:15573",
+          "name": "Conversation list",
+          "width": 280,
+          "height": 806
+        },
+        {
+          "id": "94:15644",
+          "name": "Conversation detail",
+          "width": 606,
+          "height": 806
+        },
+        {
+          "id": "94:15746",
+          "name": "Customer context",
+          "width": 288,
+          "height": 806
+        },
+        {
+          "id": "94:15669",
+          "name": "Status/负责人：王恒 · AI 已暂停"
+        },
+        {
+          "id": "94:15677",
+          "name": "Action/恢复 AI"
+        },
+        {
+          "id": "94:15711",
+          "name": "14:34  王恒已接管 · 已取消 AI 尚未发送的回复"
+        },
+        {
+          "id": "103:24843",
+          "name": "Message / AI 客服"
+        },
+        {
+          "id": "103:24855",
+          "name": "Bubble / Merchant",
+          "width": 214,
+          "height": 72
+        },
+        {
+          "id": "103:24837",
+          "name": "Bubble / Consumer",
+          "width": 200,
+          "height": 72
+        },
+        {
+          "id": "94:15712",
+          "name": "Reply composer",
+          "width": 566,
+          "height": 166
+        },
+        {
+          "id": "103:24877",
+          "name": "Composer tabs"
+        },
+        {
+          "id": "94:15714",
+          "name": "Action/回复消费者"
+        },
+        {
+          "id": "94:15722",
+          "name": "Action/内部备注"
+        },
+        {
+          "id": "103:26845",
+          "name": "Composer / Editable draft"
+        },
+        {
+          "id": "103:24883",
+          "name": "中文草稿 · 发送前确认译文"
+        },
+        {
+          "id": "94:15736",
+          "name": "Action/预览俄语回复"
+        },
+        {
+          "id": "94:15775",
+          "name": "尚未关联订单"
+        },
+        {
+          "id": "94:15778",
+          "name": "商品资料 DB-260 · 已发布\n今天 09:15 更新"
+        }
+      ],
+      "notProven": [
+        "Prototype reactions and destination validity",
+        "Independent scrolling and clipping behavior",
+        "Visual contrast, actual text overflow and keyboard behavior",
+        "Production takeover, cancellation, translation, or send behavior"
+      ]
+    },
+    {
+      "tool": "figma_use_figma",
+      "requestedNodes": [
+        "5:55",
+        "94:12817",
+        "94:13176",
+        "94:14612",
+        "94:14971",
+        "96:20384",
+        "96:24824"
+      ],
+      "outcome": "BLOCKED_BY_TOOL_LIMIT",
+      "requestReadOnly": true,
+      "rawToolResult": {
+        "content": [
+          {
+            "type": "text",
+            "text": "You've reached the Figma MCP tool call limit on the Starter plan. Upgrade your plan for more tool calls: https://www.figma.com/files/team/1436352227198829373/all-projects?upgrade=mcp_rate_limit_paywall"
+          },
+          {
+            "type": "resource_link",
+            "uri": "file://figma/docs/rate-limits-access.md",
+            "name": "rate-limits-access.md",
+            "mimeType": "text/plain",
+            "size": 3932,
+            "_meta": {
+              "size": 3932
+            }
+          }
+        ],
+        "structuredContent": {
+          "error_code": "INVALID_ARGUMENT"
+        },
+        "isError": true
+      },
+      "completedAudit": false
+    }
+  ],
+  "conclusions": {
+    "metadataRechecked": [
+      "5:55"
+    ],
+    "prototypeRechecked": [],
+    "remainingNodesNotRechecked": [
+      "94:12817",
+      "94:13176",
+      "94:14612",
+      "94:14971",
+      "96:20384",
+      "96:24824"
+    ],
+    "allSevenPagesPassed": false,
+    "canvasChanges": [],
+    "stoppedAfterLimit": true,
+    "browserTabsOpened": 0,
+    "subscriptionChanged": false
+  }
+}

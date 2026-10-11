@@ -1,0 +1,321 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791527092074,
+      "tag": "0000_identity_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791527336984,
+      "tag": "0001_identity_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791530009084,
+      "tag": "0002_bootstrap",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791530214123,
+      "tag": "0003_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791532329153,
+      "tag": "0004_membership_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791533790866,
+      "tag": "0005_stores",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791538544027,
+      "tag": "0006_message_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791542120121,
+      "tag": "0007_source_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791543381464,
+      "tag": "0008_fbs_postings",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791545034645,
+      "tag": "0009_conversation_reads",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791547695072,
+      "tag": "0010_conversation_control",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791549293054,
+      "tag": "0011_conversation_reopen",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791550331783,
+      "tag": "0012_conversation_work_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1791551555781,
+      "tag": "0013_conversation_transfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1791553752986,
+      "tag": "0014_conversation_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1791557154739,
+      "tag": "0015_conversation_replies",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1791564263973,
+      "tag": "0016_translation_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1791565386910,
+      "tag": "0017_translation_provider_permit",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1791570252449,
+      "tag": "0018_reply_preview_output",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1791572283279,
+      "tag": "0019_conversation_reply_cancellation",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1791575675606,
+      "tag": "0020_message_append_sequence",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1791582602631,
+      "tag": "0021_company_timezone",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1791584345535,
+      "tag": "0022_message_context",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1791586423110,
+      "tag": "0023_reply_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791588493303,
+      "tag": "0024_knowledge",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791591061941,
+      "tag": "0025_knowledge_index_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1791593326433,
+      "tag": "0026_knowledge_publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1791594056651,
+      "tag": "0027_knowledge_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1791599337424,
+      "tag": "0028_knowledge_product_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1791605118927,
+      "tag": "0029_reply_test_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1791606528025,
+      "tag": "0030_reply_test_query",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1791608134376,
+      "tag": "0031_reply_test_budget_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1791613124356,
+      "tag": "0032_ai_reception",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1791615789733,
+      "tag": "0033_ai_execution",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1791619785583,
+      "tag": "0034_ai_execution_repair",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1791620185107,
+      "tag": "0035_ai_resume",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1791625087769,
+      "tag": "0036_ai_listening",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1791630662326,
+      "tag": "0037_customer_message",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1791630869137,
+      "tag": "0038_inbound_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1791632628893,
+      "tag": "0039_ai_intake",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1791634518990,
+      "tag": "0040_ai_dispatch",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1791636762250,
+      "tag": "0041_ai_knowledge_query",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1791638846058,
+      "tag": "0042_ai_answer",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1791692928382,
+      "tag": "0043_ai_reply_intent",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1791695520102,
+      "tag": "0044_ai_reply_delivery",
+      "breakpoints": true
+    }
+  ]
+}
