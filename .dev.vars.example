@@ -1,0 +1,74 @@
+# Copy to .dev.vars for local development; this file contains no usable secret.
+APP_BASE_URL=http://127.0.0.1:5173
+# Generate a random secret of at least 32 characters. Never use a shared/default value.
+BETTER_AUTH_SECRET=
+
+# Required only for the first installation. Generate a separate random secret (>=32 chars).
+# Enter it on /setup, never in a URL. Remove it after installation is complete.
+BOOTSTRAP_SECRET=
+# Configure a verified sender mailbox in Resend before starting installation or inviting members.
+RESEND_API_KEY=
+MAIL_FROM=
+
+# Required only for saving/checking store credentials; independent of the identity secret.
+# Generate 32 random bytes as base64 (openssl rand -base64 32), then place the value
+# in a JSON dictionary, e.g. {"v1":"<base64 value>"}. Use a Worker Secret in production.
+STORE_CREDENTIAL_KEYS=
+STORE_CREDENTIAL_ACTIVE_KEY=v1
+
+# Outbound replies stay disabled by default. Enabling this alone is insufficient:
+# the store must also be enabled and have a verified, unexpired reply capability.
+OUTBOUND_ENABLED=false
+
+# Reply translation is independently disabled. Enabling it also requires the
+# generated Flue binding, an enabled company budget and reviewed pricing.
+TRANSLATION_ENABLED=false
+NVAPI_KEY=
+# JSON TranslationConfig: provider, model, modelConfigVersion, promptVersion,
+# maxInputTokens, maxOutputTokens and pricing (version, currency, all four
+# *MicrosPerMillion rates). No price is inferred; only verified free usage is 0.
+# See docs/02-architecture.md section 15. Keep this blank until reviewed.
+TRANSLATION_CONFIG_JSON=
+
+# Manager-only answer simulations require a separate reply_test_budget/run and
+# KNOWLEDGE_AI / KNOWLEDGE_INDEX / FLUE_REPLY_TEST_AGENT. Never enables customer sending.
+# See architecture 7.7. Keep disabled until reviewed; no free price is inferred.
+REPLY_TEST_ENABLED=false
+# Internal autonomous reception authority is separate from answer simulations.
+# Keep disabled until runtime, tool, cancellation and end-to-end quality acceptance.
+AI_RECEPTION_ENABLED=false
+# Automatic customer replies also require OUTBOUND_ENABLED and the store outbound permission.
+# Keep disabled until reply quality and platform delivery acceptance. See architecture 7.31.
+AI_OUTBOUND_ENABLED=false
+# Production Support configuration: {"model": <TranslationConfig>, "maxGenerations": 1..8}.
+# Use the supported NVIDIA model/version and reviewed prices; blank is unavailable, never free.
+# This is separate from reply-test and translation configuration. See architecture 7.19.
+AI_RECEPTION_CONFIG_JSON=
+# Optional search_knowledge tool: explicitly select promptVersion support-knowledge-v1 above.
+# support-answer-v1 additionally saves cited drafts and requests human review; it cannot send replies.
+# Requires KNOWLEDGE_AI and KNOWLEDGE_INDEX. Never reuses the staff test budget.
+# Shape: {"profile":"bge-m3-1024-bytes2400-v1","priceVersion":"<reviewed-price-version>","maxInputTokens":60000,"inputMicrosPerMillion":<reviewed-integer-price>}.
+# One embedding permit per answer run; token usage is unavailable, so its conservative allowance stays reserved.
+AI_KNOWLEDGE_QUERY_CONFIG_JSON=
+# TranslationConfig shape; prompt versions are described in architecture 7.10.
+# grounded-reply-v1 is preserved; grounded-reply-v2 is an unapproved evaluation candidate.
+# modelConfigVersion nvidia-reply-test-v2 adds guided JSON; v1 stays unchanged.
+# Shape constraints do not approve factual accuracy, handoff actions or automatic sending.
+REPLY_TEST_CONFIG_JSON=
+# Query config: profile, priceVersion, maxInputTokens, inputMicrosPerMillion,
+# dailyLimitMicros, maxQueries. This separate installation-wide UTC-day ceiling
+# reserves a full embedding input window, not measured usage or an invoice.
+REPLY_TEST_QUERY_CONFIG_JSON=
+
+# Optional knowledge indexing, retrieval tests and publication. Bind both
+# KNOWLEDGE_WORKFLOW / KNOWLEDGE_REVIEW_WORKFLOW, KNOWLEDGE_AI and a 1024-dimensional
+# cosine KNOWLEDGE_INDEX with scope/product/language/revision/eligible metadata indexes.
+# Source chunks and test questions share a UTC-day UTF-8 input allowance.
+# Publication reuses saved vectors and does not call the embedding model.
+# Reservations are not refunded on cancellation or an unknown result; this is
+# an input allowance, not a currency budget or a guarantee of free provider use.
+KNOWLEDGE_INDEXING_ENABLED=false
+KNOWLEDGE_DAILY_INPUT_BYTES=
+
+# Model and Ozon credentials are not required for account and team workflows.
+# Public self-service registration remains disabled; new accounts use installation or invitation.

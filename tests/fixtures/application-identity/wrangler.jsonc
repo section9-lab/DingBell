@@ -1,0 +1,13 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "dingbell-application-identity-test",
+  "main": "../../../src/app.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "dingbell-application-identity-test",
+    "database_id": "application-identity-local-only",
+    "migrations_dir": "../../../migrations"
+  }]
+}

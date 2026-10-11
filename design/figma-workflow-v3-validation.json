@@ -1,0 +1,22 @@
+{
+  "fileKey": "MxGVlbwWuKiSreWQrxru3n",
+  "version": "DingBell V3",
+  "applied": true,
+  "prototypeLinkChecks": { "passed": 16, "total": 16 },
+  "invalidLinks": [],
+  "initialTextOverflow": [],
+  "visuallyReviewed": ["home", "strategy", "gaps", "batchPassed", "insights", "issueExport"],
+  "finalMessageLayout": {
+    "changedFrameCount": 7,
+    "prototypeLinksPreserved": true,
+    "historyHeightPendingReply": 304,
+    "historyHeightWaiting": 378
+  },
+  "reviewEntrypoints": {
+    "messageCenter": "5:52",
+    "replyStrategy": "36:994",
+    "knowledgeImprovements": "96:20384",
+    "conversationAnalysis": "96:24824"
+  },
+  "scope": "Editable Figma design and prototype links. Does not verify real messaging, AI inference, store APIs, or CSV generation."
+}

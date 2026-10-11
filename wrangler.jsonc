@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dingbell",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workflows": [
+    { "binding": "KNOWLEDGE_WORKFLOW", "name": "dingbell-knowledge-index", "class_name": "KnowledgeIndexWorkflow" },
+    { "binding": "KNOWLEDGE_REVIEW_WORKFLOW", "name": "dingbell-knowledge-review", "class_name": "KnowledgeReviewWorkflow" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "STORE_COORDINATOR", "class_name": "StoreCoordinator" },
+      { "name": "CONVERSATION_CONTROLLER", "class_name": "ConversationController" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["StoreCoordinator"] },
+    { "tag": "v2", "new_sqlite_classes": ["ConversationController"] },
+    { "tag": "v3", "new_sqlite_classes": ["FlueReplyPreviewAgent"] },
+    { "tag": "v4", "new_sqlite_classes": ["FlueReplyTestAgent"] },
+    { "tag": "v5", "new_sqlite_classes": ["FlueSupportAgent"] }
+  ],
+  "triggers": { "crons": ["* * * * *"] },
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/__probe", "/__probe/*"]
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "dingbell-db",
+    "database_id": "dingbell-local-only",
+    "migrations_dir": "migrations"
+  }]
+}

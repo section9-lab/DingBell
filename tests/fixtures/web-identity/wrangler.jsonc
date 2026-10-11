@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "dingbell-web-identity-test",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "dingbell-web-identity-test",
+    "database_id": "web-identity-local-only",
+    "migrations_dir": "../../../migrations"
+  }]
+}

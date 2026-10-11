@@ -1,0 +1,25 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "dingbell-flue-probe",
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "PROBE_GATE", "class_name": "ProbeGate" }]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FlueProbeAgent"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["ProbeGate"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["FlueBoundedProbeAgent"]
+    }
+  ]
+}

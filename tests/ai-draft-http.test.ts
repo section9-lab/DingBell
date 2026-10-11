@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {hashPassword} from 'better-auth/crypto';
+import {aiAnswerFixture} from './fixtures/ai-answer.ts';
+import {createApp} from '../src/application.ts';
+import {services} from '../src/modules/identity/services.ts';
+import {submitAiAnswer} from '../src/modules/ai-runs/answer.ts';
+test('the draft endpoint is a read-only, no-store, member-bound view with no model or controller dependency',{timeout:30000},async t=>{
+ const x=await aiAnswerFixture();t.after(x.f.close);assert.equal((await submitAiAnswer(x.env,x.read,x.scope,x.run.request.runId,x.input)).status,'submitted');
+ const env={DB:x.f.db,APP_BASE_URL:'https://draft.example.invalid',BETTER_AUTH_SECRET:'synthetic-draft-auth-secret-at-least-thirty-two'};
+ const password='synthetic-test-password',hash=await hashPassword(password);
+ await x.f.db.prepare("INSERT INTO account(id,account_id,provider_id,user_id,password,updated_at) VALUES ('owner','owner','credential','owner',?,1)").bind(hash).run();
+ const response=await services(env)!.auth.api.signInEmail({body:{email:'owner@example.invalid',password},asResponse:true});assert.equal(response.status,200);
+ const cookie=response.headers.getSetCookie().map(s=>s.split(';',1)[0]).join('; '),app=createApp();
+ const request=(options:{member?:string|null;company?:string;query?:string;cookie?:string;method?:string}={})=>{const headers=new Headers({cookie:options.cookie??cookie});if(options.member!==null)headers.set('X-DingBell-Member-Id',options.member??'owner-member');return app.request(`${env.APP_BASE_URL}/api/companies/${options.company??'org'}/conversations/conv/ai-draft${options.query??''}`,{headers,method:options.method??'GET'},env);};
+ const ok=await request();assert.equal(ok.status,200,await ok.clone().text());assert.equal(ok.headers.get('cache-control'),'no-store');const value=await ok.json() as any;assert.equal(value.draft.body,x.input.body);assert.equal(value.canSend,false);
+ for(const [options,status]of [[{member:null},400],[{member:'wrong'},404],[{company:'foreign'},404],[{query:'?runId=foreign'},400],[{cookie:''},401],[{method:'POST'},404]] as const)assert.equal((await request(options)).status,status);
+ await x.f.db.prepare("UPDATE session SET expires_at=1 WHERE user_id='owner'").run();assert.equal((await request()).status,401);
+ assert.equal(x.f.providerRequests.length,0);assert.equal((await x.f.db.prepare('SELECT count(*) n FROM send_intent').first<any>()).n,0);
+});
