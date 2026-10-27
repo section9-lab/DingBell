@@ -61,6 +61,7 @@ function canonicalReceipt(value:ControlEvent['receipt']):ControlEvent['receipt']
   }
   return parsed.output.action==='add_note'?{...parsed.output,...canonicalMetadata,authorName:authorName as string}:{...parsed.output,...canonicalMetadata};
 }
+export function checkedControlReceipt(value:unknown):ControlEvent['receipt']{return canonicalReceipt(value as ControlEvent['receipt']);}
 function accessQuery(db:D1Database,actor:ControlActor,conversationId:string,targetMemberId?:string){
   accessParameters(actor,conversationId);
   if(targetMemberId!==undefined&&!v.is(identifier,targetMemberId))throw new RangeError('INVALID_CONTROL_TARGET');

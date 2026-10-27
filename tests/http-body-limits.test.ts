@@ -91,6 +91,22 @@ async function errorResponse(response: Response, status: number, code: string) {
   assert.equal(body.requestId, requestId);
 }
 
+test('workspace bootstrap validates one session and returns its complete company snapshot', async () => {
+  const f = await fixture(true);
+  try {
+    f.sqlite.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('body-company','Body Company','body-company',1)").run();
+    f.sqlite.prepare("INSERT INTO member (id,organization_id,user_id,role,created_at) VALUES ('body-member','body-company','body-user','owner',1)").run();
+    const loginResponse = await f.post('/api/auth/sign-in/email', JSON.stringify(login), 'content-length');
+    const cookie = loginResponse.headers.getSetCookie().map(value => value.split(';', 1)[0]).join('; ');
+    const response = await f.app.request(`${f.env.APP_BASE_URL}/api/workspace-bootstrap`, { headers: { cookie } }, f.env);
+    assert.equal(response.status, 200);responseHeaders(response);
+    const value = await response.json() as any;
+    assert.equal(value.setup.identity.configured, true);assert.equal(value.setup.email.configured, true);
+    assert.equal(value.session.user.id, 'body-user');
+    assert.deepEqual(value.companies, { companies: [{ id: 'body-company', name: 'Body Company', slug: 'body-company', role: 'owner' }], activeCompanyId: null });
+  } finally { f.close(); }
+});
+
 for (const transport of ['content-length', 'chunked-stream'] as const) {
   test(`ordinary writes accept exactly 16 KiB and preserve the cloned body for Better Auth (${transport})`, async () => {
     const f = await fixture(true);

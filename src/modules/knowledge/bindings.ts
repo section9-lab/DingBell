@@ -5,6 +5,7 @@ export type KnowledgeBindings = {
   KNOWLEDGE_AI?: Ai;
   KNOWLEDGE_INDEX?: Vectorize;
   KNOWLEDGE_INDEXING_ENABLED?: string;
+  KNOWLEDGE_VECTOR_CLEANUP_ENABLED?: string;
   KNOWLEDGE_DAILY_INPUT_BYTES?: string;
 };
 export function knowledgeIndexConfig(env: KnowledgeBindings) {

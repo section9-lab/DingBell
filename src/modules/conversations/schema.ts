@@ -110,6 +110,33 @@ export const aiDispatch = sqliteTable('ai_dispatch', {
   check('ai_dispatch_time_valid',sql`${table.createdAt} BETWEEN 0 AND 8640000000000000 AND (${table.dueAt} IS NULL OR ${table.dueAt} BETWEEN 0 AND 8640000000000000)`),
 ]);
 
+export const handoffFollowUpReview=sqliteTable('handoff_follow_up_review',{
+ controllerId:text('controller_id').notNull(),organizationId:text('organization_id').notNull(),storeId:text('store_id').notNull(),conversationId:text('conversation_id').notNull(),runId:text('run_id').notNull(),
+ sourceSequence:integer('source_sequence').notNull(),commandId:text('command_id').notNull(),reviewerUserId:text('reviewer_user_id').notNull(),reviewerMemberId:text('reviewer_member_id').notNull(),reviewerName:text('reviewer_name').notNull(),reviewedAt:integer('reviewed_at').notNull(),
+},table=>[
+ primaryKey({columns:[table.controllerId,table.runId]}),
+ foreignKey({columns:[table.controllerId,table.organizationId,table.storeId,table.conversationId],foreignColumns:[conversationControl.controllerId,conversationControl.organizationId,conversationControl.storeId,conversationControl.conversationId]}).onDelete('cascade'),
+ uniqueIndex('handoff_follow_up_command_unique').on(table.controllerId,table.commandId),index('handoff_follow_up_conversation_idx').on(table.organizationId,table.conversationId,table.reviewedAt,table.runId),
+ check('handoff_follow_up_identity_valid',sql`length(${table.runId}) BETWEEN 1 AND 256 AND length(${table.commandId}) BETWEEN 1 AND 256 AND length(${table.reviewerUserId}) BETWEEN 1 AND 256 AND length(${table.reviewerMemberId}) BETWEEN 1 AND 256 AND length(${table.reviewerName})<=1000`),
+ check('handoff_follow_up_sequence_valid',sql`typeof(${table.sourceSequence})='integer' AND ${table.sourceSequence} BETWEEN 1 AND 9007199254740991`),
+ check('handoff_follow_up_time_valid',sql`typeof(${table.reviewedAt})='integer' AND ${table.reviewedAt} BETWEEN 0 AND 8640000000000000`),
+]);
+
+export const handoffFollowUpItemEvent=sqliteTable('handoff_follow_up_item_event',{
+ controllerId:text('controller_id').notNull(),organizationId:text('organization_id').notNull(),storeId:text('store_id').notNull(),conversationId:text('conversation_id').notNull(),runId:text('run_id').notNull(),sourceSequence:integer('source_sequence').notNull(),
+ itemIndex:integer('item_index').notNull(),revision:integer('revision').notNull(),commandId:text('command_id').notNull(),actorUserId:text('actor_user_id').notNull(),actorMemberId:text('actor_member_id').notNull(),actorName:text('actor_name').notNull(),
+ status:text('status').notNull(),evidenceMessageId:text('evidence_message_id'),createdAt:integer('created_at').notNull(),
+},table=>[
+ primaryKey({columns:[table.controllerId,table.runId,table.itemIndex,table.revision]}),
+ foreignKey({columns:[table.controllerId,table.organizationId,table.storeId,table.conversationId],foreignColumns:[conversationControl.controllerId,conversationControl.organizationId,conversationControl.storeId,conversationControl.conversationId]}).onDelete('cascade'),
+ foreignKey({columns:[table.evidenceMessageId,table.organizationId,table.storeId,table.conversationId],foreignColumns:[message.id,message.organizationId,message.storeId,message.conversationId]}).onDelete('cascade'),
+ uniqueIndex('handoff_follow_up_item_command_unique').on(table.controllerId,table.commandId),index('handoff_follow_up_item_run_idx').on(table.controllerId,table.runId,table.itemIndex,table.revision),
+ check('handoff_follow_up_item_identity_valid',sql`length(${table.runId}) BETWEEN 1 AND 256 AND length(${table.commandId}) BETWEEN 1 AND 256 AND length(${table.actorUserId}) BETWEEN 1 AND 256 AND length(${table.actorMemberId}) BETWEEN 1 AND 256 AND length(${table.actorName})<=1000`),
+ check('handoff_follow_up_item_position_valid',sql`typeof(${table.sourceSequence})='integer' AND ${table.sourceSequence} BETWEEN 1 AND 9007199254740991 AND typeof(${table.itemIndex})='integer' AND ${table.itemIndex} BETWEEN 0 AND 7 AND typeof(${table.revision})='integer' AND ${table.revision} BETWEEN 1 AND 9007199254740991`),
+ check('handoff_follow_up_item_status_valid',sql`(${table.status}='evidence_linked' AND ${table.evidenceMessageId} IS NOT NULL) OR (${table.status} IN ('pending','not_required','unavailable') AND ${table.evidenceMessageId} IS NULL)`),
+ check('handoff_follow_up_item_time_valid',sql`typeof(${table.createdAt})='integer' AND ${table.createdAt} BETWEEN 0 AND 8640000000000000`),
+]);
+
 export const conversationControlEvent = sqliteTable('conversation_control_event', {
   controllerId: text('controller_id').notNull(), organizationId: text('organization_id').notNull(), storeId: text('store_id').notNull(), conversationId: text('conversation_id').notNull(),
   sequence: integer('sequence').notNull(), commandId: text('command_id').notNull(), actorUserId: text('actor_user_id'), actorMemberId: text('actor_member_id'),

@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router';
 import { Plus, Store as StoreIcon, ArrowLeft, RefreshCw } from 'lucide-react';
 import { ApiError, type Company } from '../lib/api';
 import { readStore, readStores, updateStore } from '../lib/stores-api';
-import { StoreCredentialsDialog, StoreGrantsDialog, StoreStateDialog, type StoreChange } from '../components/store-dialogs';
+import { StoreCredentialsDialog, StoreGrantsDialog, StorePlatformDialog, StoreStateDialog, type StoreChange } from '../components/store-dialogs';
 import { StoreSyncPanel } from '../components/store-sync-panel';
 import { ErrorNotice } from '../components/identity-shared';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
@@ -34,7 +34,7 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
   const [offset, setOffset] = useState(0);
   const stores = useQuery({ queryKey: ['stores', company.id, offset], queryFn: ({ signal }) => readStores(company.id, offset, signal) });
   const detail = useQuery({ queryKey: ['store', company.id, selectedId], queryFn: ({ signal }) => readStore(company.id, selectedId!, signal), enabled: !!selectedId });
-  const [dialog, setDialog] = useState<'create' | 'credentials' | 'grants' | 'paused' | 'unverified' | 'disconnected' | null>(null);
+  const [dialog, setDialog] = useState<'platform' | 'create' | 'credentials' | 'grants' | 'paused' | 'unverified' | 'disconnected' | null>(null);
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const change: StoreChange = async (operation, storeId) => {
@@ -52,6 +52,7 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
   const store = selectedId && !detail.isFetching && !detail.isError ? detail.data?.store : undefined;
   const shared = { companyId: company.id, pending, close: () => setDialog(null), change };
   return <>
+    {dialog === 'platform' && <StorePlatformDialog pending={pending} close={() => setDialog(null)} select={() => setDialog('create')} />}
     {dialog === 'create' && <StoreCredentialsDialog {...shared} />}
     {store && dialog === 'credentials' && <StoreCredentialsDialog {...shared} store={store} />}
     {store && dialog === 'grants' && <StoreGrantsDialog {...shared} store={store} />}
@@ -60,7 +61,7 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
       <div className="flex flex-col gap-2"><h1 className="text-2xl font-semibold tracking-tight">店铺管理</h1>
         <p className="text-sm leading-6 text-muted-foreground">{management ? '管理 Ozon 连接、只读能力和团队访问范围。' : '这里只显示你有权访问的店铺。连接配置由公司管理员维护。'}</p>
       </div>
-      {management && <Button disabled={pending || !stores.data.configured} onClick={() => setDialog('create')}><Plus data-icon="inline-start" />添加 Ozon 店铺</Button>}
+      {management && <Button disabled={pending || !stores.data.configured} onClick={() => setDialog('platform')}><Plus data-icon="inline-start" />添加店铺</Button>}
     </div>
     {!stores.data.configured && management && <Alert><AlertTitle>店铺凭证加密尚未配置</AlertTitle><AlertDescription>请联系部署管理员配置凭证加密密钥。现有店铺信息仍可查看，配置完成后才能保存或检查凭证。</AlertDescription></Alert>}
     {selectedId ? <>
@@ -99,7 +100,7 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
         <TableBody>{stores.data.stores.map(item => <TableRow key={item.id}><TableCell><p className="font-medium">{item.name}</p><p className="text-xs text-muted-foreground">Ozon</p></TableCell><TableCell><Badge variant="outline">{statuses[item.status]}</Badge></TableCell><TableCell className="text-xs text-muted-foreground">{date(item.checkedAt, '尚未检查')}</TableCell><TableCell className="text-right"><Button size="sm" variant="ghost" aria-label={`查看 ${item.name}`} onClick={() => setSearch({ store: item.id })}>查看详情</Button></TableCell></TableRow>)}</TableBody>
       </Table>
       <div className="flex items-center justify-between gap-2"><Button size="sm" variant="outline" disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页店铺</Button><span className="text-xs text-muted-foreground">第 {offset / 100 + 1} 页</span><Button size="sm" variant="outline" disabled={stores.data.nextOffset === null} onClick={() => setOffset(stores.data!.nextOffset!)}>下一页店铺</Button></div>
-    </> : <Empty className="border border-dashed"><EmptyHeader><EmptyMedia variant="icon"><StoreIcon /></EmptyMedia><EmptyTitle>{management ? '还没有店铺' : '暂无可访问的店铺'}</EmptyTitle><EmptyDescription>{management ? '添加 Ozon 卖家账号后，单独检查平台能力并分配团队访问权限。' : '请联系公司管理员为你分配具体店铺。加入公司不会自动获得所有店铺权限。'}</EmptyDescription></EmptyHeader>{management && <EmptyContent><Button disabled={!stores.data.configured} onClick={() => setDialog('create')}>连接 Ozon 店铺</Button></EmptyContent>}</Empty>}
+    </> : <Empty className="border border-dashed"><EmptyHeader><EmptyMedia variant="icon"><StoreIcon /></EmptyMedia><EmptyTitle>{management ? '还没有店铺' : '暂无可访问的店铺'}</EmptyTitle><EmptyDescription>{management ? '可添加多个 Ozon 卖家账号；每家店铺单独配置凭证、能力检查和团队访问权限。' : '请联系公司管理员为你分配具体店铺。加入公司不会自动获得所有店铺权限。'}</EmptyDescription></EmptyHeader>{management && <EmptyContent><Button disabled={!stores.data.configured} onClick={() => setDialog('platform')}>添加店铺</Button></EmptyContent>}</Empty>}
     <Alert><AlertTitle>客服接待尚未启用</AlertTitle><AlertDescription>已支持买家会话、商品资料和 FBS 包裹的只读同步；人工回复和 AI 自动接待将在后续步骤实现。</AlertDescription></Alert>
   </>;
 }

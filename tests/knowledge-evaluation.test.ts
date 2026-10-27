@@ -21,25 +21,28 @@ function oracle(plan:any) {
 }
 test('semantic plan is fixed, bilingual and uses only production chunks or questions as model inputs',async()=>{
   const {prepareEvaluation}=await api();const plan=await prepareEvaluation();
-  assert.deepEqual(plan,await prepareEvaluation());assert.equal(plan.documents.length,12);assert.equal(plan.cases.length,36);
-  assert.equal(plan.entries.length,48);assert.equal(new Set(plan.entries.map((item:any)=>item.key)).size,48);
-  assert.equal(plan.cases.filter((item:any)=>item.expectedDocumentId===null).length,8);
+  assert.deepEqual(plan,await prepareEvaluation());assert.equal(plan.documents.length,20);assert.equal(plan.cases.length,52);
+  assert.equal(plan.entries.length,75);assert.equal(new Set(plan.entries.map((item:any)=>item.key)).size,75);
+  assert.equal(plan.cases.filter((item:any)=>item.expectedDocumentId===null).length,12);
+  assert.equal(plan.cases.filter((item:any)=>item.difficulty==='hard_negative').length,12);
+  assert.equal(plan.cases.filter((item:any)=>item.difficulty==='long_document').length,2);
+  assert.equal(plan.documents.filter((item:any)=>item.chunkKeys.length>1).length,2);
   for(const item of plan.cases)assert.equal(plan.entries.find((entry:any)=>entry.key===item.key).text,item.question);
   for(const item of plan.cases) {
     assert.equal(item.referenceFact===null,item.expectedDocumentId===null);
     if(item.expectedDocumentId)assert.equal(plan.documents.find((doc:any)=>doc.id===item.expectedDocumentId).language,item.knowledgeLanguage);
   }
-  for(const language of ['ru','zh-CN'])assert.equal(plan.cases.filter((item:any)=>item.queryLanguage===language).length,18);
-  assert.ok(plan.totalInputBytes<32_000);
+  for(const language of ['ru','zh-CN'])assert.equal(plan.cases.filter((item:any)=>item.queryLanguage===language).length,26);
+  assert.ok(plan.totalInputBytes<64_000);
 });
 test('oracle embeddings check ranking arithmetic without claiming real model or answer quality',async()=>{
   const {prepareEvaluation,evaluateEmbeddings}=await api();const plan=await prepareEvaluation();
   const artifact=oracle(plan);const report=evaluateEmbeddings(plan,artifact);
   assert.equal(report.origin,'synthetic');assert.equal(report.answerQuality,'not_evaluated');
-  assert.equal(report.cases.length,36);
+  assert.equal(report.cases.length,52);
   for(const group of [report.calibration,report.holdout]) {
-    assert.equal(group.answerable,14);assert.equal(group.hitAt1,1);assert.equal(group.hitAt3,1);assert.equal(group.mrrAt3,1);
-    assert.equal(group.unanswerable,4);assert.equal(group.unsupportedAboveThreshold,0);assert.equal(group.expectedBelowThreshold,0);
+    assert.equal(group.answerable,20);assert.equal(group.hitAt1,1);assert.equal(group.hitAt3,1);assert.equal(group.mrrAt3,1);
+    assert.equal(group.unanswerable,6);assert.equal(group.unsupportedAboveThreshold,0);assert.equal(group.expectedBelowThreshold,0);
   }
   artifact.rows.reverse();assert.deepEqual(evaluateEmbeddings(plan,artifact),report,'row order must not silently pair vectors with different texts');
 });
@@ -84,15 +87,15 @@ test('collection persists each attempt before its model call and never retries a
   }},plan,async(event:any)=>{if(event.phase==='result')throw new Error('capture unavailable');}));
   assert.equal(uncapturedCalls,1,'a lost result capture must prevent the next model batch');
 });
-test('successful collection binds all three batches to the prepared text identities',async()=>{
+test('successful collection binds every bounded batch to the prepared text identities',async()=>{
   const {prepareEvaluation,collectEmbeddings,evaluateEmbeddings}=await api();const plan=await prepareEvaluation();
   const events:any[]=[],inputs:string[]=[];
   const artifact=await collectEmbeddings({async run(_model:string,input:{text:string[]}) {
     assert.ok(input.text.length<=16);inputs.push(...input.text);
     return {data:input.text.map(()=>Array.from({length:1024},(_,i)=>i===0?1:0)),shape:[input.text.length,1024]};
   }},plan,async(event:any)=>{events.push(event);});
-  assert.deepEqual(inputs,plan.entries.map((entry:any)=>entry.text));assert.equal(artifact.rows.length,48);
-  assert.deepEqual(events.map(item=>item.phase),['attempt','result','attempt','result','attempt','result']);
+  assert.deepEqual(inputs,plan.entries.map((entry:any)=>entry.text));assert.equal(artifact.rows.length,75);
+  assert.deepEqual(events.map(item=>item.phase),Array.from({length:5},()=>['attempt','result']).flat());
   assert.equal(evaluateEmbeddings(plan,artifact).retrieval,'local_exact_cosine');
 });
 test('the evaluation CLI prepares and scores locally but requires opt-in before creating a live capture',async t=>{

@@ -5,12 +5,30 @@ import { createStore, readStoreGrants, setStoreGrant, updateStore, type StoreRec
 import { AccountField } from './account-field';
 import { ErrorNotice, roleLabel } from './identity-shared';
 import { Button } from './ui/button';
+import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { FieldGroup } from './ui/field';
 import { Spinner } from './ui/spinner';
 
 export type StoreChange = (operation: () => Promise<unknown>, storeId?: string) => Promise<void>;
 type DialogProps = { companyId: string; pending: boolean; close: () => void; change: StoreChange };
+
+export function StorePlatformDialog({ pending, close, select }: { pending: boolean; close: () => void; select: (platform: 'ozon') => void }) {
+  return <Dialog open onOpenChange={open => { if (!open && !pending) close(); }}>
+    <DialogContent showCloseButton={false}>
+      <DialogHeader><DialogTitle>选择店铺平台</DialogTitle>
+        <DialogDescription>一个公司可以连接多个店铺。每个卖家账号单独保存凭证、检查能力并配置成员权限。</DialogDescription>
+      </DialogHeader>
+      <button type="button" disabled={pending} onClick={() => select('ozon')}
+        className="flex w-full items-center justify-between gap-4 rounded-lg border p-4 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+        <span className="flex min-w-0 flex-col gap-1"><span className="font-medium">Ozon</span><span className="text-sm leading-6 text-muted-foreground">填写店铺名称、Client ID 和 API Key。之后还可以继续添加其他 Ozon 店铺。</span></span>
+        <Badge variant="secondary">当前支持</Badge>
+      </button>
+      <p className="text-xs leading-6 text-muted-foreground">API Key 只会提交到当前 DingBell 服务并加密保存，保存后不会在页面或接口中回显。</p>
+      <DialogFooter><Button variant="outline" disabled={pending} onClick={close}>取消</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
+}
 
 export function StoreCredentialsDialog({ companyId, store, pending, close, change }: DialogProps & { store?: StoreRecord }) {
   const [newId] = useState(() => crypto.randomUUID());

@@ -17,8 +17,8 @@ export function createAnswerTool(value:AiRun,services:Services){
     catch{return {status:'unconfirmed',canSend:false,reviewRequired:true};}
    });signal?.throwIfAborted();
    const parsed=v.safeParse(aiAnswerResultSchema,saved),status=parsed.success?parsed.output.status:'unconfirmed';
-   const input:AiHandoff=status==='submitted'?{reason:'merchant_decision',summary:'A cited AI draft is saved for human review. No customer reply has been sent.',neededInformation:['Review the saved draft and its citations before deciding whether to reply.']}:
-    {reason:'tool_failure',summary:'The AI draft could not be confirmed. Human review is required; no customer reply has been sent.',neededInformation:[]};
+   const input:AiHandoff=status==='submitted'?{schemaVersion:2,reason:'merchant_decision',neededInformation:[]}:
+    {schemaVersion:2,reason:'tool_failure',neededInformation:[]};
    const receipt=await handoff.run({...context,data:input});
    return {output:{status,reviewRequired:true,handoff:receipt.output.status,canSend:false,sent:false},terminate:true};
   },

@@ -9,7 +9,7 @@ import { readOzonJSON } from '../src/modules/ozon/read.ts';
 
 const credentials = { clientId: '123456', apiKey: 'synthetic-product-api-key' };
 const listing = { product_id: '9000000000817031942', offer_id: '0001-Артикул', sku: '9000000000817031941', archived: false, has_fbo_stocks: false, has_fbs_stocks: true };
-const detail = { id: listing.product_id, offer_id: listing.offer_id, name: 'Синтетический товар', sku: listing.sku, sources: [{ sku: listing.sku, source: 'fbs', unknown_detail: 'ignored' }], price: '1530.0000', currency_code: 'RUB', is_archived: false };
+const detail = { id: listing.product_id, offer_id: listing.offer_id, name: 'Синтетический товар', sku: listing.sku, sources: [{ sku: listing.sku, source: 'fbs', unknown_detail: 'ignored' }], price: '1530.0000', currency_code: 'RUB', is_archived: false, images: ['https://ir-20.ozone.ru/s3/one.jpg','https://ir-20.ozone.ru/s3/two.jpg'], primary_image: ['https://ir-20.ozone.ru/s3/two.jpg'] };
 const response = (body: unknown): typeof fetch => (async () => Response.json(body)) as typeof fetch;
 const fails = (code: string) => (error: unknown) => error instanceof OzonReadError && error.code === code && !JSON.stringify(error).includes(credentials.apiKey);
 
@@ -51,10 +51,10 @@ test('detail reads correlate requested IDs and preserve raw decimal prices and s
   const result = await readOzonProductDetails(credentials, { productIds: [listing.product_id] }, (async (input, init) => {
     calls++; assert.equal(String(input), 'https://api-seller.ozon.ru/v3/product/info/list');
     assert.deepEqual(JSON.parse(String(init?.body)), { product_id: [listing.product_id] });
-    return Response.json({ items: [{ ...detail, images: ['https://not-fetched.invalid/picture'], unknown: { id: 1.5 }, updated_at: 'not-a-source-version' }] });
+    return Response.json({ items: [{ ...detail, unknown_image: 'https://not-fetched.invalid/picture', unknown: { id: 1.5 }, updated_at: 'not-a-source-version' }] });
   }) as typeof fetch);
   assert.equal(calls, 1);
-  assert.deepEqual(result.items, [{ id: listing.product_id, offerId: listing.offer_id, name: detail.name, sku: listing.sku, sources: [{ sku: listing.sku, source: 'fbs' }], price: '1530.0000', currency: 'RUB', archived: false }]);
+  assert.deepEqual(result.items, [{ id: listing.product_id, offerId: listing.offer_id, name: detail.name, sku: listing.sku, sources: [{ sku: listing.sku, source: 'fbs' }], price: '1530.0000', currency: 'RUB', archived: false, primaryImage: detail.primary_image[0], images: [detail.primary_image[0],detail.images[0]] }]);
   for (const price of ['0', '00012.3400', '999999999999999999999999.000000001']) {
     assert.equal((await readOzonProductDetails(credentials, { productIds: [listing.product_id] }, response({ items: [{ ...detail, price }] }))).items[0].price, price);
   }
@@ -62,7 +62,7 @@ test('detail reads correlate requested IDs and preserve raw decimal prices and s
 
 test('optional product facts remain unknown and absent details do not become deletions', async () => {
   const result = await readOzonProductDetails(credentials, { productIds: [listing.product_id] }, response({ items: [{ id: listing.product_id, offer_id: listing.offer_id, name: detail.name }] }));
-  assert.deepEqual(result.items[0], { id: listing.product_id, offerId: listing.offer_id, name: detail.name, sku: null, sources: [], price: null, currency: null, archived: null });
+  assert.deepEqual(result.items[0], { id: listing.product_id, offerId: listing.offer_id, name: detail.name, sku: null, sources: [], price: null, currency: null, archived: null, primaryImage: null, images: [] });
   assert.deepEqual(await readOzonProductDetails(credentials, { productIds: [listing.product_id] }, response({ items: [] })), { items: [] });
 });
 
@@ -87,7 +87,7 @@ test('invalid or unbounded requests fail without reaching the provider', async (
 });
 
 test('detail responses reject unrelated IDs, duplicates, malformed facts and numeric prices', async () => {
-  for (const items of [[{ ...detail, id: '7' }], [detail, detail], [{ ...detail, name: 42 }], [{ ...detail, sources: {} }], [{ ...detail, sources: [{ sku: listing.sku, source: false }] }], [{ ...detail, price: 1530.00001 }], [{ ...detail, price: '1e3' }], [{ ...detail, price: '-3' }], [{ ...detail, currency_code: 643 }], [{ ...detail, is_archived: 'false' }]]) {
+  for (const items of [[{ ...detail, id: '7' }], [detail, detail], [{ ...detail, name: 42 }], [{ ...detail, sources: {} }], [{ ...detail, sources: [{ sku: listing.sku, source: false }] }], [{ ...detail, price: 1530.00001 }], [{ ...detail, price: '1e3' }], [{ ...detail, price: '-3' }], [{ ...detail, currency_code: 643 }], [{ ...detail, is_archived: 'false' }], [{ ...detail, images: ['http://ir-20.ozone.ru/insecure.jpg'] }], [{ ...detail, images: ['https://not-ozon.invalid/tracker.jpg'] }], [{ ...detail, primary_image: {} }], [{ ...detail, images: Array.from({length:21},()=>detail.images[0]) }]]) {
     await assert.rejects(readOzonProductDetails(credentials, { productIds: [listing.product_id] }, response({ items })), fails('invalid_response'));
   }
 });

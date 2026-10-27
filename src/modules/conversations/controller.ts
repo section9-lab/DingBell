@@ -255,7 +255,15 @@ export class ConversationController extends DurableObject<ControlBindings> {
     if(!this.env.DB||!this.routed(scope)||!v.is(v.pipe(v.string(),v.uuid()),runId))return {outcome:'unavailable' as const};
     const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
     const saved=await this.ctx.storage.get(`receipt:ai-classification:${runId}`),historical=saved?checkedAiIntakeReceipt(saved):null;
-    const work=historical?.run??await this.readAiWork(scope,runId);if(work?.schemaVersion!==2||!sameScope(work.scope,scope))return {outcome:'unavailable' as const};
+    let work=historical?.run??await this.readAiWork(scope,runId);
+    // Another classification may commit after the receipt read and revoke the
+    // live run. Recover only its saved receipt; commitClassification still
+    // compares the original run, origin and exact input before replaying it.
+    if(!historical&&work?.schemaVersion!==2){
+      const committed=await this.ctx.storage.get(`receipt:ai-classification:${runId}`);
+      if(committed)work=checkedAiIntakeReceipt(committed).run;
+    }
+    if(work?.schemaVersion!==2||!sameScope(work.scope,scope))return {outcome:'unavailable' as const};
     const result=await this.commitClassification(directory,work,input,'agent');if(result.outcome==='accepted')await this.flush(scope);return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
   }
   async readClassifiedInput(scope:ControlScope){
@@ -418,7 +426,7 @@ export class ConversationController extends DurableObject<ControlBindings> {
       return true;
     }))return;
     if(Date.now()<run.deadlineAt)return;
-    if(run.schemaVersion===2)await this.commitClassification(directory,run,null,'system',{kind:'handoff',reason:'timeout'});else await this.commitHandoff(directory,run,{reason:'tool_failure',summary:'The automatic support run exceeded its deadline.',neededInformation:[]},'system');
+    if(run.schemaVersion===2)await this.commitClassification(directory,run,null,'system',{kind:'handoff',reason:'timeout'});else await this.commitHandoff(directory,run,{schemaVersion:2,reason:'tool_failure',neededInformation:[]},'system');
     await this.ctx.storage.transaction(async transaction=>{
       if(JSON.stringify(await transaction.get('aiRun'))===JSON.stringify(run))await transaction.delete('aiDeadline');
       await this.schedule(transaction);

@@ -32,6 +32,12 @@ const companiesSchema = v.object({
   companies: v.array(companySchema),
   activeCompanyId: v.nullable(v.string()),
 });
+const workspaceBootstrapSchema = v.pipe(v.object({ setup: setupSchema, session: sessionSchema, companies: v.nullable(companiesSchema) }),
+  v.check(value => value.setup.identity.configured
+    ? (value.session === null) === (value.companies === null)
+      && (value.session === null || value.session.session.activeOrganizationId === value.companies?.activeCompanyId
+        && (value.companies.activeCompanyId === null || value.companies.companies.some(company => company.id === value.companies!.activeCompanyId)))
+    : value.session === null && value.companies === null));
 const errorSchema = v.object({
   error: v.object({ code: v.string(), row: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(20)))) }),
   requestId: v.optional(v.string()),
@@ -47,6 +53,8 @@ const messages: Record<string, string> = {
   AI_NOT_CONFIGURED: 'AI 接待的模型、价格或运行服务尚未配置，请联系部署管理员。',
   AI_BUDGET_UNAVAILABLE: '当前没有足够的 AI 接待预算或次数，请联系公司管理员。',
   AI_RECEPTION_UNAVAILABLE: '暂时不能恢复 AI。请核对已发布策略与店铺状态；上一次接待尚未结束时，需要等待关闭。',
+  HANDOFF_REVIEW_CONFLICT: '跟进要求已经变化或由其他成员核对，请刷新后确认最新记录。',
+  HANDOFF_ITEM_CONFLICT: '跟进项、消息证据或当前权限已经变化，请刷新后重新核对。',
   RESUMPTION_NOT_FOUND: '暂未查到原恢复操作的结果，请保留原操作并继续核对。',
   REPLY_TEST_UNAVAILABLE: 'AI 回复测试服务暂不可用，请读取已保存的测试记录后再操作。',
   REPLY_TEST_QUERY_LIMIT: '今日问答检索额度已用完，请在 UTC 日期更新后新建测试。',
@@ -142,6 +150,9 @@ const messages: Record<string, string> = {
   INVITATION_INVALID: '此邀请当前不可用，请联系邀请人确认。',
   INVITATION_UNCONFIRMED: '旧邀请缺少完整的处理记录，请联系管理员重新发出邀请。',
   FORBIDDEN: '你没有执行此操作的权限，请联系公司所有者。',
+  EXPORT_SCOPE_CHANGED: '会话范围已经变化，请刷新列表后重新导出。',
+  EXPORT_REQUIRES_ASYNC: '当前范围过大，请缩小范围；大型异步导出将在导出中心提供。',
+  EXPORT_UNAVAILABLE: '暂时无法生成 CSV，请稍后重试。',
   INVALID_RESPONSE: '服务返回了无法识别的数据，请重新加载。',
   NETWORK_ERROR: '连接服务失败，请检查网络后重试。',
 };
@@ -197,24 +208,8 @@ export async function request<
   return parsed.output;
 }
 
-export async function readIdentity(signal?: AbortSignal) {
-  const setup = await request('/api/setup', setupSchema, { signal });
-  if (!setup.identity.configured)
-    return { setup, session: null, companies: null };
-  try {
-    const session = await request('/api/auth/get-session', sessionSchema, {
-      signal,
-    });
-    if (!session) return { setup, session: null, companies: null };
-    const companies = await request('/api/companies', companiesSchema, {
-      signal,
-    });
-    return { setup, session, companies };
-  } catch (error) {
-    if (error instanceof ApiError && error.code === 'UNAUTHENTICATED')
-      return { setup, session: null, companies: null };
-    throw error;
-  }
+export function readIdentity(signal?: AbortSignal) {
+  return request('/api/workspace-bootstrap', workspaceBootstrapSchema, { signal });
 }
 
 export function signIn(email: string, password: string) {

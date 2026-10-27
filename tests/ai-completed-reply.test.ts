@@ -34,7 +34,7 @@ async function close(x:Fixture,outcome:'completed'|'failed'|'aborted'='completed
  await closeAiExecution(x.f.db,x.scope,id,{kind:'runtime_closed',evidenceId:crypto.randomUUID(),instanceId:'ai-support:'+id,receipt:x.receipt,
   outcome,executionClosed:true,providerPermits:execution.generations.length,verifiedAt:Date.now()});
 }
-const budget=(x:Fixture)=>x.f.db.prepare('SELECT * FROM ai_budget').all();
+const budget=async(x:Fixture)=>(await x.f.db.prepare('SELECT * FROM ai_budget').all()).results;
 async function noSend(x:Fixture){
  assert.equal((await x.f.db.prepare('SELECT count(*) n FROM send_intent').first<{n:number}>())?.n,0);
  assert.deepEqual(x.f.providerRequests,[]);assert.deepEqual(x.f.providerErrors,[]);

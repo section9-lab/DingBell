@@ -4,10 +4,11 @@ import { test } from 'node:test';
 import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { submitReplyPreview,readReplyPreview } from '../src/modules/translations/service.ts';
-import { claimTranslationProviderRequest,createTranslationBudget,readTranslationRun,releaseUnstartedTranslation,setTranslationBudgetEnabled } from '../src/modules/translations/storage.ts';
+import { claimTranslationProviderRequest,createTranslationBudget,readTranslationRun,releaseUnstartedTranslation,reserveTranslation,setTranslationBudgetEnabled } from '../src/modules/translations/storage.ts';
 import type { TranslationBindings } from '../src/modules/translations/bindings.ts';
 import type { PreviewInspection,TranslationRuntime } from '../src/modules/translations/api-types.ts';
 import type { TranslationActor,TranslationConfig,TranslationRun,TranslationReceipt } from '../src/modules/translations/types.ts';
+import {repairFinancialUsage} from '../src/modules/usage-repair.ts';
 const actor:TranslationActor={orgId:'org',actorUserId:'staff',sessionId:'staff-session'};
 const manager:TranslationActor={orgId:'org',actorUserId:'owner',sessionId:'owner-session'};
 const scope={conversationId:'conv',expectedMemberId:'staff-member'};
@@ -45,10 +46,10 @@ function runtime(db:D1Database){
       dispatches++;const previous=receipts.get(run.id);if(previous)return previous;
       const receipt={submissionId:run.id,uid:`uid-${run.id}`,acceptedAt:new Date().toISOString()};receipts.set(run.id,receipt);
       const ledger=ledgers.get(run.id)!;ledger.generation=1;
-      if(!['zero','read-error-zero'].includes(mode)){ledger.http=1;if(await claimTranslationProviderRequest(db,{organizationId:run.organizationId,storeId:run.storeId,conversationId:run.conversationId},run.id))providers++;}
+      if(!['zero','read-error-zero','pending-zero'].includes(mode)){ledger.http=1;if(await claimTranslationProviderRequest(db,{organizationId:run.organizationId,storeId:run.storeId,conversationId:run.conversationId},run.id))providers++;}
       if(mode==='lost'){mode='success';throw new Error('synthetic lost receipt');}return receipt;
     },
-    async read(){reads++;await afterRead?.();if(mode==='read-error-zero')throw new Error('temporary RPC failure');if(mode==='pending')return {outcome:'pending'};if(['failed','zero'].includes(mode))return {outcome:'failed'};
+    async read(){reads++;await afterRead?.();if(mode==='read-error-zero')throw new Error('temporary RPC failure');if(['pending','pending-zero'].includes(mode))return {outcome:'pending'};if(['failed','zero'].includes(mode))return {outcome:'failed'};
       return {outcome:'completed',text:mode==='changed'?'Новый другой ответ.':'Подтвердите заказ.',metadata:{preview:{usageReported:mode!=='no-usage',usage:mode==='no-usage'?null:usage,outputValid:mode!=='invalid'}}};
     },
     async close(scope,id){closed++;const ledger=ledgers.get(id)!;assert.equal(ledger.http,0);ledger.closed=true;await releaseUnstartedTranslation(db,scope,id,{kind:'execution_closed_without_provider_request',evidenceId:crypto.randomUUID(),instanceId:`reply-preview:${id}`,verifiedAt:Date.now(),providerRequests:0,executionClosed:true});},
@@ -132,4 +133,35 @@ test('reply preview service preserves authorization, immutable recovery and read
     assert.deepEqual(await submitReplyPreview({...env,TRANSLATION_ENABLED:undefined,NVAPI_KEY:undefined},actor,scope,input(),deps),{outcome:'rejected',code:'TRANSLATION_DISABLED'});
     assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM reply_preview_run').first('n'),before);
   });
+  await t.test('background repair releases only a receipt-bound failed ledger that proves zero requests',async()=>{
+    r.setMode('pending-zero');const body=input(),submitted=await submitReplyPreview(env,actor,scope,body,deps);assert.ok('preview'in submitted);assert.equal(submitted.preview.usageStatus,'held');
+    const run=await readRun(body.requestId);assert.ok(run);assert.equal(run.providerRequestClaimedAt,null);r.setMode('zero');
+    await f.db.prepare("UPDATE reply_preview_run SET repair_due_at=999999999999999 WHERE settlement='held'").run();await f.db.prepare('UPDATE reply_preview_run SET repair_due_at=0 WHERE id=?').bind(run.id).run();
+    await repairFinancialUsage(env,{translationRuntime:r.api});assert.equal((await readRun(body.requestId))!.settlement,'released');
+  });
+  await t.test('background repair settles reported usage without a reader and keeps unknown evidence scheduled',async()=>{
+    r.setMode('pending');const body=input(),submitted=await submitReplyPreview(env,actor,scope,body,deps);assert.ok('preview'in submitted);assert.equal(submitted.preview.usageStatus,'held');
+    const run=await readRun(body.requestId);assert.ok(run);await f.db.prepare("UPDATE reply_preview_run SET repair_due_at=999999999999999 WHERE settlement='held'").run();
+    await f.db.prepare('UPDATE reply_preview_run SET repair_due_at=0 WHERE id=?').bind(run.id).run();await repairFinancialUsage(env,{translationRuntime:r.api});
+    let saved=await f.db.prepare('SELECT settlement,repair_due_at AS due,repair_token AS token FROM reply_preview_run WHERE id=?').bind(run.id).first<any>();
+    assert.equal(saved.settlement,'held');assert.ok(saved.due>Date.now()+240000);assert.equal(saved.token,null);
+    await f.db.prepare("DELETE FROM store_grant WHERE member_id='staff-member'").run();r.setMode('success');await f.db.prepare('UPDATE reply_preview_run SET repair_due_at=0 WHERE id=?').bind(run.id).run();
+    await Promise.all([repairFinancialUsage(env,{translationRuntime:r.api}),repairFinancialUsage(env,{translationRuntime:r.api})]);
+    saved=await f.db.prepare('SELECT settlement,charged_micros AS charged,repair_due_at AS due,repair_token AS token FROM reply_preview_run WHERE id=?').bind(run.id).first<any>();
+    assert.deepEqual(saved,{settlement:'settled',charged:1,due:null,token:null});r.setMode('success');
+  });
+});
+
+test('0046 schedules old held usage without replacing financial rows or immutable guards',{timeout:30000},async t=>{
+  const f=await fixture(45);t.after(()=>f.close());await createTranslationBudget(f.db,manager,{id:'budget',startsAt:Date.now()-1000,endsAt:Date.now()+3600000,limitMicros:1000000});
+  await setTranslationBudgetEnabled(f.db,manager,'budget',0,true);const requestId=crypto.randomUUID();
+  const reserved=await reserveTranslation(f.db,actor,{requestId,storeId:'store',conversationId:'conv',expectedMemberId:'staff-member',source:'Тест',sourceRevision:0,budgetId:'budget'},config);assert.equal(reserved.outcome,'reserved');
+  const before=await f.db.prepare('SELECT * FROM reply_preview_run WHERE request_id=?').bind(requestId).first<any>();
+  const migration=statements('0046_usage_repair.sql');await assert.rejects(()=>f.db.batch([...migration,'SELECT * FROM missing_usage_repair_table'].map(sql=>f.db.prepare(sql))));
+  assert.equal((await f.db.prepare("PRAGMA table_info('reply_preview_run')").all<{name:string}>()).results.some(row=>row.name==='repair_due_at'),false);
+  await f.db.batch(migration.map(sql=>f.db.prepare(sql)));const after=await f.db.prepare('SELECT * FROM reply_preview_run WHERE request_id=?').bind(requestId).first<any>();
+  assert.equal(after.repair_due_at,0);assert.equal(after.repair_token,null);delete after.repair_due_at;delete after.repair_token;assert.deepEqual(after,before);
+  const guards=(await f.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'reply_preview_%' ORDER BY name").all<{name:string}>()).results.map(row=>row.name);
+  assert.ok(guards.includes('reply_preview_run_immutable'));assert.ok(guards.includes('reply_preview_settlement_immutable'));assert.ok(guards.includes('reply_preview_output_immutable'));
+  assert.deepEqual((await f.db.prepare('PRAGMA foreign_key_check').all()).results,[]);
 });

@@ -19,7 +19,7 @@ export async function prepareEvaluation() {
     cases.push({...item,key});entries.push({key,kind:'query',text:item.question,documentId:null});
   }
   const totalInputBytes=entries.reduce((sum,item)=>sum+new TextEncoder().encode(item.text).length,0);
-  if(entries.length>64||totalInputBytes>32_000||entries.some(item=>new TextEncoder().encode(item.text).length>2400))throw new Error('KNOWLEDGE_EVAL_INPUT_LIMIT');
+  if(entries.length>128||totalInputBytes>64_000||entries.some(item=>new TextEncoder().encode(item.text).length>2400))throw new Error('KNOWLEDGE_EVAL_INPUT_LIMIT');
   const value={datasetVersion,model:knowledgeProfile.model,profile:knowledgeProfile.id,dimensions:knowledgeProfile.dimensions,
     topK:3,minimumScore:.7,totalInputBytes,documents,cases,entries};
   return {...value,datasetHash:await knowledgeHash(value)};
@@ -27,7 +27,7 @@ export async function prepareEvaluation() {
 export type EvaluationPlan=Awaited<ReturnType<typeof prepareEvaluation>>;
 const vector=v.pipe(v.array(v.pipe(v.number(),v.finite())),v.length(knowledgeProfile.dimensions),v.check(row=>row.some(value=>value!==0)));
 const artifactSchema=v.strictObject({datasetHash:v.string(),profile:v.literal(knowledgeProfile.id),model:v.literal(knowledgeProfile.model),
-  origin:v.picklist(['synthetic','workers-ai']),rows:v.pipe(v.array(v.strictObject({key:v.string(),values:vector})),v.minLength(1),v.maxLength(64))});
+  origin:v.picklist(['synthetic','workers-ai']),rows:v.pipe(v.array(v.strictObject({key:v.string(),values:vector})),v.minLength(1),v.maxLength(128))});
 export type EmbeddingArtifact=v.InferOutput<typeof artifactSchema>;
 function normalized(row:number[]) {
   const scale=Math.max(...row.map(Math.abs)),scaled=row.map(value=>value/scale),length=Math.hypot(...scaled);

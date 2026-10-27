@@ -111,7 +111,8 @@ test('production Support has a separate native binding and remains disabled by d
   const config=JSON.parse(await readFile(join(output,'wrangler.json'),'utf8'));
   assert.ok(config.durable_objects?.bindings?.some((b:{name:string;class_name:string})=>b.name==='FLUE_SUPPORT_AGENT'&&b.class_name==='FlueSupportAgent'));
   assert.notEqual(config.vars?.AI_RECEPTION_ENABLED,'true');
-  assert.match(await readFile(resolve(output,config.main),'utf8'),/FlueSupportAgent/);
+  assert.deepEqual(config.r2_buckets??[],[]);
+  const worker=await readFile(resolve(output,config.main),'utf8');assert.match(worker,/FlueSupportAgent/);assert.match(worker,/handoff-brief/);assert.match(worker,/handoff-reviews/);assert.match(worker,/handoff-items/);assert.match(worker,/conversation\/activity|\/activity/);assert.match(worker,/conversation-activities/);assert.match(worker,/conversation-timeline|\/timeline/);assert.match(worker,/exports\/csv/);assert.match(worker,/analytics\/overview/);assert.match(worker,/data-governance/);assert.match(worker,/companies\/:companyId\/degradation|\/degradation/);
 });
 
 test('browser assets exclude server implementations, database schema and isolated probes', async () => {
@@ -128,7 +129,7 @@ test('browser assets exclude server implementations, database schema and isolate
   for (const entry of scripts) {
     const source = await readFile(join(clientOutput, entry), 'utf8');
     for (const path of serverPaths) assert.doesNotMatch(source, path, `server implementation leaked into ${entry}`);
-    for (const marker of [...probeMarkers, 'dingbell_support_generation', 'FlueSupportAgent', 'FLUE_SUPPORT_AGENT', 'SUPPORT_SECRET_UNAVAILABLE', 'bootstrap_installation', 'invitation_flow', 'identity_audit_event', 'company_settings_audit_event', 'company_settings_version_valid', 'identity_audit_request_idx', 'identity_audit_organization_time_idx', 'store_audit_event', 'credential_ciphertext', 'STORE_CREDENTIAL_KEYS', 'store_sync', 'store_coordinator', 'sync_cursor', 'conversation_control', 'ConversationController', 'CONVERSATION_CONTROLLER', 'product_source_snapshot', 'fbs_sync_window', 'fbs_posting_observation', 'detail_epoch', 'ingest_event', 'api-seller.ozon.ru', 'reply_test_query', 'REPLY_TEST_QUERY_CONFIG_JSON', 'REPLY_TEST_CONFIG_JSON', 'reply_test_run', 'reply_test_budget', 'FlueReplyTestAgent', 'REPLY_TEST_ENABLED', 'reply_preview_run', 'translation_budget_bucket', 'FlueReplyPreviewAgent', 'NVAPI_KEY', 'integrate.api.nvidia.com']) {
+    for (const marker of [...probeMarkers, 'dingbell_support_generation', 'FlueSupportAgent', 'FLUE_SUPPORT_AGENT', 'SUPPORT_SECRET_UNAVAILABLE', 'bootstrap_installation', 'invitation_flow', 'identity_audit_event', 'company_settings_audit_event', 'company_settings_version_valid', 'identity_audit_request_idx', 'identity_audit_organization_time_idx', 'store_audit_event', 'credential_ciphertext', 'STORE_CREDENTIAL_KEYS', 'store_sync', 'store_coordinator', 'sync_cursor', 'conversation_control', 'ConversationController', 'CONVERSATION_CONTROLLER', 'product_source_snapshot', 'fbs_sync_window', 'fbs_posting_observation', 'detail_epoch', 'ingest_event', 'api-seller.ozon.ru', 'reply_test_query', 'REPLY_TEST_QUERY_CONFIG_JSON', 'REPLY_TEST_CONFIG_JSON', 'reply_test_run', 'reply_test_budget', 'FlueReplyTestAgent', 'REPLY_TEST_ENABLED', 'reply_preview_run', 'translation_budget_bucket', 'budget_reconciliation_state', 'FlueReplyPreviewAgent', 'NVAPI_KEY', 'integrate.api.nvidia.com']) {
       assert.equal(source.includes(marker), false, `${marker} leaked into browser asset ${entry}`);
     }
   }

@@ -7,8 +7,12 @@ const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_
 export const aiScopeSchema=v.strictObject({organizationId:id,storeId:id,conversationId:id,controllerId:id});
 export const aiStartSchema=v.strictObject({runId:v.pipe(v.string(),v.uuid()),expectedVersion:counter,messageId:id,policyId:id,stage:policyStageSchema,language:v.picklist(['ru','zh-CN','en'])});
 export const aiResumeSchema=v.pipe(v.strictObject({...aiStartSchema.entries,previousRunId:v.nullable(v.pipe(v.string(),v.uuid()))}),v.check(r=>r.runId!==r.previousRunId));
-export const aiHandoffSchema=v.strictObject({reason:v.picklist(['missing_evidence','customer_request','merchant_decision','tool_failure']),summary:replyBodySchema,
- neededInformation:v.pipe(v.array(v.pipe(replyBodySchema,v.maxLength(200))),v.maxLength(8))});
+export const aiFollowUpKindSchema=v.picklist(['product_model','issue_description','desired_resolution','usage_context','photo_or_video']);
+const handoffReason=v.picklist(['missing_evidence','customer_request','merchant_decision','tool_failure']);
+export const aiHandoffToolInputSchema=v.strictObject({reason:handoffReason,neededInformation:v.pipe(v.array(aiFollowUpKindSchema),v.maxLength(5),v.check(values=>new Set(values).size===values.length))});
+export const controlledAiHandoffSchema=v.strictObject({reason:handoffReason,schemaVersion:v.literal(2),neededInformation:v.pipe(v.array(aiFollowUpKindSchema),v.maxLength(5),v.check(values=>new Set(values).size===values.length))});
+export const legacyAiHandoffSchema=v.strictObject({reason:handoffReason,summary:replyBodySchema,neededInformation:v.pipe(v.array(v.pipe(replyBodySchema,v.maxLength(200))),v.maxLength(8))});
+export const aiHandoffSchema=v.union([controlledAiHandoffSchema,legacyAiHandoffSchema]);
 export const aiAdmissionSchema=v.strictObject({messageId:id,inputRevision:counter,question:replyBodySchema,policyId:id,policyRevision:v.pipe(counter,v.minValue(1)),
  policyConfig:v.pipe(replyPolicyConfigSchema,v.check(c=>c.kind==='automatic'&&c.mode==='automatic')),stage:policyStageSchema,language:v.picklist(['ru','zh-CN','en'])});
 export const aiRunSchema=v.pipe(v.strictObject({schemaVersion:v.literal(1),scope:aiScopeSchema,request:aiStartSchema,admission:aiAdmissionSchema,
@@ -27,6 +31,8 @@ export const aiReceiptSchema=v.pipe(v.variant('action',[
 export type AiStart=v.InferOutput<typeof aiStartSchema>;
 export type AiRun=v.InferOutput<typeof aiRunSchema>;
 export type AiHandoff=v.InferOutput<typeof aiHandoffSchema>;
+export type ControlledAiHandoff=v.InferOutput<typeof controlledAiHandoffSchema>;
+export type AiHandoffToolInput=v.InferOutput<typeof aiHandoffToolInputSchema>;
 export type AiReceipt=v.InferOutput<typeof aiReceiptSchema>;
 export function checkedAiReceipt(value:unknown):AiReceipt{return v.parse(aiReceiptSchema,value);}
 export function handoffNotice(value:unknown){

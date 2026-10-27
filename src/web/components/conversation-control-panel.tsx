@@ -15,13 +15,17 @@ import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from './ui/popo
 import { ConversationNotesDialog, type NoteSubmissionResult } from './conversation-notes-dialog';
 import { ConversationReplyComposer } from './conversation-reply-composer';
 import { AiReceptionControl } from './ai-reception-control';
+import { ConversationHandoffBrief } from './conversation-handoff-brief';
+import {ConversationActivityDialog} from './conversation-activity-dialog';
+import {ConversationTimelineDialog} from './conversation-timeline-dialog';
+import type {ConversationMessage} from '../lib/conversations-api';
 
 type ControlResponse = Awaited<ReturnType<typeof readConversationControl>>;
 const workLabels = { needs_reply: '待回复', waiting_customer: '等待消费者', waiting_internal: '等待内部' } as const;
 const denied = (error: unknown): error is ApiError => error instanceof ApiError && ['UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND'].includes(error.code);
 
-export function ConversationControlPanel({ userId, companyId, conversationId, conversationLabel, children, onDenied }: {
-  userId: string; companyId: string; conversationId: string; conversationLabel: string; children: ReactNode; onDenied: (error: ApiError) => void;
+export function ConversationControlPanel({ userId, companyId, conversationId, conversationLabel, messages, children, onDenied }: {
+  userId: string; companyId: string; conversationId: string; conversationLabel: string; messages:ConversationMessage[]; children: ReactNode; onDenied: (error: ApiError) => void;
 }) {
   const cache = useQueryClient();
   const queryKey = ['conversation-control', companyId, conversationId];
@@ -31,10 +35,14 @@ export function ConversationControlPanel({ userId, companyId, conversationId, co
   const [transfer, setTransfer] = useState<{ commandId: string; expectedVersion: number; assignedMemberId: string | null; targetMemberId: string; reason: string } | null>(null);
   const [notice, setNotice] = useState<{ text: string; requestId?: string; saved?: boolean } | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [activityOpen,setActivityOpen]=useState(false);
+  const [timelineOpen,setTimelineOpen]=useState(false);
   const busy = useRef(false), active = useRef(true), reported = useRef(false);
   const resolveButton = useRef<HTMLButtonElement>(null);
   const transferButton = useRef<HTMLButtonElement>(null);
   const notesButton = useRef<HTMLButtonElement>(null);
+  const activityButton=useRef<HTMLButtonElement>(null);
+  const timelineButton=useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const control = useQuery({
     queryKey, queryFn: ({ signal }) => readConversationControl(companyId, conversationId, signal),
@@ -76,6 +84,9 @@ export function ConversationControlPanel({ userId, companyId, conversationId, co
       });
       void cache.invalidateQueries({ queryKey: ['conversations', companyId] });
       void cache.invalidateQueries({ queryKey: ['conversation-replies', companyId, conversationId] });
+      void cache.invalidateQueries({ queryKey: ['handoff-brief', companyId, conversationId] });
+      void cache.invalidateQueries({queryKey:['conversation-activity',companyId,conversationId]});
+      void cache.invalidateQueries({queryKey:['conversation-timeline',companyId,conversationId]});
       setNotice(command.action === 'send_reply' ? null : { text: '处理状态已保存。', saved: true });
       return { outcome: 'accepted', receipt: result.receipt };
     } catch (error) {
@@ -131,7 +142,7 @@ export function ConversationControlPanel({ userId, companyId, conversationId, co
           <Button ref={resolveButton} size="sm" variant="outline" disabled={disabled} onClick={() => setConfirmation(command('resolve'))}>标记已解决</Button>
         </div> : <Button size="sm" variant="outline" disabled={disabled} onClick={() => void submit(command('reopen'))}>重新打开</Button>}
       </div>}
-      {view && <div className="mt-2 flex flex-wrap items-center gap-2"><Button ref={notesButton} size="sm" variant="ghost" disabled={pending || control.isFetching} onClick={() => setNotesOpen(true)}>内部备注</Button>
+      {view && <div className="mt-2 flex flex-wrap items-center gap-2"><Button ref={notesButton} size="sm" variant="ghost" disabled={pending || control.isFetching} onClick={() => setNotesOpen(true)}>内部备注</Button><Button ref={activityButton} size="sm" variant="ghost" disabled={pending||control.isFetching} onClick={()=>setActivityOpen(true)}>操作日志</Button><Button ref={timelineButton} size="sm" variant="ghost" disabled={pending||control.isFetching} onClick={()=>setTimelineOpen(true)}>业务时间线</Button>
       {state?.lifecycle === 'open' && <div aria-label="工作状态操作" className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">更新进度</span>
         {(Object.keys(workLabels) as (keyof typeof workLabels)[]).filter(status => status !== state.workStatus).map(workStatus =>
@@ -144,12 +155,15 @@ export function ConversationControlPanel({ userId, companyId, conversationId, co
       {exhausted && <p role="alert" className="mt-2 text-xs text-destructive">会话版本已达到上限，请联系部署管理员检查。</p>}
       {view?.projectionPending && !notice && <p className="mt-2 text-xs text-muted-foreground">处理状态已保存，日志同步中。</p>}
       {view && <AiReceptionControl key={`${userId}:${view.viewerMemberId}`} scope={{ userId, memberId: view.viewerMemberId, companyId, conversationId }} view={view} disabled={disabled} onChanged={reread} onDenied={onDenied} />}
+      {view && <ConversationHandoffBrief companyId={companyId} conversationId={conversationId} messages={messages} onDenied={onDenied} />}
       {view?.projectionPending && <p className="mt-2 text-xs text-muted-foreground">列表状态和计数可能稍后更新，当前处理状态以此处为准。</p>}
       {notice && <div role="status" className="mt-2 text-xs text-muted-foreground"><p>{notice.saved && view?.projectionPending ? '处理状态已保存，日志同步中。' : notice.text}</p>{notice.requestId && <p className="mt-1 break-all">请求编号：{notice.requestId}</p>}</div>}
       {pending && <p role="status" className="mt-2 flex items-center gap-2 text-xs"><Spinner aria-hidden="true" />正在保存处理状态…</p>}
     </>}
     <ConversationNotesDialog companyId={companyId} conversationId={conversationId} open={notesOpen} onOpenChange={setNotesOpen} view={view}
       pending={pending} locked={locked || control.isFetching} onSubmit={submit} onDenied={onDenied} finalFocus={() => notesButton.current?.isConnected && !notesButton.current.disabled ? notesButton.current : panel.current} />
+    <ConversationActivityDialog companyId={companyId} conversationId={conversationId} open={activityOpen} onOpenChange={setActivityOpen} onDenied={onDenied} finalFocus={()=>activityButton.current?.isConnected&&!activityButton.current.disabled?activityButton.current:panel.current} />
+    <ConversationTimelineDialog companyId={companyId} conversationId={conversationId} open={timelineOpen} onOpenChange={setTimelineOpen} onDenied={onDenied} finalFocus={()=>timelineButton.current?.isConnected&&!timelineButton.current.disabled?timelineButton.current:panel.current} />
     <Dialog open={!!confirmation} onOpenChange={open => { if (!open && !pending) setConfirmation(null); }}>
       <DialogContent showCloseButton={false} finalFocus={() => resolveButton.current?.isConnected && !resolveButton.current.disabled ? resolveButton.current : panel.current}>
         <DialogHeader><DialogTitle>标记会话已解决？</DialogTitle><DialogDescription>确认本次咨询已处理完成。此操作只更新团队的处理状态，不会向消费者发送消息或修改 Ozon 订单。</DialogDescription></DialogHeader>

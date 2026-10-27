@@ -58,7 +58,7 @@ test('a scrolled live window pauses delivery and hidden-page polling, then resum
   const calls:string[]=[];page.on('request',request=>{if(request.url().includes('/message-updates?'))calls.push(request.url());});
   await page.clock.install();await page.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});window.dispatchEvent(new Event('visibilitychange'));");
   const before=calls.length;await page.clock.fastForward(12_000);expect(calls.length).toBe(before);
-  const identityRead=page.waitForResponse(response=>response.url().endsWith('/api/setup')&&response.status()===200);
+  const identityRead=page.waitForResponse(response=>response.url().endsWith('/api/workspace-bootstrap')&&response.status()===200);
   await page.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});window.dispatchEvent(new Event('visibilitychange'));");await identityRead;
   await expect(record(page,20)).toBeInViewport();await expect(page.getByRole('button',{name:'显示新消息',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'显示新消息',exact:true}).click();await expect(record(page,56)).toBeInViewport();

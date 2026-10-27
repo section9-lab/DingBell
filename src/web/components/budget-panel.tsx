@@ -3,6 +3,7 @@ import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../lib/api';
 import { readReplyTestBudgets,type ReplyTestBudgetCommand,type ReplyTestBudgetView,type ReplyTestBudgetWorkspace } from '../lib/reply-test-budget-api';
 import {readAiBudgets} from '../lib/ai-budget-api';
+import {formatAuditMicros,readBudgetAudit,readBudgetReconciliationSummary} from '../lib/budget-audit-api';
 import {changeBudget,usdToMicros,formatBudgetUsd,utcBudgetDay,type BudgetKind} from '../lib/budget-api';
 import type {AiBudgetWorkspace} from '../../shared/ai-budget';
 import { useCompanySettings } from './company-settings-provider';
@@ -12,12 +13,28 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { FieldGroup,Field,FieldLabel,FieldDescription,FieldError } from './ui/field';
-import { Alert,AlertDescription } from './ui/alert';
+import { Alert,AlertDescription,AlertTitle } from './ui/alert';
 import { Dialog,DialogTrigger,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from './ui/dialog';
 import { Spinner } from './ui/spinner';
 const budgetTitles={test:'AI 回复测试预算',reception:'AI 接待预算'};
 const budgetDescriptions={test:'仅用于内部问答测试。金额为 USD 用量估算，不是充值余额或供应商账单；翻译与客户消息发送另行管理。',reception:'用于消费者会话中的 AI 接待，与策略测试单独记账。金额为 USD 用量估算，不是充值余额或供应商账单。'};
 const dayText=(ms:number)=>new Date(ms).toISOString().slice(0,10);
+const auditKindName={ai:'AI 接待',translation:'回复翻译','reply-test':'策略测试'};
+function BudgetReconciliationOverview({companyId,memberId,date}:{companyId:string;memberId:string;date:(value:string)=>string}){
+ const query=useQuery({queryKey:['budget-reconciliation-summary',companyId,memberId],queryFn:({signal})=>readBudgetReconciliationSummary(companyId,memberId,signal),retry:false,gcTime:0,refetchInterval:30000});
+ const data=query.data;
+ return <Card><CardHeader><CardTitle>预算核对监控</CardTitle><CardDescription>汇总 AI 接待、回复翻译和策略测试的后台账本核对。仅显示财务状态，不包含客户正文。</CardDescription></CardHeader>
+  <CardContent className="flex flex-col gap-4">
+   {!data?(query.isPending?<p role="status" className="flex items-center gap-2 text-sm"><Spinner />正在读取核对状态…</p>:<ErrorNotice error={query.error} />):<>
+    <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">{[['已跟踪',data.totals.tracked],['账本一致',data.totals.balanced],['待首次核对',data.totals.pending],['存在差异',data.totals.mismatch],['后台不可用',data.totals.unavailable]].map(([label,value])=><div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 text-sm font-medium">{value}</dd></div>)}</dl>
+    {data.totals.alerting>0&&<Alert variant="destructive" role="alert"><AlertTitle>有 {data.totals.alerting} 个预算需要复核</AlertTitle><AlertDescription>异常会按退避计划继续核对，但不会自动修改账本、释放预留或重发供应商请求。</AlertDescription></Alert>}
+    {!!data.items.length&&<ul className="flex flex-col gap-2" aria-label="待核对预算">{data.items.map(item=><li key={`${item.kind}:${item.budgetId}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span>{auditKindName[item.kind]} · <span className="break-all font-mono text-xs">{item.budgetId}</span></span><Badge variant="outline">{item.consecutiveFailures>0?'后台不可用':item.status==='mismatch'?(item.consecutiveMismatches>1?'持续差异':'发现差异'):'待首次核对'}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{item.observedAt===null?'尚无成功快照':`最近成功：${date(new Date(item.observedAt).toISOString())}`} · 下次计划：{date(new Date(item.nextDueAt).toISOString())}</p></li>)}</ul>}
+    {!data.items.length&&<p className="text-sm text-muted-foreground">当前没有待核对或异常预算。</p>}
+    {data.truncated&&<p className="text-xs text-muted-foreground">仅显示前 50 条，请先处理持续异常并继续刷新。</p>}
+    <p className="text-xs text-muted-foreground">汇总读取于 {date(new Date(data.at).toISOString())}。本地账本一致不等于供应商发票已核实。</p>
+   </>}
+  </CardContent><CardFooter><Button variant="outline" disabled={query.isFetching} onClick={()=>void query.refetch()}>{query.isFetching&&<Spinner />}刷新核对状态</Button></CardFooter></Card>;
+}
 export function BudgetPanel({companyId,kind}:{companyId:string;kind:BudgetKind}){
   const settings=useCompanySettings(),[pages,setPages]=useState<string[]>([]),client=useQueryClient(),cursor=pages.at(-1);
   const key=['ai-budgets',kind,...settings.queryKey,cursor??''];
@@ -28,6 +45,23 @@ export function BudgetPanel({companyId,kind}:{companyId:string;kind:BudgetKind})
   </CardContent><CardFooter><Button variant="outline" disabled={query.isFetching} onClick={()=>void refresh()}>读取当前预算</Button></CardFooter></Card>;
   return <BudgetWorkspace key={`${kind}:${query.data.viewerMemberId}`} kind={kind} data={query.data} fetching={query.isFetching} refresh={refresh} date={settings.date}
     page={pages.length+1} previous={pages.length?()=>setPages(p=>p.slice(0,-1)):undefined} next={query.data.nextBefore?()=>setPages(p=>[...p,query.data!.nextBefore!]):undefined} />;
+}
+function BudgetReconciliation({companyId,memberId,budgetId,kind,date}:{companyId:string;memberId:string;budgetId:string;kind:BudgetKind;date:(value:string)=>string}){
+ const auditKind=kind==='reception'?'ai':'reply-test';
+ const query=useQuery({queryKey:['budget-reconciliation',companyId,memberId,auditKind,budgetId],queryFn:({signal})=>readBudgetAudit(companyId,memberId,auditKind,budgetId,signal),retry:false,gcTime:0,refetchInterval:30000});
+ if(!query.data)return <section className="flex flex-col gap-2 rounded-lg border p-4" aria-label="预算账本核对"><h3 className="text-sm font-medium">账本核对</h3>
+  {query.isPending?<p role="status" className="flex items-center gap-2 text-sm"><Spinner />正在核对预算账本…</p>:<ErrorNotice error={query.error} />}
+  <Button className="self-start" variant="outline" size="sm" disabled={query.isFetching} onClick={()=>void query.refetch()}>重新核对</Button></section>;
+ const a=query.data,m=a.monitoring,repeated=a.status==='mismatch'&&(m?.consecutiveMismatches??0)>=2;
+ return <section className="flex flex-col gap-3 rounded-lg border p-4" aria-label="预算账本核对">
+  <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">账本核对</h3><Badge variant={a.status==='balanced'?'secondary':'outline'}>{a.status==='balanced'?'账本一致':repeated?'持续异常':'发现差异'}</Badge></div>
+  {a.status==='mismatch'&&<Alert variant="destructive" role="alert"><AlertTitle>{repeated?'预算账本持续不一致':'预算账本需要复核'}</AlertTitle><AlertDescription>系统不会自动退款、释放预留或重发供应商请求。预留差额 {formatAuditMicros(a.difference.reservedMicros)}，支出差额 {formatAuditMicros(a.difference.spentMicros)}{a.difference.admittedRuns===null?'':`，次数差额 ${a.difference.admittedRuns}`}；无效执行记录 {a.invalidExecutions} 条。</AlertDescription></Alert>}
+  {m&&m.consecutiveFailures>0&&<Alert variant="destructive" role="alert"><AlertTitle>后台核对暂时不可用</AlertTitle><AlertDescription>最近失败 {m.consecutiveFailures} 次；已保留上一份结果，并计划重试。此状态不会触发退款或供应商请求。</AlertDescription></Alert>}
+  <dl className="grid grid-cols-2 gap-3 lg:grid-cols-3"><div><dt className="text-xs text-muted-foreground">账本预留 / 明细预留</dt><dd className="mt-1 text-sm">{formatAuditMicros(a.recorded.reservedMicros)} / {formatAuditMicros(a.expected.reservedMicros)}</dd></div><div><dt className="text-xs text-muted-foreground">账本支出 / 明细支出</dt><dd className="mt-1 text-sm">{formatAuditMicros(a.recorded.spentMicros)} / {formatAuditMicros(a.expected.spentMicros)}</dd></div><div><dt className="text-xs text-muted-foreground">获准次数 / 明细次数</dt><dd className="mt-1 text-sm">{a.recorded.admittedRuns??'不适用'} / {a.expected.admittedRuns??'不适用'}</dd></div></dl>
+  {kind==='reception'&&<p className="text-xs text-muted-foreground">嵌入预留 {formatAuditMicros(a.embeddingReservedMicros)}；已有 Gateway 证据关联 {formatAuditMicros(a.embeddingCorrelatedMicros)}；待关联 {formatAuditMicros(a.embeddingUncorrelatedMicros)}。</p>}
+  <p className="text-xs text-muted-foreground">当前核对：{date(new Date(a.at).toISOString())}。{m?.observedAt!=null?` 后台最近核对：${date(new Date(m.observedAt).toISOString())}。`:' 后台尚待首次核对。'} 该结果不是供应商发票，供应商费用仍未标记为最终核实。</p>
+  <Button className="self-start" variant="outline" size="sm" disabled={query.isFetching} onClick={()=>void query.refetch()}>{query.isFetching&&<Spinner />}重新核对</Button>
+ </section>;
 }
 function BudgetWorkspace({data,kind,fetching,refresh,date,page,previous,next}:{data:ReplyTestBudgetWorkspace|AiBudgetWorkspace;kind:BudgetKind;fetching:boolean;refresh:()=>Promise<boolean>;date:(value:string)=>string;page:number;previous?:()=>void;next?:()=>void}){
   const [open,setOpen]=useState(false),[draft,setDraft]=useState(()=>({id:crypto.randomUUID(),start:dayText(Date.now()),end:dayText(Date.now()+86400000),amount:'',runs:''}));
@@ -77,6 +111,8 @@ function BudgetWorkspace({data,kind,fetching,refresh,date,page,previous,next}:{d
       </section>}
       {kind==='reception'&&<Alert role="note"><AlertDescription>自动接待尚未开放，可先准备额度。启用预算不会自动接管会话或向消费者发送消息。</AlertDescription></Alert>}
       {data.currentBudget?budgetContent(data.currentBudget,true):<p className="text-sm text-muted-foreground">{kind==='test'?'当前没有覆盖此时段的生成预算。创建并启用预算后，才可开始新的测试。':'当前没有覆盖此时段的接待预算。可先创建，确认额度后再启用。'}</p>}
+      {data.currentBudget&&<BudgetReconciliation companyId={data.companyId} memberId={data.viewerMemberId} budgetId={data.currentBudget.id} kind={kind} date={date} />}
+      {kind==='reception'&&<BudgetReconciliationOverview companyId={data.companyId} memberId={data.viewerMemberId} date={date} />}
       {reviewNotice}{!!error&&!review&&<ErrorNotice error={error} />}{error instanceof ApiError&&error.code!=='OPERATION_UNCONFIRMED'&&review&&<ErrorNotice error={error} />}
       {notice&&<p role="status" className="text-sm">{notice}</p>}
       {'queryToday' in data&&<section className="flex flex-col gap-2"><h3 className="text-sm font-medium">今日问题检索 · UTC</h3><p className="text-sm">本公司获准 {data.queryToday.queries} 次，预留上限合计 {formatBudgetUsd(data.queryToday.reservedMicros)}。</p><p className="text-xs text-muted-foreground">检索另受整个部署的每日额度限制，不从上方生成预算中扣除。检索额度不是实际账单；未知结果不会自动退款或再次调用。</p></section>}

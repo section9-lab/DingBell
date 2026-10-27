@@ -8,6 +8,7 @@ export interface OzonProductDetails {
   id: string; offerId: string; name: string; sku: string | null;
   sources: { sku: string; source: string }[];
   price: string | null; currency: string | null; archived: boolean | null;
+  primaryImage: string | null; images: string[];
 }
 const decimalId = /^(0|[1-9][0-9]{0,39})$/;
 function invalid(): never { throw new OzonReadError('invalid_response'); }
@@ -25,6 +26,17 @@ function currency(value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string' || !/^[A-Z]{3}$/.test(value)) invalid();
   return value;
+}
+function image(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 2048) invalid();
+  try { const url = new URL(value); if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash || !/(^|\.)ozone\.ru$/i.test(url.hostname)) invalid(); }
+  catch { invalid(); }
+  return value;
+}
+function imageList(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 20) invalid();
+  return value.map(image);
 }
 
 /** lastId and reportedTotal are provider observations, not a complete catalog snapshot. */
@@ -56,9 +68,10 @@ export async function readOzonProductDetails(credentials: Credentials, options: 
     seen.add(productId);
     const sources = row.sources ?? [];
     if (!Array.isArray(sources)) invalid();
+    const primary=imageList(row.primary_image),images=imageList(row.images),colors=imageList(row.color_image),all=[...new Set([...primary,...images,...colors])].slice(0,20);
     return { id: productId, offerId: text(row.offer_id), name: text(row.name, 4096), sku: optionalId(row.sku),
       sources: sources.map(item => { const source = object(item); return { sku: id(source.sku), source: text(source.source) }; }),
-      price: price(row.price), currency: currency(row.currency_code), archived: optionalBoolean(row.is_archived) };
+      price: price(row.price), currency: currency(row.currency_code), archived: optionalBoolean(row.is_archived),primaryImage:primary[0]??images[0]??colors[0]??null,images:all };
   });
   return { items };
 }

@@ -4,12 +4,17 @@ import { stripTypeScriptTypes } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import { afterEach } from 'node:test';
 import { Response as MFResponse } from 'miniflare';
 import { Miniflare } from 'miniflare';
 import { ensureControlDirectory } from '../../src/modules/conversations/control-storage.ts';
 import type { ControlActor, ControlScope } from '../../src/modules/conversations/control-types.ts';
 
 const root=fileURLToPath(new URL('../../',import.meta.url));
+// Fixture tests run serially within each test file. Register cleanup before
+// initialization, so a test timeout cannot strand a partially created runtime.
+const activeFixtures=new Set<()=>Promise<void>>();
+afterEach(async()=>{await Promise.all([...activeFixtures].map(close=>close()));});
 async function runtimeModules() {
   const modules:{type:'ESModule';path:string;contents:string}[]=[],visited=new Set<string>();
   async function add(path:string) {
@@ -30,6 +35,13 @@ export async function conversationControlFixture(throughMigration?:string,config
   let providerMode='success', releaseProvider:(()=>void)|undefined;
   const credentialEnv={STORE_CREDENTIAL_ACTIVE_KEY:'test',STORE_CREDENTIAL_KEYS:JSON.stringify({test:btoa('t'.repeat(32))})};
   const path=await mkdtemp(join(tmpdir(),'dingbell-control-'));
+  let mf:Miniflare|undefined,db:D1Database,closing:Promise<void>|undefined;
+  const close=()=>closing??= (async()=>{
+    releaseProvider?.();releaseProvider=undefined;
+    try{await mf?.dispose();}finally{activeFixtures.delete(close);await rm(path,{recursive:true,force:true});}
+  })();
+  activeFixtures.add(close);
+  try{
   const options={modules:await runtimeModules(),modulesRoot:root,compatibilityDate:'2026-06-01',
     bindings:{...credentialEnv,OUTBOUND_ENABLED:config.outboundEnabled??'false',AI_RECEPTION_ENABLED:config.aiEnabled??'false',AI_OUTBOUND_ENABLED:config.aiOutboundEnabled??'false',TEST_AI_TIMEOUT_MS:config.aiTimeoutMs??60000},
     d1Databases:{DB:'synthetic-control'},d1Persist:join(path,'d1'),
@@ -49,10 +61,19 @@ export async function conversationControlFixture(throughMigration?:string,config
       return MFResponse.json({result:'success'});
     } catch(error){providerErrors.push(String(error));throw error;}},
   };
-  let mf=new Miniflare(options),db=await mf.getD1Database('DB') as unknown as D1Database;
+  if(closing)throw new Error('Conversation fixture initialization was cancelled');
+  mf=new Miniflare(options);db=await mf.getD1Database('DB') as unknown as D1Database;
   const migrations=(await readdir(join(root,'migrations'))).filter(name=>name.endsWith('.sql')).sort();
-  for(const name of migrations.filter(name=>!throughMigration||name.slice(0,4)<=throughMigration))
-    for(const sql of (await readFile(join(root,'migrations',name),'utf8')).split('--> statement-breakpoint').map(sql=>sql.trim()).filter(Boolean))await db.prepare(sql).run();
+  async function migrate(names:string[]){
+    for(const name of names){
+      const statements=(await readFile(join(root,'migrations',name),'utf8')).split('--> statement-breakpoint').map(sql=>sql.trim()).filter(Boolean);
+      // Prepare inside workerd as well: preparing each statement through the
+      // Node binding proxy adds hundreds of synchronous RPC round trips.
+      const response=await mf!.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op:'fixture-migrate',statements})});
+      assert.equal(response.status,200,`Fixture migration ${name}: ${await response.text()}`);
+    }
+  }
+  await migrate(migrations.filter(name=>!throughMigration||name.slice(0,4)<=throughMigration));
   await db.prepare('CREATE TABLE test_provider_request (id INTEGER PRIMARY KEY, path TEXT NOT NULL, body TEXT NOT NULL, accepted INTEGER NOT NULL)').run();
   await db.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('org','Org','org',1),('other-org','Other','other',1)").run();
   for(const [id,role]of [['owner','owner'],['staff','member']])await db.batch([
@@ -80,16 +101,18 @@ export async function conversationControlFixture(throughMigration?:string,config
     get db(){return db;},scope,actor,credentialEnv,providerRequests,providerErrors,
     provider(mode:string){providerMode=mode;},releaseProvider(){releaseProvider?.();releaseProvider=undefined;},
     async call<T=any>(op:string,extra:Record<string,unknown>={},target:ControlScope=scope) {
-      const response=await mf.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op,scope:target,actor:actor(),...extra})});
+      const response=await mf!.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op,scope:target,actor:actor(),...extra})});
       return {status:response.status,body:await response.json() as T};
     },
-    async restart(aiEnabled?:string,sendConfig:{outboundEnabled?:string;aiOutboundEnabled?:string}={}){await mf.dispose();if(aiEnabled!==undefined)options.bindings.AI_RECEPTION_ENABLED=aiEnabled;
+    async restart(aiEnabled?:string,sendConfig:{outboundEnabled?:string;aiOutboundEnabled?:string}={}){if(closing)throw new Error('Conversation fixture is closed');await mf!.dispose();
+      if(closing)throw new Error('Conversation fixture is closed');if(aiEnabled!==undefined)options.bindings.AI_RECEPTION_ENABLED=aiEnabled;
       if(sendConfig.outboundEnabled!==undefined)options.bindings.OUTBOUND_ENABLED=sendConfig.outboundEnabled;if(sendConfig.aiOutboundEnabled!==undefined)options.bindings.AI_OUTBOUND_ENABLED=sendConfig.aiOutboundEnabled;
       mf=new Miniflare(options);db=await mf.getD1Database('DB') as unknown as D1Database;},
     async migrateAfter(version:string){
       const pending=migrations.filter(name=>name.slice(0,4)>version);assert.ok(pending.length,'an actual forward migration must exist');
-      for(const name of pending)for(const sql of (await readFile(join(root,'migrations',name),'utf8')).split('--> statement-breakpoint').map(sql=>sql.trim()).filter(Boolean))await db.prepare(sql).run();
+      await migrate(pending);
     },
-    async close(){releaseProvider?.();await mf.dispose();await rm(path,{recursive:true,force:true});},
+    close,
   };
+  }catch(error){await close().catch(()=>{});throw error;}
 }

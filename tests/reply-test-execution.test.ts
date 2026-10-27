@@ -8,6 +8,7 @@ import { readControlAccess } from '../src/modules/conversations/control-storage.
 import { normalizeControlState } from '../src/modules/conversations/control-state.ts';
 import { createReplyTestBudget,setReplyTestBudgetEnabled,reserveReplyTest,claimReplyTestProviderRequest,readReplyTestRun } from '../src/modules/reply-tests/storage.ts';
 import type { TranslationConfig } from '../src/modules/translations/types.ts';
+import {repairFinancialUsage} from '../src/modules/usage-repair.ts';
 
 async function api(){
   const m=await import('../src/modules/reply-tests/execution.ts').catch(error=>{if(error.code==='ERR_MODULE_NOT_FOUND')return null;throw error;});
@@ -80,4 +81,14 @@ test('disabled execution, revoked callers and missing native authority cannot tr
   const replaced=await m.executeReplyTest(f.env,f.actor,f.target,f.deps);assert.equal(replaced.outcome,'found');assert.equal(replaced.status,'unconfirmed');assert.equal(replaced.review,null);assert.equal(f.counts().requests,1);
   f.sqlite.prepare('DELETE FROM session WHERE id=?').run(f.actor.sessionId);
   assert.deepEqual(await m.executeReplyTest(f.env,f.actor,f.target,f.deps),{outcome:'not_found'});
+});
+test('background repair settles a reply test after the original staff session disappears',async t=>{
+  const m=await api(),f=await fixture();t.after(f.close);f.result({outcome:'pending'});
+  const pending=await m.executeReplyTest(f.env,f.actor,f.target,f.deps);assert.equal(pending.outcome,'found');assert.equal(pending.usageStatus,'held');
+  f.sqlite.prepare('DELETE FROM session WHERE id=?').run(f.actor.sessionId);
+  f.result({outcome:'completed',text:JSON.stringify(f.candidate),metadata:{replyTest:{usageReported:true,usage:{input:9,output:3,cacheRead:2,cacheWrite:1},outputValid:true}}});
+  await repairFinancialUsage(f.env,{replyTestRuntime:f.deps.runtime});await repairFinancialUsage(f.env,{replyTestRuntime:f.deps.runtime});
+  const run=await f.db.prepare('SELECT settlement,charged_micros AS charged,repair_due_at AS due,repair_token AS token FROM reply_test_run WHERE id=?').bind(f.run.id).first<any>();
+  assert.deepEqual({...run},{settlement:'settled',charged:1,due:null,token:null});
+  const budget=await f.db.prepare("SELECT reserved_micros AS reserved,spent_micros AS spent FROM reply_test_budget WHERE id='budget'").first<any>();assert.deepEqual({...budget},{reserved:0,spent:1});
 });

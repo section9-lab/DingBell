@@ -1,0 +1,5 @@
+import * as v from 'valibot';
+const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value=>value===value.trim()&&value.isWellFormed()&&!/[\u0000-\u001f\u007f]/.test(value)));
+const filters=v.pipe(v.strictObject({storeId:v.optional(id),queue:v.optional(v.picklist(['all','mine','unassigned'])),'state':v.optional(v.picklist(['all','needs_reply','waiting_customer','waiting_internal','resolved'])),searchField:v.optional(v.picklist(['thread','order'])),search:v.optional(id)}),v.check(value=>(value.searchField===undefined)===(value.search===undefined)));
+export const conversationExportRequestSchema=v.pipe(v.strictObject({kind:v.picklist(['conversations','messages']),scope:v.picklist(['all','page','selected']),filters:v.optional(filters,{}),conversationIds:v.optional(v.pipe(v.array(id),v.maxLength(100),v.check(ids=>new Set(ids).size===ids.length)))}),v.check(value=>value.scope==='all'?value.conversationIds===undefined:value.conversationIds!==undefined&&value.conversationIds.length>0));
+export type ConversationExportRequest=v.InferOutput<typeof conversationExportRequestSchema>;

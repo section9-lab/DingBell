@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { RefreshCw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, Search, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { ApiError, type Company } from '../lib/api';
 import { readStores } from '../lib/stores-api';
 import { readConversations, readConversation } from '../lib/conversations-api';
@@ -18,12 +18,15 @@ import { Spinner } from '../components/ui/spinner';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group';
+import {Popover,PopoverContent,PopoverTitle,PopoverTrigger} from '../components/ui/popover';
 import { clearPendingReplies } from '../lib/conversation-reply-pending';
 import { clearPendingPreviews } from '../lib/conversation-preview-pending';
 import { clearAiResumptions } from '../lib/ai-reception-pending';
 import { clearReplyDrafts } from '../lib/conversation-draft';
 import { clearConversationPositions } from '../lib/conversation-position';
 import { useConversationMessages } from '../hooks/use-conversation-messages';
+import {CompanyConversationActivityDialog} from '../components/company-conversation-activity-dialog';
+import {downloadConversationCsv,exportConversationCsv} from '../lib/conversation-export-api';
 
 import { useCompanySettings } from '../components/company-settings-provider';
 
@@ -46,6 +49,10 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
   const listScope = JSON.stringify([company.id, storeId, searchField, search, queue, state]);
   const [draft, setDraft] = useState(search);
   const [draftField, setDraftField] = useState<'thread' | 'order'>(searchField);
+  const [companyActivityOpen,setCompanyActivityOpen]=useState(false);
+  const [exporting,setExporting]=useState(false);
+  const [exportResult,setExportResult]=useState<{text:string;error?:ApiError}|null>(null);
+  const companyActivityButton=useRef<HTMLButtonElement>(null);
   const [pagination, setPagination] = useState<{ scope: string; pages: string[] }>({ scope: '', pages: [] });
   const listPages = pagination.scope === listScope ? pagination.pages : [];
   function setListPages(value: string[] | ((pages: string[]) => string[])) {
@@ -109,6 +116,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
     setParams(next);
   }
   function reload() { setListPages([]); setRevision(value => value + 1); if (selected) history.refresh(); }
+  async function exportCsv(scope:'all'|'page'|'selected',kind:'conversations'|'messages') {const ids=scope==='page'?conversationPage?.conversations.map(item=>item.id):scope==='selected'&&selected?[selected]:undefined;if(scope!=='all'&&!ids?.length)return;setExporting(true);setExportResult(null);try{const result=await exportConversationCsv(company.id,{kind,scope,filters:{...(storeId?{storeId}:{}),queue,state,...(search?{searchField,search}:{})},...(ids?{conversationIds:ids}:{})});downloadConversationCsv(result);setExportResult({text:`已生成 ${result.rowCount} 行${kind==='conversations'?'会话汇总':'消息明细'}，快照 ${messageDate(result.snapshotAt)}。`});}catch(error){setExportResult({text:'导出失败。',error:error instanceof ApiError?error:new ApiError('EXPORT_UNAVAILABLE')});}finally{setExporting(false);}}
   if (denied) return <ErrorNotice error={denied} />;
   const conversationPage = conversations.isError ? undefined : conversations.data;
   const conversation = !detail.isError ? detail.data?.conversation : undefined;
@@ -121,7 +129,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
   return <>
     <div className="flex shrink-0 items-center justify-between gap-3">
       <div className="min-w-0"><h1 className="text-xl font-semibold tracking-tight sm:text-2xl">消息中心</h1><p className="mt-1 hidden text-sm text-muted-foreground sm:block">查看消费者会话，认领并跟进处理进度。</p></div>
-      <Button variant="outline" disabled={refreshing} onClick={reload}><RefreshCw data-icon="inline-start" />刷新消息</Button>
+      <div className="flex flex-wrap items-center justify-end gap-2">{['owner','admin'].includes(company.role)&&<Popover><PopoverTrigger render={<Button variant="outline" disabled={exporting}/> }><Download data-icon="inline-start"/>{exporting?'正在导出…':'导出 CSV'}</PopoverTrigger><PopoverContent className="grid w-72 gap-3"><PopoverTitle>冻结范围导出</PopoverTitle><p className="text-xs text-muted-foreground">会话汇总</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','conversations')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','conversations')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','conversations')}>当前会话</Button>}</div><p className="text-xs text-muted-foreground">消息明细</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','messages')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','messages')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','messages')}>当前会话</Button>}</div></PopoverContent></Popover>}<Button ref={companyActivityButton} variant="outline" onClick={()=>setCompanyActivityOpen(true)}>公司日志</Button><Button variant="outline" disabled={refreshing} onClick={reload}><RefreshCw data-icon="inline-start" />刷新消息</Button></div>
     </div>
     <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border">
       <aside aria-label="会话列表" className={cn('w-full shrink-0 flex-col border-r md:flex md:w-72', selected ? 'hidden' : 'flex')}>
@@ -150,7 +158,19 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
           <p className="mt-3 text-xs text-muted-foreground">计数按当前店铺、搜索和状态统计 · 仅精确匹配</p>
         </form>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2" tabIndex={0} aria-label="会话条目">
-          {conversations.isPending ? <Reading text="正在读取会话…" /> : conversations.isError ? <div className="p-2"><ErrorNotice error={conversations.error} />{conversations.error instanceof ApiError && conversations.error.code === 'INVALID_REQUEST' && <Button variant="outline" className="mt-3" onClick={reload}>返回第一页会话</Button>}</div> : !conversations.data?.conversations.length ? <MessageEmpty title={storeId || search || queue !== 'all' || state !== 'all' ? '没有匹配的会话' : '暂无已导入会话'} description={storeId || search || queue !== 'all' || state !== 'all' ? '检查标识，或更换队列、状态与店铺筛选。' : '在店铺管理启用会话同步后，已导入的记录会显示在这里。'} /> : conversations.data.conversations.map(item => <Button key={item.id} id={`conversation-${item.id}`} variant={selected === item.id ? 'secondary' : 'ghost'} aria-current={selected === item.id ? 'true' : undefined} aria-label={`打开会话 ${item.platformThreadId}`} className="h-auto w-full shrink-0 justify-start px-3 py-4 text-left" onClick={() => choose(item.id)}><div className="flex min-w-0 flex-1 flex-col gap-2"><span className="truncate font-medium">会话 {item.platformThreadId}</span><span className="truncate text-xs text-muted-foreground">{item.store.name}</span><span className="flex flex-wrap items-center gap-1"><Badge variant="outline">{states.find(value => value.value === (item.workflow.lifecycle === 'resolved' ? 'resolved' : item.workflow.workStatus))?.label}</Badge>{item.workflow.assignedMemberId === conversationPage?.viewerMemberId && <Badge variant="secondary">我负责</Badge>}</span><span className="break-words whitespace-normal text-xs text-muted-foreground [overflow-wrap:anywhere]">{item.workflow.assignedMemberId === null ? '未分配' : item.workflow.assigneeName === null ? '负责人已移除' : `负责人：${item.workflow.assigneeName.trim() || '未填写姓名'}`}</span><span className="line-clamp-2 whitespace-normal break-words font-normal [overflow-wrap:anywhere]">{item.latestMessage ? item.latestMessage.isImage ? '图片消息' : item.latestMessage.content.join(' ') + (item.latestMessage.previewTruncated ? '…' : '') : '尚无已导入消息'}</span><span className="text-xs font-normal text-muted-foreground">{messageDate(item.lastMessageAt)}</span></div></Button>)}
+          {conversations.isPending ? <Reading text="正在读取会话…" /> : conversations.isError ? <div className="p-2"><ErrorNotice error={conversations.error} />{conversations.error instanceof ApiError && conversations.error.code === 'INVALID_REQUEST' && <Button variant="outline" className="mt-3" onClick={reload}>返回第一页会话</Button>}</div> : !conversations.data?.conversations.length ? <MessageEmpty title={storeId || search || queue !== 'all' || state !== 'all' ? '没有匹配的会话' : '暂无已导入会话'} description={storeId || search || queue !== 'all' || state !== 'all' ? '检查标识，或更换队列、状态与店铺筛选。' : '在店铺管理启用会话同步后，已导入的记录会显示在这里。'} /> : conversations.data.conversations.map(item => {
+            const latestSender = item.latestMessage?.direction === 'outbound' ? '商家' : item.latestMessage?.direction === 'inbound' ? '买家' : '消息';
+            const preview = item.latestMessage ? item.latestMessage.isImage ? '图片消息' : item.latestMessage.content.join(' ') + (item.latestMessage.previewTruncated ? '…' : '') : null;
+            const assignment = item.workflow.assignedMemberId === null ? '未分配' : item.workflow.assigneeName === null ? '负责人已移除' : `负责人：${item.workflow.assigneeName.trim() || '未填写姓名'}`;
+            return <Button key={item.id} id={`conversation-${item.id}`} variant={selected === item.id ? 'secondary' : 'ghost'} aria-current={selected === item.id ? 'true' : undefined} aria-label={`打开会话 ${item.platformThreadId}`} className="h-auto w-full shrink-0 justify-start px-3 py-3 text-left" onClick={() => choose(item.id)}>
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{item.store.name}</span><span className="shrink-0 text-xs font-normal text-muted-foreground">{messageDate(item.lastMessageAt)}</span></span>
+                <span className="line-clamp-2 whitespace-normal break-words text-sm font-normal [overflow-wrap:anywhere]">{preview===null?<span className="text-muted-foreground">消息尚未导入</span>:<><span className="text-muted-foreground">{latestSender}：</span>{preview}</>}</span>
+                <span className="flex flex-wrap items-center gap-1"><Badge variant="outline">{states.find(value => value.value === (item.workflow.lifecycle === 'resolved' ? 'resolved' : item.workflow.workStatus))?.label}</Badge>{item.workflow.assignedMemberId === conversationPage?.viewerMemberId ? <Badge variant="secondary">我负责</Badge> : item.workflow.assignedMemberId === null ? <span className="text-xs text-muted-foreground">未分配</span> : null}</span>
+                <span className="sr-only">{assignment}</span>
+              </div>
+            </Button>;
+          })}
         </div>
         <div className="flex shrink-0 items-center justify-between gap-2 border-t p-3"><Button variant="ghost" size="icon-sm" aria-label="上一页会话" disabled={!listPages.length || conversations.isFetching} onClick={() => setListPages(pages => pages.slice(0, -1))}><ChevronLeft /></Button><span className="text-xs text-muted-foreground">第 {listPages.length + 1} 页</span><Button variant="ghost" size="icon-sm" aria-label="下一页会话" disabled={!conversations.data?.nextCursor || conversations.isFetching} onClick={() => setListPages(pages => [...pages, conversations.data!.nextCursor!])}><ChevronRight /></Button></div>
       </aside>
@@ -159,7 +179,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
           {conversation && <ConversationHeader key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} back={() => choose('')} />}
           {!conversation && loading && <Reading text="正在读取会话…" />}
           {conversation && <ConversationControlPanel key={`${company.id}:${selected}`} userId={userId} companyId={company.id} conversationId={selected}
-            conversationLabel={`${conversation.store.name} · 会话 ${conversation.platformThreadId}`} onDenied={setControlDenied}>
+            conversationLabel={`${conversation.store.name} · 买家咨询`} messages={messages} onDenied={setControlDenied}>
           <div className="flex min-h-0 flex-1">{loading ? <Reading text="正在读取消息…" /> : <MessageTimeline messages={messages} pageKey={history.pageKey} earlier={history.earlier} anchorId={history.anchorId} view={history.view} onPosition={history.position} />}</div>
           <div className="flex shrink-0 flex-wrap items-center gap-1 border-t px-3 py-1.5" aria-label="消息导航">
             {['owner','admin'].includes(company.role)&&conversationPage?.viewerMemberId&&<ReplyTestPanel key={`${company.id}:${conversationPage.viewerMemberId}:${selected}`} scope={{userId,companyId:company.id,memberId:conversationPage.viewerMemberId,conversationId:selected}} storeId={conversation.store.id}
@@ -176,7 +196,9 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
       </section>
       {conversation && !conversationError && <ConversationAside key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} />}
     </div>
+    {exportResult&&<Alert><AlertDescription>{exportResult.error?<ErrorNotice error={exportResult.error}/>:exportResult.text}</AlertDescription></Alert>}
     {(stores.isError || conversations.isError) && <Alert><AlertDescription>读取未完成，已隐藏不可确认的数据。请检查网络并刷新消息。</AlertDescription></Alert>}
     {!availableStores.length && !stores.isPending && !stores.isError && <p className="shrink-0 text-xs text-muted-foreground">尚无可访问店铺。<Link to="/workspace/stores" className="underline underline-offset-4">前往店铺管理</Link></p>}
+    <CompanyConversationActivityDialog companyId={company.id} stores={availableStores} open={companyActivityOpen} onOpenChange={setCompanyActivityOpen} onDenied={setControlDenied} onConversation={choose} finalFocus={()=>companyActivityButton.current}/>
   </>;
 }

@@ -3,26 +3,28 @@ import {aiRunSchema,aiScopeSchema} from '../conversations/ai-state.ts';
 import type {ControlScope} from '../conversations/control-types.ts';
 import {currentPayload,readAiExecution,type AiRunReader} from './storage.ts';
 import {knowledgeHash} from '../knowledge/content.ts';
-import {embedKnowledge,knowledgeProfile} from '../knowledge/vectorize.ts';
+import {embedKnowledgeWithReceipt,knowledgeProfile} from '../knowledge/vectorize.ts';
 import {retrievePublishedKnowledge,retrievalScopeSchema,retrievalDocumentLimit,type RetrievalScope,type ResolvedKnowledge} from '../knowledge/retrieval.ts';
 import {knowledgeCitationSchema,type KnowledgeCitationRequest} from '../../shared/knowledge.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const amount=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER));
 const hash=v.pipe(v.string(),v.regex(/^[0-9a-f]{64}$/));
 export const aiKnowledgeQueryConfigSchema=v.strictObject({profile:v.literal(knowledgeProfile.id),priceVersion:id,
- maxInputTokens:v.pipe(amount,v.minValue(60000),v.maxValue(1000000)),inputMicrosPerMillion:amount});
+ maxInputTokens:v.pipe(amount,v.minValue(60000),v.maxValue(1000000)),inputMicrosPerMillion:amount,gatewayId:v.optional(id)});
 export const aiKnowledgeChunkSchema=v.strictObject({...knowledgeCitationSchema.entries,body:v.pipe(v.string(),v.maxLength(8192)),title:v.pipe(v.string(),v.maxLength(160)),contentHash:hash,score:v.pipe(v.number(),v.finite())});
 export const aiKnowledgeEvidenceSchema=v.strictObject({runId:v.pipe(v.string(),v.uuid()),scope:retrievalScopeSchema,questionHash:hash,chunks:v.pipe(v.array(aiKnowledgeChunkSchema),v.maxLength(10))});
 export type AiKnowledgeEvidence=v.InferOutput<typeof aiKnowledgeEvidenceSchema>;
 export type AiKnowledgeBindings={DB?:D1Database;AI_RECEPTION_ENABLED?:string;AI_OUTBOUND_ENABLED?:string;OUTBOUND_ENABLED?:string;AI_KNOWLEDGE_QUERY_CONFIG_JSON?:string;KNOWLEDGE_AI?:Ai;KNOWLEDGE_INDEX?:Vectorize};
-type QueryRow={config:string;scope:string;questionHash:string;reservedMicros:number;vectors:string|null;evidence:string|null};
+type QueryRow={config:string;scope:string;questionHash:string;reservedMicros:number;vectors:string|null;evidence:string|null;gatewayLogId:string|null;gatewayUsage:string|null;chargedMicros:number|null;settledAt:number|null};
 const now="CAST(unixepoch('subsecond')*1000 AS INTEGER)";
 function fail():never{throw new Error('AI_KNOWLEDGE_UNAVAILABLE');}
 function freezePrice(value:unknown){
  const config=v.parse(aiKnowledgeQueryConfigSchema,value),cost=(BigInt(config.maxInputTokens)*BigInt(config.inputMicrosPerMillion)+999999n)/1000000n;
  if(cost>BigInt(Number.MAX_SAFE_INTEGER))fail();return {config,cost:Number(cost)};
 }
-async function queryRow(db:D1Database,id:string){return db.prepare('SELECT config,scope,question_hash AS questionHash,reserved_micros AS reservedMicros,vectors,evidence FROM ai_knowledge_query WHERE run_id=?').bind(id).first<QueryRow>();}
+async function queryRow(db:D1Database,id:string){return db.prepare(`SELECT config,scope,question_hash AS questionHash,reserved_micros AS reservedMicros,vectors,evidence,
+ gateway_log_id AS gatewayLogId,gateway_usage AS gatewayUsage,charged_micros AS chargedMicros,settled_at AS settledAt
+ FROM ai_knowledge_query WHERE run_id=?`).bind(id).first<QueryRow>();}
 async function context(env:AiKnowledgeBindings,read:AiRunReader,scope:ControlScope,runId:string){
  if(env.AI_RECEPTION_ENABLED!=='true'||!env.DB)fail();v.parse(aiScopeSchema,scope);v.parse(v.pipe(v.string(),v.uuid()),runId);
  const execution=await readAiExecution(env.DB,scope,runId);if(!execution||execution.closure||!['support-knowledge-v1','support-answer-v1','support-reply-v1'].includes(execution.config.model.promptVersion))fail();
@@ -67,6 +69,45 @@ async function validateEvidence(db:D1Database,c:Awaited<ReturnType<typeof contex
 export async function reviewAiKnowledgeEvidence(env:AiKnowledgeBindings,read:AiRunReader,scope:ControlScope,runId:string,value:unknown){
  try{const c=await context(env,read,scope,runId),row=await queryRow(env.DB!,runId);if(!row?.evidence||JSON.stringify(v.parse(aiKnowledgeEvidenceSchema,value))!==JSON.stringify(v.parse(aiKnowledgeEvidenceSchema,JSON.parse(row.evidence))))return null;return await validateEvidence(env.DB!,c,value);}catch{return null;}
 }
+/**
+ * Convert a conservative embedding hold only after the immutable Gateway log
+ * matches this exact run and reports usable token counts. This is provider
+ * usage evidence, not final invoice reconciliation.
+ */
+export async function reconcileAiKnowledgeUsage(env:AiKnowledgeBindings,scope:ControlScope,runId:string){
+ const result=(status:'unavailable'|'unconfirmed'|'settled'|'already_settled')=>({status,canRelease:false as const,supplierCostsVerified:false as const});
+ try{
+  if(!env.DB||!env.KNOWLEDGE_AI)return result('unavailable');scope=v.parse(aiScopeSchema,scope);v.parse(v.pipe(v.string(),v.uuid()),runId);
+  const execution=await readAiExecution(env.DB,scope,runId),row=await queryRow(env.DB,runId);if(!execution||!row)return result('unavailable');
+  if(row.chargedMicros!==null)return row.gatewayUsage&&row.settledAt!==null?result('already_settled'):result('unavailable');
+  const price=freezePrice(JSON.parse(row.config));if(!price.config.gatewayId||!row.gatewayLogId)return result('unconfirmed');
+  const log=await env.KNOWLEDGE_AI.gateway(price.config.gatewayId).getLog(row.gatewayLogId),metadata=log.metadata;
+  const tokensIn=log.tokens_in,tokensOut=log.tokens_out??0,costUsd=log.cost;
+  if(log.id!==row.gatewayLogId||log.provider!=='workers-ai'||log.model!==knowledgeProfile.model||!log.success||log.status_code<200||log.status_code>299||log.cached||log.custom_cost===true
+    ||typeof tokensIn!=='number'||!Number.isSafeInteger(tokensIn)||tokensIn<1||tokensIn>price.config.maxInputTokens||!Number.isSafeInteger(tokensOut)||tokensOut!==0
+    ||typeof costUsd!=='number'||!Number.isFinite(costUsd)||costUsd<0
+    ||metadata?.dingbellPurpose!=='ai-knowledge'||metadata?.dingbellRunId!==runId)return result('unconfirmed');
+  const chargedBig=(BigInt(tokensIn)*BigInt(price.config.inputMicrosPerMillion)+999999n)/1000000n;
+  const expectedUsd=tokensIn*(price.config.inputMicrosPerMillion/1_000_000_000_000);
+  if(Math.abs(costUsd-expectedUsd)>Math.max(1e-12,expectedUsd*1e-9)||chargedBig>BigInt(row.reservedMicros))return result('unconfirmed');const charged=Number(chargedBig);
+  const usage=JSON.stringify({schemaVersion:1,provider:'workers-ai',model:knowledgeProfile.model,gatewayId:price.config.gatewayId,
+    gatewayLogId:row.gatewayLogId,tokensIn,tokensOut,cached:false,costUsd,priceVersion:price.config.priceVersion});
+  const token=crypto.randomUUID(),marker=[execution.budgetId,scope.organizationId,token];
+  const rows=await env.DB.batch([
+   env.DB.prepare(`UPDATE ai_budget SET reserved_micros=reserved_micros-?,spent_micros=spent_micros+?,commit_token=?
+    WHERE id=? AND organization_id=? AND commit_token IS NULL AND reserved_micros>=? AND spent_micros<=9007199254740991-?
+    AND EXISTS(SELECT 1 FROM ai_knowledge_query WHERE run_id=? AND gateway_log_id=? AND charged_micros IS NULL) RETURNING id`)
+    .bind(row.reservedMicros,charged,token,execution.budgetId,scope.organizationId,row.reservedMicros,charged,runId,row.gatewayLogId),
+   env.DB.prepare(`UPDATE ai_knowledge_query SET gateway_usage=?,charged_micros=?,settled_at=MAX(created_at,${now})
+    WHERE run_id=? AND gateway_log_id=? AND charged_micros IS NULL
+    AND EXISTS(SELECT 1 FROM ai_budget WHERE id=? AND organization_id=? AND commit_token=?) RETURNING run_id`)
+    .bind(usage,charged,runId,row.gatewayLogId,...marker),
+   env.DB.prepare('UPDATE ai_budget SET commit_token=NULL WHERE id=? AND organization_id=? AND commit_token=?').bind(...marker),
+  ]);
+  const final=await queryRow(env.DB,runId);if(!final||final.gatewayUsage!==usage||final.chargedMicros!==charged||final.settledAt===null)return result('unconfirmed');
+  return result(rows[1].results.length?'settled':'already_settled');
+ }catch{return result('unconfirmed');}
+}
 export async function searchAiKnowledge(env:AiKnowledgeBindings,read:AiRunReader,scope:ControlScope,runId:string){
  const result=(status:'unavailable'|'unconfirmed'|'changed')=>({status,canSend:false as const,evidence:null});
  try{
@@ -91,7 +132,9 @@ export async function searchAiKnowledge(env:AiKnowledgeBindings,read:AiRunReader
       WHERE e.id=? AND e.closure IS NULL AND b.enabled=1 AND b.starts_at<=${now} AND b.ends_at>${now} AND b.limit_micros-b.spent_micros-b.reserved_micros>=0 AND ${currentPayload}`)
       .bind(JSON.stringify(c.execution.payload),runId).first();
      if(!allowed||!c.enabled())return result('unavailable');
-     const [vector]=await embedKnowledge(env.KNOWLEDGE_AI,[c.run.admission.question]);await db.prepare('UPDATE ai_knowledge_query SET vectors=? WHERE run_id=? AND vectors IS NULL').bind(JSON.stringify(vector),runId).run();
+     const embedded=await embedKnowledgeWithReceipt(env.KNOWLEDGE_AI,[c.run.admission.question],price.config.gatewayId?{id:price.config.gatewayId,eventId:runId}:undefined);
+     await db.prepare(`UPDATE ai_knowledge_query SET vectors=?,gateway_log_id=COALESCE(gateway_log_id,?)
+       WHERE run_id=? AND vectors IS NULL`).bind(JSON.stringify(embedded.vectors[0]),embedded.gatewayLogId,runId).run();
     }
     catch{return result('unconfirmed');}
     row=await queryRow(db,runId);if(!row)return result('unconfirmed');

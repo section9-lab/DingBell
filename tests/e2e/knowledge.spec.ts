@@ -389,7 +389,7 @@ test('knowledge and open dialogs stay hidden during reauthorization and are clea
   await expect(page.getByRole('dialog', { name: '放弃未保存的修改？' })).toBeVisible();
   let release = () => {}, arrived = () => {};
   const gate = new Promise<void>(resolve => { release = resolve; }), seen = new Promise<void>(resolve => { arrived = resolve; });
-  await page.route('**/api/auth/get-session', async route => { const response = await route.fetch(); arrived(); await gate; await route.fulfill({ response }); });
+  await page.route('**/api/workspace-bootstrap', async route => { const response = await route.fetch(); arrived(); await gate; await route.fulfill({ response }); });
   try {
     await revalidate(page); await seen;
     await expect(page.getByText('正在确认账号状态…', { exact: true })).toBeVisible();
@@ -399,7 +399,7 @@ test('knowledge and open dialogs stay hidden during reauthorization and are clea
   await expect(page.getByRole('dialog', { name: '放弃未保存的修改？' })).toBeVisible();
   await page.getByRole('button', { name: '继续编辑', exact: true }).click();
   await expect(page.getByLabel('知识正文', { exact: true })).toHaveValue('重新核验身份期间保留的内容');
-  await page.unroute('**/api/auth/get-session'); await application.removeMembership('company-a'); await revalidate(page);
+  await page.unroute('**/api/workspace-bootstrap'); await application.removeMembership('company-a'); await revalidate(page);
   await expect(page.getByRole('heading', { name: '选择公司', exact: true })).toBeVisible();
   await expect(page.getByLabel('知识正文', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -411,7 +411,7 @@ test('a save acknowledged while knowledge is hidden can be reconciled without a 
   const writeGate = new Promise<void>(resolve => { releaseWrite = resolve; }), identityGate = new Promise<void>(resolve => { releaseIdentity = resolve; });
   const written = new Promise<void>(resolve => { accepted = resolve; }), identity = new Promise<void>(resolve => { checking = resolve; });
   await page.route('**/knowledge/*/draft', async route => { writes++; const response = await route.fetch(); accepted(); await writeGate; await route.fulfill({ response }); });
-  await page.route('**/api/auth/get-session', async route => { const response = await route.fetch(); checking(); await identityGate; await route.fulfill({ response }); });
+  await page.route('**/api/workspace-bootstrap', async route => { const response = await route.fetch(); checking(); await identityGate; await route.fulfill({ response }); });
   try {
     await page.getByLabel('知识正文', { exact: true }).fill('保存响应在隐藏期间到达的内容');
     await page.getByRole('button', { name: '保存草稿', exact: true }).click(); await written;

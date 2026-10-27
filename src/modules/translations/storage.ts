@@ -3,7 +3,7 @@ import { storeAccess } from '../stores/storage.ts';
 import { replyBodySchema } from '../conversations/control-state.ts';
 import { estimateTranslationReservation,estimateTranslationUsage,freezeTranslationConfig } from './config.ts';
 import type { TranslationActor,TranslationBudget,TranslationConfig,TranslationInput,TranslationOutput,TranslationReceipt,TranslationReservation,TranslationRun,TranslationScope,TranslationUsage,UnstartedTranslationEvidence } from './types.ts';
-import { readTranslationDeploymentConfig,type TranslationDeploymentEnv } from './deployment-config.ts';
+import type { TranslationDeploymentEnv } from './deployment-config.ts';
 
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value=>value.trim()===value&&value.isWellFormed()&&!/[\u0000-\u001f\u007f]/.test(value)));
 const counter=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER));
@@ -40,6 +40,10 @@ const runWhere='run.id=? AND run.organization_id=? AND run.store_id=? AND run.co
 function internalRead(db:D1Database,scope:TranslationScope,runId:string){return db.prepare(`SELECT ${runColumns} FROM reply_preview_run AS run WHERE ${runWhere}`).bind(...scopeValues(scope,runId));}
 async function requiredRun(db:D1Database,scope:TranslationScope,runId:string){
   const row=await internalRead(db,scope,runId).first<RunRow>();if(!row)throw new Error('TRANSLATION_RUN_NOT_FOUND');return run(row);
+}
+/** Internal financial repair read; it confers no permission to display the source or output. */
+export async function readTranslationForRepair(db:D1Database,scope:TranslationScope,runId:string){
+  const row=await internalRead(db,scope,runId).first<RunRow>();return row?run(row):null;
 }
 const accessFrom=`FROM conversation JOIN store ON store.id=conversation.store_id AND store.organization_id=conversation.organization_id
   JOIN member AS viewer ON viewer.organization_id=conversation.organization_id AND viewer.user_id=?`;
@@ -166,7 +170,7 @@ async function finish(db:D1Database,scope:TranslationScope,value:TranslationRun,
       WHERE id=? AND organization_id=? AND reserved_micros>=? AND spent_micros<=9007199254740991-?
         AND EXISTS (SELECT 1 FROM reply_preview_run AS run WHERE ${runWhere} AND settlement='held' ${settlement==='settled'?'AND receipt=?':'AND provider_request_claimed_at IS NULL'})`)
       .bind(value.reservedMicros,charged,token,value.budgetId,scope.organizationId,value.reservedMicros,charged,...bound,...(settlement==='settled'?[receipt]:[])),
-    db.prepare(`UPDATE reply_preview_run AS run SET settlement=?,usage=?,charged_micros=?,settled_at=MAX(created_at,${now}),release_evidence=?
+    db.prepare(`UPDATE reply_preview_run AS run SET settlement=?,usage=?,charged_micros=?,settled_at=MAX(created_at,${now}),release_evidence=?,repair_due_at=NULL,repair_token=NULL
       WHERE ${runWhere} AND settlement='held' AND EXISTS (SELECT 1 FROM translation_budget_bucket WHERE id=? AND organization_id=? AND commit_token=?)`)
       .bind(settlement,usage,charged,evidence,...bound,...marker),
     internalRead(db,scope,value.id),
@@ -224,7 +228,7 @@ export async function admitTranslationPreview(db:D1Database,actor:TranslationAct
   };
   const previous=await replay();if(previous)return previous;
   if(env.TRANSLATION_ENABLED!=='true')return {outcome:'disabled'};
-  const config=readTranslationDeploymentConfig(env);if(!config)return {outcome:'not_configured'};
+  const config=(await import('./deployment-config.ts')).readTranslationDeploymentConfig(env);if(!config)return {outcome:'not_configured'};
   const budgets=await db.prepare(`SELECT id FROM translation_budget_bucket WHERE organization_id=? AND enabled=1
     AND starts_at<=${now} AND ends_at>${now} ORDER BY starts_at LIMIT 2`).bind(actor.orgId).all<{id:string}>();
   if(budgets.results.length!==1)return {outcome:'budget_unavailable'};

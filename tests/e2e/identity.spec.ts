@@ -49,15 +49,14 @@ test('incorrect credentials keep the user on the form with a useful generic erro
 test('anonymous focus revalidation preserves typed credentials', async ({ page, application }) => {
   await page.goto(`${application.baseURL}/login`);
   await fillLogin(page, application.password);
-  const refreshedSetup = page.waitForResponse(response => new URL(response.url()).pathname === '/api/setup');
-  const refreshedSession = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/get-session');
+  const refreshedIdentity = page.waitForResponse(response => new URL(response.url()).pathname === '/api/workspace-bootstrap');
   await page.evaluate(`(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
     document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
   })()`);
-  await Promise.all([refreshedSetup, refreshedSession]);
+  await refreshedIdentity;
   try {
     const email = await page.getByLabel('邮箱', { exact: true }).inputValue();
     const password = await page.getByLabel('密码', { exact: true }).inputValue();
@@ -129,7 +128,7 @@ test('a temporary company-loading failure can be retried explicitly', async ({ p
   await signIn(page, application);
   await expect(page.getByRole('heading', { name: '选择公司', exact: true })).toBeVisible();
   let requests = 0;
-  await page.route('**/api/companies', async route => {
+  await page.route('**/api/workspace-bootstrap', async route => {
     requests += 1;
     if (requests === 1) {
       await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({
@@ -148,7 +147,7 @@ test('a temporary company-loading failure can be retried explicitly', async ({ p
 test('offline workspace hides company data and reconnects only after verifying the session', async ({ page, context, application }) => {
   let sessionReads = 0;
   page.on('request', request => {
-    if (new URL(request.url()).pathname === '/api/auth/get-session') sessionReads += 1;
+    if (new URL(request.url()).pathname === '/api/workspace-bootstrap') sessionReads += 1;
   });
   await signIn(page, application);
   await page.getByRole('button', { name: /测试公司 A/ }).click();
@@ -172,7 +171,7 @@ test('an unconfirmed activation rereads actual company state without resending t
   let activations = 0;
   let companyReads = 0;
   page.on('request', request => {
-    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/companies') companyReads += 1;
+    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/workspace-bootstrap') companyReads += 1;
   });
   await page.route('**/api/companies/company-b/activate', async route => {
     activations += 1;

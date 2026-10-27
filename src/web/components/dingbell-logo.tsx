@@ -1,0 +1,25 @@
+import type { SVGProps } from 'react';
+
+/** Original DingBell geometric support-cat mark. Keep this geometry in sync with public/dingbell-logo.svg. */
+export function DingBellLogo({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      className={className}
+      role="img"
+      aria-label="DingBell 客服猫"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path d="M8 34C8 17.5 18.7 7 32 7s24 10.5 24 27" fill="none" stroke="#55D6BE" strokeWidth="5" strokeLinecap="round" />
+      <path d="M13 29 14.5 11 26 20c1.9-.7 3.9-1 6-1s4.1.3 6 1l11.5-9L51 29c2.1 3.1 3 6.4 3 10 0 9.8-9.8 16-22 16-3.6 0-7-.5-10-1.6L14 58l1.8-9C12 46.1 10 42.7 10 39c0-3.6.9-6.9 3-10Z" fill="#5B5CE2" />
+      <rect x="6" y="30" width="9" height="15" rx="4.5" fill="#55D6BE" />
+      <rect x="49" y="30" width="9" height="15" rx="4.5" fill="#55D6BE" />
+      <circle cx="24" cy="35" r="2.5" fill="#fff" />
+      <circle cx="40" cy="35" r="2.5" fill="#fff" />
+      <path d="m29.5 41 2.5 2 2.5-2" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M55 40v1c0 7-5 10-12 10" fill="none" stroke="#55D6BE" strokeWidth="4" strokeLinecap="round" />
+      <circle cx="41" cy="51" r="3" fill="#55D6BE" />
+    </svg>
+  );
+}

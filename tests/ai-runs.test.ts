@@ -50,7 +50,11 @@ test('repair completion stops settled records but keeps closed unknown usage eli
  const claim=(await repair.claimAiRepairs(f.f.db,Date.now(),50))[0];await repair.finishAiRepair(f.f.db,claim);
  const due=await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first<number>('repair_due_at');assert.ok(due!>Date.now()+240000);
  assert.equal((await m.readAiExecution(f.f.db,run.scope,run.request.runId))!.remainingReservedMicros,110);
- await m.settleAiGeneration(f.f.db,run.scope,run.request.runId,1,receipt,{input:10,output:5,cacheRead:0,cacheWrite:0});await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE id=?').bind(run.request.runId).run();
+ await m.settleAiGeneration(f.f.db,run.scope,run.request.runId,1,receipt,{input:10,output:5,cacheRead:0,cacheWrite:0});
+ const created=Date.now();await f.f.db.prepare("INSERT INTO ai_knowledge_query(run_id,config,scope,question_hash,reserved_micros,created_at,gateway_log_id) VALUES(?,'{}','{}',?,0,?,'pending-log')")
+  .bind(run.request.runId,'a'.repeat(64),created).run();await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE id=?').bind(run.request.runId).run();
+ await repair.finishAiRepair(f.f.db,(await repair.claimAiRepairs(f.f.db,Date.now(),50))[0]);assert.ok((await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first<number>('repair_due_at'))!>Date.now()+240000);
+ await f.f.db.prepare("UPDATE ai_knowledge_query SET gateway_usage='{}',charged_micros=0,settled_at=? WHERE run_id=?").bind(created,run.request.runId).run();await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE id=?').bind(run.request.runId).run();
  await repair.finishAiRepair(f.f.db,(await repair.claimAiRepairs(f.f.db,Date.now(),50))[0]);assert.equal(await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first('repair_due_at'),null);
  assert.deepEqual(await repair.claimAiRepairs(f.f.db,Date.now(),50),[]);
 });
@@ -75,9 +79,10 @@ test('background AI repair addresses saved execution IDs without consulting the 
  const repair=await repairApi();assert.equal(typeof repair.repairAiExecutions,'function','Cron must reconcile historical financial plans independently');
  const m=await api(),f=await fixture();t.after(f.f.close);const id=await budget(m,f),ids:string[]=[];
  for(const conversationId of ['conv','second']){const run=await f.activate(conversationId);await m.reserveAiExecution(f.f.db,f.reader,run.scope,run.request.runId,id,config);ids.push(run.request.runId);}
- const env={DB:f.f.db,AI_RECEPTION_ENABLED:'false',FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{get(){throw new Error('current slot must not be consulted');}}} as any,calls:string[]=[];
- await repair.repairAiExecutions(env,{reconcile:async(_env,scope,runId)=>{assert.equal(scope.organizationId,'org');calls.push(runId);throw new Error('synthetic runtime outage');}});
- assert.deepEqual(calls.sort(),ids.sort());assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at>0 AND repair_token IS NULL').first('n'),2);
+ const env={DB:f.f.db,AI_RECEPTION_ENABLED:'false',FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{get(){throw new Error('current slot must not be consulted');}}} as any,calls:string[]=[],knowledgeCalls:string[]=[];
+ await repair.repairAiExecutions(env,{reconcile:async(_env,scope,runId)=>{assert.equal(scope.organizationId,'org');calls.push(runId);throw new Error('synthetic runtime outage');},
+  reconcileKnowledge:async(_env,scope,runId)=>{assert.equal(scope.organizationId,'org');knowledgeCalls.push(runId);return {status:'unconfirmed',canRelease:false,supplierCostsVerified:false};}});
+ assert.deepEqual(calls.sort(),ids.sort());assert.deepEqual(knowledgeCalls.sort(),ids.sort());assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at>0 AND repair_token IS NULL').first('n'),2);
  await repair.repairAiExecutions(env,{reconcile:async()=>{throw new Error('not yet due');}});assert.equal(calls.length,2);
  await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0').run();await repair.repairAiExecutions({...env,FLUE_SUPPORT_AGENT:undefined});assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at=0').first('n'),2);
 });

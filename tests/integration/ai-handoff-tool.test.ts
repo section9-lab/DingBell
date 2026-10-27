@@ -7,7 +7,7 @@ import {fauxProvider,fauxAssistantMessage,fauxText,fauxToolCall,type FauxRespons
 import {init,observe,useModel,useTool,useResponseFinish} from '@flue/runtime';
 import {start,sqlite} from '@flue/runtime/node';
 import {createHandoffTool} from '../../src/modules/conversations/handoff-tool.ts';
-import type {AiRun,AiHandoff} from '../../src/modules/conversations/ai-state.ts';
+import type {AiRun,AiHandoffToolInput,ControlledAiHandoff} from '../../src/modules/conversations/ai-state.ts';
 import type {ControlScope} from '../../src/modules/conversations/control-types.ts';
 import {createPolicy,changePolicy} from '../../src/modules/reply-policies/storage.ts';
 import {conversationControlFixture} from '../fixtures/conversation-control.ts';
@@ -27,13 +27,13 @@ test('Flue tool execution records actual Cloudflare handoff outcomes without gra
  for(const mode of ['success','human-takeover','lost-response','invalid-authority'] as const)await t.test(mode,async()=>{
   const {f,run}=await fixture(),directory=await mkdtemp(join(tmpdir(),'dingbell-handoff-tool-'));
   let runtime:Awaited<ReturnType<typeof start>>|undefined,turns=0,rpcs=0;const results:{isError:boolean;result:unknown}[]=[];
-  const input:AiHandoff={reason:'customer_request',summary:'Клиент просит человека.',neededInformation:[]};
+  const input:AiHandoffToolInput={reason:'customer_request',neededInformation:[]};
   const id=`handoff-tool-${run.request.runId}`;
   const unsubscribe=observe(event=>{if(event.type==='tool'&&event.instanceId===id)results.push({isError:event.isError,result:event.result});});
   try{
    const faux=fauxProvider({api:'dingbell-handoff-tool-fixture',provider:'dingbell-handoff-tool-fixture',models:[{id:'model'}]});
    const reply:FauxResponseFactory=()=>{turns++;faux.appendResponses([reply]);return turns===1?fauxAssistantMessage(fauxToolCall('request_handoff',mode==='invalid-authority'?{...input,runId:crypto.randomUUID()}:input),{stopReason:'toolUse'}):fauxAssistantMessage(fauxText('Untrusted model fallback'));};faux.setResponses([reply]);
-   const controller={async requestHandoff(scope:ControlScope,runId:string,value:AiHandoff){rpcs++;const result=await f.call('ai-handoff',{runId,input:value},scope);if(mode==='lost-response')throw new Error('synthetic lost receipt');assert.equal(result.status,200);return result.body;}};
+   const controller={async requestHandoff(scope:ControlScope,runId:string,value:ControlledAiHandoff){rpcs++;const result=await f.call('ai-handoff',{runId,input:value},scope);if(mode==='lost-response')throw new Error('synthetic lost receipt');assert.equal(result.status,200);return result.body;}};
    function HandoffAgent(){useModel('dingbell-handoff-tool-fixture/model',{compaction:false});useTool(createHandoffTool(run,controller));useResponseFinish(({response})=>({toolCalls:response.toolCalls}));return 'Exercise the isolated handoff tool with synthetic input.';}
    HandoffAgent.agentName='HandoffToolFixture';HandoffAgent.durability={maxAttempts:1,timeoutMs:10000};
    const launch=()=>start({agents:[HandoffAgent],db:sqlite(join(directory,'flue.sqlite')),providers:[faux.provider],env:{}});
@@ -46,7 +46,7 @@ test('Flue tool execution records actual Cloudflare handoff outcomes without gra
    }else{
     assert.equal(rpcs,1);assert.equal(turns,1,'a terminal handoff result must not generate a follow-up customer reply');assert.equal(result.text,'');assert.equal(results.length,1);assert.equal(results[0]!.isError,false);
     const serialized=JSON.stringify(results[0]!.result),status=mode==='success'?'committed':mode==='human-takeover'?'rejected':'unconfirmed';assert.ok(serialized.includes(status),serialized);
-    for(const privateValue of [run.request.runId,run.scope.controllerId,run.admission.question,input.summary])assert.equal(serialized.includes(privateValue),false);
+    for(const privateValue of [run.request.runId,run.scope.controllerId,run.admission.question])assert.equal(serialized.includes(privateValue),false);
     assert.equal((await f.call('read')).body.view.state.reception,mode==='human-takeover'?'human':'paused');
    }
    const audits=await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='request_handoff'").first<{n:number}>();assert.equal(audits!.n,mode==='success'||mode==='lost-response'?1:0);

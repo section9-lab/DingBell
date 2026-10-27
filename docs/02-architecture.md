@@ -1607,3 +1607,375 @@ AI 与人工复用原解密、店铺级请求预算、排队、单次 attempt、
 公共读接口和前端解码只额外接受受控 `ai-reply:UUID`，任意其他前缀仍拒绝。消息中心展示 AI 发送正文和状态，人工取消命令仍是原 UUID 契约，因此不向 AI 队列展示该按钮；人工接管及部署/店铺暂停可阻止尚未发起的 AI 请求。不新增公开 AI 发送入口、员工冒充字段或自动确认动作。
 
 部署必须显式同时开启 `AI_RECEPTION_ENABLED`、`AI_OUTBOUND_ENABLED`、`OUTBOUND_ENABLED` 和店铺权限，并满足已验证未过期 auth/reply 能力。示例配置保持关闭；新提示词虽可被配置选中，也不能绕过入口、每次生成、知识工具、意图准备及最终发送的开关复核。本地 native 验证中，原生 Flue、D1/DO、检索授权与共享发送器实际运行；模型/Ozon HTTP、嵌入与索引绑定采用合成适配；这不证明真实模型答案语义、Ozon 权限/窗口、云端容量或平台重试可行。真实外发、私有订单归属、跨账本预留审计、嵌入费用核对和 Cloud R2/部署仍待独立验收。
+
+### 7.32 R12-1：跨账本预留与支出的只读核对
+
+`readCompanyBudgetAudit` 独立比较公司三套预算及其原始账本，不调用模型、Flue 或发送器。AI 预留等于未关闭运行尚未领取的生成名额，加每个已领取但用量未知的生成预留，再加 `ai_knowledge_query` 的保守嵌入预留；关闭运行只去掉未领取名额，不能清除未知生成或嵌入预留。生成支出使用 `ai_generation.charged_micros`，运行次数按执行记录计数。翻译和问答测试分别累加仍 `held` 的原预留、已记录支出，已释放记录不再占款；测试运行次数包括已结清及已释放的已准入记录，翻译不额外定义运行次数配额。
+
+测试检索额度属于部署级 `reply_test_query_usage`，不是公司 `reply_test_budget` 的余额组成。`readQueryAllowanceAudit` 按指定 UTC 日期比较所有公司逐笔检索与部署额度；仅是内部部署管理函数，不开放公司路由，不能用公司局部合计与全局配额直接比较。向量/引用就绪、日期过期或生成结清均不证明嵌入实际费用，因此当前检索预留仍完整保留。
+
+预算汇总和逐笔合计在同一 SQL 语句中读取，避免并发结算时读取两个不同状态造成假差异。整数 `SUM` 后转十进制字符串再返回，差额使用 `BigInt`，保留超过 JS 安全整数范围的精确结果；SQLite 64 位整数溢出直接报告不可读取，不使用浮点近似或零值兜底。检测生成计数/序号缺口及遗留预算事务标记；报告 `balanced` 仅说明这些账面合计相等，不证明执行快照、供应商账单或正文事实有效。`canRelease` 与 `supplierCostsVerified` 始终为 false。
+
+新增 `GET /api/companies/:companyId/budget-audits/:kind/:budgetId`，kind 只允许 `ai`、`translation`、`reply-test`。仅当前已验证的公司所有者/管理员可读，要求规范编码的 `X-DingBell-Member-Id`，首次读取、财务语句及返回前都绑定当前会话与成员；撤权后的迟到读取不返回旧数据。无参数注入、写入或退款入口，不返回对话、输入、配置、价格或供应商密钥，不公开部署级检索汇总。差异不会自动改余额、暂停预算、改变新运行准入或授予旧执行新的权限。
+
+本批不增加依赖、迁移、UI 或云资源。待实施范围仍包括核对展示/告警、持久审计结果、供应商逐请求用量证据与不可变结算/释放、无人读取的翻译/测试运行修复，以及生产规模下的查询性能。依据：[D1 绑定/事务文档](https://developers.cloudflare.com/d1/worker-api/d1-database/)、[SQLite 聚合整数与溢出合同](https://www.sqlite.org/lang_aggfunc.html)。当前[官方 BGE-M3 页面](https://developers.cloudflare.com/workers-ai/models/bge-m3/)未给本项目逐请求实际费用的关联证据；不因取得向量或标价就推定原请求实际费用。
+
+后续研究发现[官方批处理 REST 示例](https://developers.cloudflare.com/workers-ai/features/batch-api/rest-api/)提供外部关联号及批次 token 用量，可作为后续证据路径候选；该接口与当前同步绑定的传输、输入和回执合同不同，示例的批次用量不能直接套用到现有逐次预留，不据此释放历史请求或新增第二次调用。
+
+2026-10-11 继续核对的另一个候选是 [AI Gateway Workers 绑定](https://developers.cloudflare.com/ai-gateway/usage/worker-binding-methods/)与[单条日志 API](https://developers.cloudflare.com/api/resources/ai_gateway/subresources/logs/methods/get/)：可按日志编号读取模型、供应商、用量和可选成本。`aiGatewayLogId` 的文档合同是最近一次请求的编号；并发下不能仅凭该可变属性认定它属于某个旧运行，必须另核原请求关联信息。当前已锁定 Workers 类型中 token/cost 字段可缺失，缺失不能按零值结算；自定义成本、缓存命中或示例数值也不能替代原请求真实用量。当前 BGE-M3 同步输出类型只有向量/shape 等字段，没有本项目可直接使用的逐次用量证据。
+
+若后续采用 Gateway，需验证请求关联、BGE-M3 的实际用量字段、失败/丢回执/迟到日志与保留期限；不为核对重发原嵌入。[日志文档](https://developers.cloudflare.com/ai-gateway/observability/logging/)区分关闭整个日志与仅关闭 payload：后者保留用量元数据而不保留原文/响应，但当前项目尚未验证该设置在原生绑定路径的实际效果。本次只有文档和锁定类型研究，未创建网关、开启日志、修改同步嵌入路径或释放历史费用。
+
+### 7.33 R12-2：分类完成与并发回执读取
+
+分类回执初读和当前 intake 的 live-read 不是一次原子读取。其他请求可能在二者之间提交分类并推进 control epoch，使 live-read 不再返回旧运行。此时只补读同一 `ai-classification:runId` 的已保存回执，再沿用原提交事务比较 origin、原运行与完整分类输入；一致请求返回同一原回执和当前状态，不一致仍拒绝。回执重放不恢复旧 epoch、不重新生成 nextRunId、不启动新运行或发送，也不替代后续回答的独立准入。
+
+固定顺序的真实 D1/DO 检查覆盖上述窗口及冲突分类，保存 RED 与修复证据。控制夹具迁移优化和提前清理只属于测试环境；不会向生产应用加入任意 SQL 执行入口。原业务测试期限与四路并发合同不变。
+
+### 7.34 R12-3：AI Gateway 嵌入用量关联与保守结算
+
+生产知识查询配置可选 `gatewayId`；未配置时保持原同步 Workers AI 路径和完整保守预留。配置后，每次嵌入关闭 Gateway 缓存，并写入 `dingbellPurpose=ai-knowledge`、原 `runId` 和 event ID。向量响应通过原维度/数量校验后，才把绑定提供的 `aiGatewayLogId` 写入查询。该可变绑定属性本身不作为费用证明；并发误关联会在后续运行元数据核对中失败并继续持有预留，不会把另一运行的费用记入本运行。
+
+迁移 `0045_ai_knowledge_gateway_log.sql` 只为既有查询增加可空日志编号、不可变 Gateway 用量、实际微美元和结算时间；历史行全部保持 null，不重写向量、依据、权限或原预留。日志编号及结算事实一旦写入不可替换，结算三字段必须同时存在，实际金额不得超过原预留。失败迁移回滚原表和触发器，原 no-delete 保护继续有效。
+
+`reconcileAiKnowledgeUsage` 只读取原查询和 `gateway.getLog()`，不重发嵌入。日志必须同时匹配不可变日志编号、`workers-ai`、固定 BGE-M3 模型、2xx 成功、未命中缓存、非自定义成本、原运行元数据、正整数输入 tokens、零输出 tokens 及冻结上限；`cost` 必须是有限非负 USD，并与原 token 数和冻结单价一致。字段缺失、日志尚未可见、价格不符、失败/缓存/自定义费用或任一关联冲突都返回未确认，完整预留保持不变。
+
+通过校验后，实际微美元仍按冻结单价与 tokens 向上取整。一个 D1 批次把原嵌入预留从预算 `reserved_micros` 移到 `spent_micros`，保存规范用量证据并清除事务标记；并发核对最多一个写入者，重放返回已结算而不重复扣费。差于保守上限的部分随本次可信结算释放，但 `supplierCostsVerified` 与 `canRelease` 仍为 false：Gateway 日志是逐请求提供商证据，不是最终发票/账单对账，也不授权释放其他未知费用。
+
+预算审计相应把未结算查询计为 embedding reserved，把已结算金额计入支出，并检查结算字段是否成组。现有 AI 修复游标在运行关闭后仍会为有日志编号但未结算的查询每五分钟保留核对机会；scheduled Worker 同时观察原生成与 Gateway 用量，因此不依赖管理员打开审计页面。无日志编号的旧查询和未配置 Gateway 的查询不会被猜测释放。
+
+本地验证只使用合成 Gateway 日志与真实 D1，不证明 Cloudflare 日志可见延迟、保留期、BGE-M3 真实 token/cost 形状、生产 Gateway 的 payload 关闭配置或最终供应商发票。生产启用前仍须用无客户正文的受控请求逐项验收；日志和账单不一致时保持待核对。翻译/问答测试的无人读取修复由下一节接续；发票级对账、展示/告警和生产查询性能仍属于 R12 后续范围。
+
+### 7.35 R12-4：翻译与问答测试的持久费用修复
+
+迁移 `0046_usage_repair.sql` 只为 `reply_preview_run` 和 `reply_test_run` 增加可空修复时间、租约 token 及索引；已有财务行、原回执、结算字段、外键和不可变触发器不重建。旧 held 运行默认立即进入待核对集合，已结算/已释放行不领取。正常的前台结算或可信零请求释放会同时清除修复游标，不留下无效后台工作。
+
+每分钟 scheduled Worker 分别最多领取 25 条翻译和 25 条问答测试记录，租约 60 秒，每组最多 5 条并行、单条观察上限 3 秒。未结清项移到五分钟后再查，使较新的 held 记录不会被最早的永久未知费用饿死；结清项停止排期。租约只负责公平调度，不授予模型调用、结果读取权限或退款权。
+
+后台修复不调用 prepare/dispatch，也不恢复丢失回执。只有 D1 原回执、原 native uid 和匹配的不可变 DO 账本同时存在，才观察原执行；完整且明确报告的四类用量按原冻结价格进入既有幂等结算。员工 session、成员或店铺查看权限后来失效不抹掉已经发生的供应商成本，后台也不会因此展示原文、译文、问题或回答。receipt 缺失、实例/账本不匹配、调用异常、pending、用量缺失或不合法均继续 held。
+
+自动释放采用更严格分支：原回执读取必须明确返回失败，同一账本必须匹配且 HTTP 计数为零，再由原 Durable Object 的 close 方法生成永久关闭证明并调用既有释放事务。临时读取错误、仅仅找不到实例、无回执或已有一次 HTTP 都不是零请求证据。并发 Cron/前台读取通过领取租约和原结算条件最多记账或释放一次；失败修复只延后，不重发供应商请求。
+
+本地测试使用合成 Flue runtime 与真实 D1，覆盖无人读取、原 session 删除、pending 重排、并发修复、可信零请求释放、未知请求保留及 0046 失败回滚/历史保护。它不替代真实 NVIDIA 用量、供应商账单、云端 Cron 延迟或大规模积压验收。
+
+### 7.36 R12-5：持久账本核对状态与受限告警
+
+迁移 `0047_budget_reconciliation.sql` 新增不含业务正文的 `budget_reconciliation_state`。迁移为已有三类公司预算建立待核对状态，并通过三个预算插入触发器把新预算加入队列；状态不能删除。每条状态只保存公司、预算类型/编号、下一次检查、租约、规范化总额快照、连续差异/失败次数与通用错误码，不保存翻译原文、问题、回答、消息、用户或供应商 payload。
+
+scheduled Worker 每轮按 `next_due_at/公司/类型/预算` 稳定排序领取最多 25 条，租约 60 秒并以五路并发执行纯 D1 算术核对。正常结果每十五分钟复核，差异每五分钟复核；旧到期项始终排在已后移的条目前，避免单一异常预算饿死队列。异常只保存 `AUDIT_UNAVAILABLE` 和时间，不持久化数据库异常文本；上一份可信快照继续保留。连续差异计数在恢复一致后清零，首次差异与持续差异可以在界面中区分。
+
+该任务调用无成员身份的内部算术边界，但它只读原预算和逐笔账本，并只能更新监控状态；不能 prepare、dispatch、settle、close、退款或释放预留。管理 API 仍在读取前后核对当前已验证 session、公司成员和 owner/admin 角色，并把实时同语句快照与后台状态一起返回；普通成员、跨公司和已替换成员不可读取。公司设置页只为当前预算展示账本/明细总额、精确差额、嵌入关联额、后台时间及持续异常/后台失败告警。
+
+“账本一致”只表示本地明细算术与本地预算投影一致。界面和 API 继续固定 `supplierCostsVerified=false`、`canRelease=false`，不把状态快照当供应商发票，也不据此自动修钱。当前告警是受限页面内的持续状态，不包含邮件、Webhook 或跨租户汇总；真实 Gateway/供应商发票、通知去重/恢复通知以及生产规模 Cron 与查询性能仍需后续验收。
+
+### 7.37 R12-6：公司核对汇总、退避与积压边界
+
+管理员可通过 `GET /api/companies/:companyId/budget-audits` 读取本公司的持久核对汇总。接口要求规范编码的当前成员头，并在批量读取前、SQL 内及返回前复核已验证 session 与 owner/admin 角色；普通成员、跨公司和被替换成员仍得到不可枚举的 404。响应只给 tracked/pending/balanced/mismatch/unavailable/alerting 数量和最多 50 条待首次核对、差异或后台失败状态，不返回财务 payload、客户内容或跨公司统计。列表超过 50 条明确 `truncated=true`，不能把截断列表当作全部异常。
+
+公司设置的 AI 接待预算页增加三类预算汇总卡，因此尚无独立管理页面的翻译预算异常也可被公司管理员看到。卡片区分待首次核对、首次差异、持续差异和后台不可用，显示下一次计划时间，并继续说明本地一致不是供应商发票。单预算实时核对仍独立展示精确金额；汇总状态不能授权改账或释放。
+
+连续差异和连续后台失败采用 5 分钟起、按次数翻倍、最多 1 小时的退避；成功但仍有差异使用差异计数，读取失败使用独立失败计数，恢复成功后失败计数清零，恢复平衡后差异计数清零。领取仍按到期时间和稳定作用域排序，每轮最多 25 条；本地 1,000 条合成积压检查确认相邻批次不重复、汇总列表有界，并确认到期索引和公司主键索引被查询计划采用。这是本地查询形状证据，不是多租户生产负载或 Cloudflare Cron 延迟验收。
+
+### 7.38 R09-1：转人工跟进要求的受限展示
+
+现有 `request_handoff` 回执已经不可变保存模型提出的原因、摘要和最多八项 `neededInformation`。本增量不再创建第二份客户资料表，而是从 D1 投影读取最新原回执，规范解析后形成固定用途 `human_follow_up`、固定状态 `requirements_only` 的跟进简报。该状态明确表示“建议后续确认哪些信息”，不表示消费者已经提供值，也不表示退款、改址、取消、补发或任何平台动作已经完成。
+
+`GET /api/companies/:companyId/conversations/:id/handoff-brief` 是纯读取入口；不要求或接受正文、字段值、运行编号或业务动作参数，不调用模型、控制器或平台。读取前后重新核对当前验证 session、公司成员和店铺访问权，并绑定同一控制目录；撤权、跨公司、目录变化或损坏投影均不返回历史摘要。公开 DTO 只包含原运行编号、固定用途/收集状态、受限原因、摘要、建议确认项、投影序号、时间和 `open/resolved/superseded` 状态。
+
+消息中心在当前处理区展示该简报，清楚标注仅收集本次咨询必要信息。刷新只 GET 原投影；人工命令成功后使简报查询失效并重读，不重放 AI 工具。当前没有新增让客服录入结构化客户值的表单，也没有定义手机号、地址、证件或支付资料字段，更没有自动把消费者消息解析为已收集值。R09 后续必须先确认字段、目的、保留期和可见角色，再实现值级持久化、修订/撤回和处理闭环；本节只交付安全的人工跟进要求入口。
+
+### 7.39 R09-2：人工核对回执
+
+迁移 `0048_handoff_follow_up_review.sql` 新增最小化、不可更新的 `handoff_follow_up_review`。每个控制器/AI 运行最多一条回执，只保存源 handoff 序号、幂等命令号、执行核对的用户/成员、显示名和时间；不保存消费者字段值、消息正文、订单号、联系方式或平台动作结果。会话按既有删除策略清除时回执随控制目录级联删除，不能单独修改既有记录。
+
+`POST …/handoff-reviews` 只接受 UUID 命令号、固定动作 `acknowledge_requirements`、原运行号和预期投影序号。成员编号只能来自规范请求头。写入语句再次核对当前 session、邮箱验证、公司成员、店铺授权、源回执、最新 AI 边界和会话未解决状态；迁移级插入守卫独立复核源事件、当前成员资格及没有更晚 AI 边界。撤权、成员替换、运行/序号变化和已被后续 AI 取代均不能写入。
+
+相同成员使用同一命令号重放时得到同一回执；并发重复最多写一行。响应丢失后，页面保留命令号重试，或通过只读简报恢复已持久化结果。其他命令号不能把已有核对据为己有。公开回执固定返回 `customerDataCollected=false` 与 `businessActionCompleted=false`；“已核对”只说明员工看过跟进要求，不说明消费者提供资料，也不完成会话或任何 Ozon 操作。按钮只在当前开放、未取代且未核对的简报出现。
+
+这仍不是值级资料收集。允许字段、用途、保留期、修订/撤回和人工业务完成证据尚未定义，因此 R09 不整项关闭。
+
+### 7.40 R09-3：不复制正文的跟进项证据与修订
+
+迁移 `0049_handoff_follow_up_items.sql` 新增仅追加的 `handoff_follow_up_item_event`。每个 handoff 要求按原数组下标维护独立 revision，状态仅可为 `pending/evidence_linked/not_required/unavailable`。`evidence_linked` 只保存同会话消费者后续入站消息的内部编号；正文、附件、联系方式、订单号和模型解析值均不复制。证据消息删除时关联事件按既有消息删除边界级联，整段会话删除时全部跟随控制目录清除。
+
+`POST …/handoff-items` 只接受固定动作、幂等命令号、原运行/序号、要求下标、预期 revision、受限状态及可选消息编号。数据库守卫和最终写语句同时要求：源事件是当前 handoff、下标确实存在、会话开放且未进入新 AI 边界、操作者仍有当前 session/成员/店铺权限；证据必须是同一会话中、原 AI 输入 revision 之后追加的 `Customer/inbound` 消息。旧消息、出站消息、其他会话、任意值字段和伪造 revision 不能写入。
+
+事件不可更新；改为无需收集、暂未提供或撤回标记都会追加新 revision，不覆盖历史。相同命令并发/重放返回同一事件，其他载荷复用命令号冲突。页面只从当前已显示消息中选择证据，服务端不信任该列表并独立复核。公开响应固定 `customerDataCopied=false`、`businessActionCompleted=false`；消息关联只证明员工选择了某条后续消费者消息，不验证正文事实、订单归属、身份或业务动作。
+
+该设计完成了人工侧最小化证据链接、修订/撤回和刷新恢复，但 AI 的 `neededInformation` 目前仍是受长度限制的自由文本。允许需求类型、敏感要求拒绝规则和产品留存值尚未确认，因此不能把 R09 标为整包完成，也不能向模型开放订单、地址、电话、证件或支付资料的结构化收集。
+
+### 7.41 R09-4：允许类型、留存和人工处理闭环
+
+新启动的 Flue `request_handoff` 工具不再接受自由文本摘要或字段名；摘要由应用按受限原因生成。模型只能从 `product_model`、`issue_description`、`desired_resolution`、`usage_context`、`photo_or_video` 五种非身份、非支付类型中选择，最多五项且不得重复；工具在持久回执中写入 `schemaVersion=2`。订单编号、地址、电话、邮箱、身份文件、凭据、支付信息和任意自定义字段均不在 schema 中；工具说明同时明确禁止，但最终安全边界是 schema 拒绝而不是依赖模型服从。既有冻结 `promptVersion` 文本不在本增量中静默改写。
+
+部署前已经存在的自由文本 handoff 回执继续按原 `AiReceipt` 合同读取，公开为 `legacy_read_only/legacy_unspecified`；它们不能新增逐项证据或处置事件。这样保留历史审计和升级兼容，又不会让旧自由文本成为绕过新白名单的写入口。系统超时、回答审核和回复准备失败产生的新 handoff 也统一写 v2；无消费者资料需要时使用空要求列表。
+
+R09 的资料处理采用“引用而不复制”作为最终首版字段策略：五种类型没有独立 value 列，员工只能关联原输入 revision 之后的消费者入站消息编号，或记录无需收集/暂未提供。用途固定为 `human_follow_up`，可见角色固定为当前已验证、且仍有该店铺访问权的公司成员。留存不设第二套期限：核对和逐项事件跟随源会话/消息生命周期；证据消息或会话按后续统一删除流程移除时关联记录级联清除。R20 仍负责全产品正式时间期限与删除作业，但 R09 不再阻塞于一个独立且可能漂移的保留值。
+
+人工流程状态由持久事实派生：尚未核对或仍有 pending 项为 `pending`；员工核对且每项均有处置后为 `ready_for_human_decision`；后续 AI 边界为 `superseded`；人工使用既有会话 `resolve` 命令后为 `closed`。就绪不自动解决会话、不发送消息、不调用 Ozon，也不把 resolve 解释为退款、改址、取消或其他业务动作完成；公开 DTO 始终固定 `businessActionCompleted=false` 和 `customerDataCopied=false`。
+
+至此 R09 在本地首版范围完成：受控工具、用途、允许类型、持久证据、刷新/丢回执/并发重放、修订/撤回、成员替换/撤权、人工就绪与关闭语义、敏感最小化和删除绑定均有确定合同。真实模型是否在俄语场景正确选择类型仍属于 R11，真实平台业务动作本来不在本工具权限内，正式全产品留存期限与删除执行属于 R20；这些边界不重新打开 R09。
+
+### 7.42 R14-1：内容最小化的会话操作日志
+
+新增 `GET /api/companies/:companyId/conversations/:id/activity`，从不可变 `conversation_control_event` 投影读取控制历史。首批覆盖认领、接管、解决/重开、工作状态、转交、内部备注存在、人工/AI 回复提交、取消、AI 启动/恢复/等待/分类/派发停止、转人工和消费者输入事件。事件按控制 sequence 倒序分页，首读冻结当前 sequence；cursor 绑定公司、会话、控制器、当前成员和快照，后续新事件不能插入旧分页，成员替换不能继承旧 cursor。
+
+接口在查询前、SQL 内和返回前核对当前验证 session、公司成员和店铺访问权，并校验每份持久 receipt 与事件 action、command、sequence 一致。公开 DTO 只返回事件类别、动作、时间、操作者当前存在/已移除状态、操作后的控制状态和可选发送投影；不返回消息正文、内部备注、回复正文、翻译、模型输入、完整 receipt、供应商 payload 或原始错误。发送投影明确区分人工/AI 来源及 queued/sending/sent/failed/unknown/skipped/canceled，并仅把持久 provider success 标为明确接受。
+
+消息中心新增“操作日志”对话框，显示有界分页和当前投影。平台原文仍在原消息区域，不复制到操作日志；内部备注正文仍在独立受限入口。该增量建立 R14 的控制事件骨架，但尚未完成按时间/店铺/渠道/阶段/负责人/接待方式/发送结果/策略版本筛选，也未把 AI 草稿、译文、外发尝试历史和平台原始消息合并成完整业务时间线，因此 R14 仍为进行中。
+
+### 7.43 R14-2：事件类别、动作与时间范围筛选
+
+操作日志 API 增加可选 `category/action/from/to`。类别只能是全部、人工、AI/系统、消费者事件；动作必须来自控制事件白名单；时间使用非负毫秒并要求 `from < to`，采用 `[from,to)`。所有筛选值写入 v2 cursor，换筛选条件重放旧 cursor 明确返回无效请求，不能把另一范围的分页位置误用于当前结果。
+
+SQL 在 limit 前应用类别、动作和时间条件，仍受冻结控制 sequence 限制。前端首批开放类别选择；动作和时间合同先供后续公司日志页复用。日志条目增加仅布尔型关联记录标志，区分平台消息、内部备注、AI 草稿、翻译确认和回复意图的存在，不返回这些记录的正文。AI 草稿标志只在持久 `ai_answer` 与原 handoff 运行关联时成立，不能从模型措辞猜测。
+
+该增量完成每会话事件类别/动作/时间过滤基础，仍没有公司级店铺、渠道、业务阶段、负责人、接待方式、发送结果与策略版本组合筛选；R14 继续进行中。
+
+### 7.44 R14-3：公司级会话日志与组合筛选
+
+新增 `GET /api/companies/:companyId/conversation-activities`，跨当前成员有权店铺读取控制事件。接口支持店铺、事件类别、动作、半开时间范围、业务阶段、当前负责人、当前接待方式、当前会话状态、发送结果、策略 ID/修订和渠道组合筛选；当前数据模型只有 Ozon 私聊，因此渠道唯一合法值为 `private`，不伪造未接入渠道。
+
+公司分页使用 `conversation_control_event.rowid` 冻结首读快照，再按 `projected_at/controller_id/sequence` 稳定倒序翻页。Cursor 固定全部筛选、成员及授权店铺集合 SHA-256；授权店铺增加或撤销后，旧 cursor 失效，避免新授权记录插入旧分页或撤权后继续翻页。每次读取前后都重读有效 session、已验证用户、公司成员和完整授权店铺集合；SQL 本身也逐事件应用 `storeAccess`。普通成员看不到未授权店铺，撤销全部店铺权后得到空结果而不是其它店铺元数据。
+
+业务阶段和策略版本只从已持久 `ai_execution.payload.run.admission` 读取；没有关联运行的人工事件不会被猜测归类。发送结果只来自持久 `send_intent.state`。负责人、接待方式和会话状态明确筛选当前 `conversation_control` 状态，不声称它们是事件发生时的状态；事件发生后的状态仍由每行已校验 receipt 的 `appliedState` 表达。
+
+消息中心增加“公司日志”对话框，提供授权店铺、类别、阶段、本人/未分配负责人、接待方式、会话状态、发送结果及策略筛选，并可回到对应会话。响应继续只返回内容最小化事件、店铺名和平台会话 ID，不复制正文或供应商数据。R14 尚缺平台原始消息、AI 草稿/译文内容入口和完整外发尝试历史的统一时间线。
+
+### 7.45 R14-4：冻结的完整业务时间线与 AI 运行结果
+
+新增 `GET /api/companies/:companyId/conversations/:id/timeline`，在同一倒序时间轴明确区分六类来源：平台原始消息、不可变控制动作、AI 草稿、人工回复翻译预览、真实外发意图和平台发送回执。平台消息显示源记录正文；AI 草稿显示已持久答案和知识依据的文档标题/修订，不返回 citation 正文、模型提示词或内部路由；翻译显示原文、已确认译文和费用状态；外发意图显示实际确认发送的正文；平台回执只在 `send_attempt.finished_at` 已进入快照时出现，并区分明确接受、失败和未知，不把 HTTP 尝试或排队冒充送达。内部备注仍只显示动作存在，正文留在原受限备注入口。
+
+首读同时冻结控制 sequence、消息 append sequence、AI 答案/翻译/发送意图/发送尝试 rowid 和 `snapshotAt`。六路来源各自在 SQL 中应用快照与翻页边界，合并后按 `occurredAt/id` 稳定排序；后续新增消息和完成回执不会插入旧分页。发送尝试在快照时尚未完成时只显示当时可证明的 queued/sending，不使用快照后的完成状态倒灌历史。每页读取前后复核当前会话、成员和店铺权限。
+
+R14 三类 cursor 均升级为以服务端身份 Secret 执行且绑定当前数据库 session ID 的 HMAC-SHA-256 签名；篡改快照、筛选、边界或签名会被拒绝。公司 cursor 继续额外绑定授权店铺集合哈希，跨 session、成员替换和授权集合变化均不能续页。
+
+控制活动增加结构化 `aiRun` 投影和公司级 `aiResult` 筛选。结果固定为 `open/drafted/reply_submitted/handoff/completed/failed/aborted/unconfirmed/closed_without_output`，只从持久 AI execution、answer、reply intent、handoff 和 closure 推导；业务阶段、策略 ID/修订同样只读 admission 证据。公司页面补齐动作、精确毫秒时间、指定负责人及 AI 运行结果筛选；当前唯一渠道仍为 `private`。
+
+消息中心新增“业务时间线”入口。正文直接读取原业务表，不新增日志正文副本；公司日志继续无正文，只负责筛选并跳转会话。至此 7.1 的时间、店铺、渠道、阶段、负责人、接待方式、状态、发送结果、策略版本和 AI 运行结果过滤，以及 7.2 的六类时间线区分均已落地，R14 本地首版完成。
+
+### 7.46 R15-1：冻结的会话汇总 CSV
+
+新增经理专用 `POST /api/companies/:companyId/exports/csv`，首批只接受 `kind=conversations`，范围固定为全部当前筛选、当前页 ID 或明确选择 ID。筛选合同复用消息中心的店铺、队列、工作状态和精确会话/订单查询；页/选择范围最多 100 个不重复会话，服务器重新应用筛选与当前权限，任一 ID 已移出范围则整体返回冲突，不静默少导。
+
+会话汇总由一条 D1 statement 同时取得当前 owner/admin、公司时区、`snapshotAt` 和最多 5,001 个候选，避免查询间筛选漂移。首版本地同步下载上限为 5,000 行和 8 MiB；超过任一上限明确要求后续异步导出，不截断。字段包括店铺、会话/渠道/平台引用、最新业务阶段、当前负责人和工作状态、平台状态、创建/最近消息/解决时间、人工与 AI 明确回复数、最近转人工原因及未知发送数。只有 `send_intent.state=sent` 计入明确回复，unknown 单列。
+
+CSV 固定 UTF-8 BOM、CRLF 和 `@json2csv/whatwg@7.0.8` 的规范引号/换行转义。所有字符串在不改写原数据库值的前提下先以 NFKC 副本检测；跳过前导空白、控制字符和常见不可见字符后若以 `= + - @`（含全角变体）开头，则只在导出单元格前增加单引号。该防护覆盖普通文本、名称和标识，不依赖字段被认为“可信”。
+
+迁移 0050 新增无正文 `conversation_export_audit`，在文件生成后再次核对当前 session、验证邮箱、原成员和 owner/admin 权限才写入；记录冻结筛选、选择 ID、筛选哈希、导出人快照、行数、字节数、文件 SHA-256 和时间。actor ID 不设删除外键，成员移除不销毁既有导出审计；公司删除则级联清理。响应只有审计写入成功才返回 CSV。
+
+消息中心为 owner/admin 提供“全部筛选结果、当前页、当前会话”三个入口；普通成员默认无 export 权限。该增量完成会话汇总的小型同步导出，消息明细 CSV 尚未实现，R15 继续进行中；R16 仍负责超过本地边界的冻结快照、私有 R2 和导出中心。
+
+### 7.47 R15-2：消息明细 CSV 与 R15 收口
+
+同一严格请求合同新增 `kind=messages`，三种范围与会话汇总完全一致。单条 D1 statement 先冻结有权会话集合，再合并两类明细：平台原始消息和共享发送管道的实际 outbound intent。平台记录导出原始内容数组、方向、发送者、平台消息编号、发生/接收时间；outbound 记录导出人工/AI 来源、翻译前原文、已确认译文、最终发送正文、发送/回执时间、状态、HTTP 状态和平台明确接受证据。
+
+AI outbound 额外只导出持久 admission 的语言、策略 ID/修订，以及 citation 的 `documentId@revision#chunkId` 版本标识；不导出 citation 正文、提示词、知识正文、供应商 payload 或原始错误。内部备注默认不导出。平台消息与 outbound intent 可能描述同一次业务沟通，但 `record_type` 保留来源差异，不通过不可靠正文/时间猜测合并。
+
+消息明细复用 5,000 行/8 MiB 边界、UTF-8 BOM、CRLF、WHATWG 转义、全字段公式防护和 0050 审计。空会话仍能生成只有表头的有效文件；页/选择范围按会话数验证，不能因当前无消息把合法会话误判越权。消息中心的导出菜单分别提供会话汇总和消息明细的全部筛选、当前页、当前会话入口。
+
+至此 R15 的两类 CSV、三种范围、冻结筛选、权限复核、中俄文本、换行/引号和公式注入防护均已落地，R15 本地首版完成。超过同步边界的 100,000 行任务、私有 R2、生成/下载阶段重新验权、过期和恢复继续属于 R16。
+
+### 7.48 R16-1：导出作业数据库与私有 R2 适配
+
+迁移 0051 新增 `export_job` 与 `export_row`。作业冻结 kind、范围、筛选、选择 ID、创建时全部有权店铺、筛选哈希、请求成员快照、`snapshotAt`、过期时间和状态修订；临时行以 `(job_id,ordinal)` 唯一并保存当时生成所需的有界 JSON payload。行号上限 100,000，payload 单行上限 1 MiB。公司删除级联作业，作业删除级联临时行；请求成员不设删除外键，离职不能抹除历史主体。
+
+状态固定为 `queued → snapshotting → generating → ready`，另有 failed/canceled/expired。后台以短租约 token 领取，追加快照行、进入生成、完成或失败均比较原租约和当前状态；重复领取、旧 worker 和错序完成不能覆盖新状态。只有数据库中恰有声明数量的临时行才能进入 generating。ready 必须同时具备对象键、行数、字节数和 SHA-256；进入 ready 后删除 D1 临时行。过期先枚举 ready 对象，R2 删除成功后才以 revision CAS 清除对象引用并标记 expired。
+
+新增可选 `EXPORTS_BUCKET` 类型及 R2 适配器。对象键固定为 `exports/{job UUID}/{sha256}.csv`，不在 key 暴露公司或会话标识；put 前拒绝同 key 已存在对象，put 后以 `head` 正面核对字节数和自定义 `schemaVersion/jobId/organizationId/sha256`，不匹配则删除并保持未确认。读取同时复核 key、大小和全部元数据；bucket 缺失时明确不可用，不退回公开 URL 或 D1 blob。账号实际返回 R2 未启用；用户明确拒绝开通和支付，因此默认部署配置不声明 R2 binding，也不创建云资源。将来只有运营者主动提供私有对象存储时才增加 `EXPORTS_BUCKET`；适配器保留为可选能力，不影响免费配置构建运行。
+
+创建作业只允许当前 owner/admin，并在写入同一时点重新比较完整店铺集合；读取要求当前 owner/admin 且冻结店铺仍存在。首版保留期参数限制在 1 分钟至 7 天，默认 24 小时。该增量完成数据库状态机和可选 R2 适配，但尚未接入快照分批生成、Queue/DLQ、导出中心、授权下载、取消/重试和 100,000 行云端验证，因此 R16 继续进行中。免费配置继续使用 R15 的 5,000 行/8 MiB 同步导出；不以 D1、KV 或 Durable Object 冒充大文件对象存储。
+
+### 7.49 R17：基础分析与公开指标口径
+
+新增管理者只读 `GET /api/companies/:companyId/analytics/overview`。接口接受可选 `storeId` 及公司本地日期 `fromDate/toDate`，日期范围固定为 `[from,to)`；缺省为公司时区当天，最长 366 个日历日。IANA 时区边界在服务端换算，春季/秋季 DST 日分别允许 23/25 小时。读取前取得时区，最终统计语句再次验证同一时区、owner/admin session 和完整店铺授权；设置或权限在两步间变化时失败关闭。
+
+全部指标在一条 D1 statement 的同一 `snapshotAt` 计算。新增会话使用平台创建时间，不使用导入时间；已解决使用期间持久 resolve 事件并同时给出去重会话数和事件数；当前积压只统计当前 open + needs_reply，是存量而不与期间流量相加。首次响应 cohort 是期间发生全生命周期首条平台入站的会话，响应只接受平台 outbound 消息或 sent attempt 的确认时间，内部备注、草稿、queued/failed/unknown 不算；未响应会话单列，平均/P50/P95 只计算非负已响应时长。
+
+转人工分母是期间创建 AI reception execution 的去重会话，分子是其中期间有持久 `request_handoff` 控制事件的去重会话；回复测试、翻译和模型建议文字不算实际转人工。发送失败分母只含期间完成且明确 sent/failed 的 attempt；failed 为分子，unknown 与 sending 单列。所有比例在分母为零时返回 null，页面展示“无数据”，不得显示 0%。
+
+AI 用量按接待生成/嵌入、翻译预览、问答测试生成/嵌入五类持久 provider claim 分列。只汇总已记录的 input/output/cache tokens，不推断缺失 token；费用只汇总持久冻结估算，分别公开 cost-known/cost-unknown claim，并固定 `supplierCostsVerified=false`。Gateway、内部估算和释放零费用都不冒充供应商发票。
+
+响应内嵌 `analytics-v1` 数据字典，逐指标公开分子、分母、排除项、时区、端点和零分母规则。公司设置页展示新增、解决、当前积压、首次响应、转人工、发送失败和 AI 用量，并可展开完整口径。接口和日志不包含客户正文、提示词、供应商 payload 或错误文本。
+
+### 7.50 R18-1：独立自部署与开源交付骨架
+
+新增贡献、自部署、升级/回滚和故障排查文档。干净检出路径固定 Node 24.14.0、`npm ci`、本地 D1 迁移、全套检查和显式 `.dev.vars`；云部署由部署者自己的 Cloudflare/D1、邮件、Ozon 和可选模型账号组成，不存在 DingBell 商业账号、中心许可证检查或必需遥测主机。所有模型、翻译、知识索引、AI 接待和外发开关继续默认 false；当前默认 Wrangler 无 R2 binding。
+
+升级文档固定 D1 迁移先于匹配 Worker、Durable Object tag 只追加、外部开关先关闭、未知请求不重放，以及 D1/DO/Workflow/R2/密钥必须作为整体恢复范围。旧 Worker 只有在理解新版已持久状态时才能回滚；不可删除审计/财务事实或用 ad-hoc DROP 冒充回退。
+
+`THIRD_PARTY_NOTICES.md` 记录直接运行依赖、字体、图标和 Figma/Obra 来源。`license-inventory.mjs` 从 lockfile v3 核对 905 个锁定包的版本、integrity 和 license metadata，并显式列出 LGPL/MPL/CC-BY/Python 等待发布复核表达式，可生成机器清单到忽略的 `dist/compliance`。这只是工程清单，不替代许可证全文、NOTICE 和法律复核。
+
+`check-release.mjs` 核对交付文档、Node 版本、安全忽略项、可选 R2 未绑定及六个外部功能默认关闭。DingBell 自身许可证 D-04 仍未由用户确认，因此仓库不添加 LICENSE、保持 `private:true`，release check 明确失败为 `project license pending owner decision`。不能把文档骨架或第三方 metadata 完整误报为开源发布完成。
+
+### 7.51 R20-1：数据治理现状与删除失败关闭
+
+新增 manager-only `GET /api/companies/:companyId/data-governance` 和公司设置页状态面板。它是无正文的治理能力清单，不是删除命令。响应固定 `governance-v1`，将架构建议的业务副本 90 天、审计 180 天、原始回调/AI 原始轨迹 7 天、导出 24 小时明确标为 `pending_operator_approval`，并固定 `automaticDeletionEnabled=false`；D-06、法务/审计期限、备份和恢复合同批准前不运行定时删除。
+
+资源矩阵逐项列出 D1 身份、会话、知识、AI 执行、财务、导出，控制 DO、Flue DO、Vectorize、可选 R2、未实现 SEARCH_DB 和备份。每项只公开是否含客户内容、当前 readiness 和必须取得的证据。完整公司删除固定 `available=false`、`accessDisablementImplemented=false`、`businessActionCompleted=false`；不能以 D1 部分 cascade、同步 CSV 不留服端文件、默认没有 R2，或某个 DO 的删除接口冒充全链路删除。
+
+内容边界固定声明应用内容 tracing 关闭、运维日志不保存客户正文、真实 AI Gateway payload 关闭状态仍为 `external_configuration_unverified`，且 `supplierInvoiceVerified=false`。新增源码门禁扫描全部生产 TS/TSX，拒绝 console 内容记录器和 Sentry/OpenTelemetry/New Relic/Datadog/Application Insights 依赖；HTTP 诱饵验证未知 query 值不会回显。该检查证明当前应用代码边界，不证明 Cloudflare 账号、Gateway、边缘日志或外部备份配置。
+
+删除编排尚未实现，因此没有新增危险的删除 API、没有停止公司访问、没有清理业务数据，也没有创建“完成凭据”。后续必须先实现跨资源不可逆状态机和访问禁用，再逐项验证恢复中断、后台任务不再生成数据以及备份到期。
+
+### 7.52 R19-1：技术用量与 AI 业务回复双口径
+
+`analytics-v1` 在同一 D1 statement 快照中增加 `businessUsage`。技术台账继续只汇总五类持久 provider claim、已报告 token、冻结估算费用和未知费用；不叠加 Flue 实时观测、Gateway 日志或预算汇总层。业务台账只把 `send_intent.schema_version=2` 且对应持久 `send_attempt.state=sent`、`finished_at` 位于区间内的唯一意图计为确认 AI 外发。
+
+人工 schema 1 的 sent 意图只报告排除数量；AI unknown 意图单列，queued/sending/failed、模型生成、草稿、工具提交和 HTTP 尝试都不计业务量。`send_intent` 的 `(controller_id,id)` 主键及 AI 固定 `ai-reply:{runId}` 身份防止重复成功回执叠加业务量。页面明确并列展示“确认 AI 外发业务量”和“AI 技术用量 claims”，避免把模型请求次数当作回复数。
+
+该增量仍固定 `supplierCostsVerified=false`。技术估算与业务发送可由持久记录复算，但真实供应商发票、Gateway 外部配置和账单差异尚未验收；因此 R19 继续依赖 R12，不能宣称费用最终核实。
+
+### 7.53 R21-1：全产品降级状态合同
+
+新增 manager-only `GET /api/companies/:companyId/degradation` 和公司设置页状态。读取只观察部署开关、经过严格解析的 Support 配置、当前生效预算的可用金额/运行次数及现有产品边界，不启动模型、不预留金额、不创建发送或导出任务，也不返回密钥或配置正文。
+
+新 AI execution 状态固定为 available/disabled/configuration_unavailable/budget_unavailable。只有总开关、模型/绑定/价格及当前完整运行金额和次数全部满足时才显示 available；其余状态固定 `newAiExecutions=false` 和 `onUnavailable=human_queue`。这不取消或退款已开始运行，既有运行仍按原账本结算。
+
+同一合同固定公开：当前授权下人工处理可用；同步 CSV 仍为 5,000 行/8 MiB；用户拒绝 R2 后大型异步对象存储导出不可用；unknown 发送 `automaticReplay=false` 且必须核对原证据；商业计费为 not_implemented。客户端 strict schema 拒绝服务器把 unknown 自动重放或扩大免费能力。
+
+联合回归实际覆盖预算/配置拒绝后返回人工队列且不重放 admitted run、公共恢复预算门禁、人工接待控制、同步导出以及 unknown 原契约。该增量建立本地降级矩阵，但真实供应商故障、生产并发最后额度、外部告警和真实平台 unknown 核对仍待 R12/最终试点，因此 R21 继续进行中。
+
+### 7.54 R22-1：D1 文件备份升级与恢复矩阵
+
+新增真实 SQLite 文件演练：先只应用 0000—0044，写入合成公司、成员、加密凭据版本、会话和客户消息，再关闭数据库并复制不可变 backup。升级副本应用 0045—当前迁移后逐字核对消息 JSON、凭据 ciphertext/key version/revision、新表和全部外键；原 backup 以只读旧 schema 打开且没有新版表，SHA-256 在读取前后不变；第二个恢复副本从同一 backup 重新应用新版迁移后仍只保留一份原消息。
+
+`test:upgrade-local` 将该演练与凭据 key ring 轮换、0012 带数据失败回滚及 0044 AI intent/attempt 带数据升级/失败回滚串行执行。旧 v1 key 保留时可读取旧 ciphertext，新 v2 只用于新写；移除仍被依赖的旧 key 必须失败，不把不可解密数据当作空凭据。全套只使用合成数据和 OS 临时目录。
+
+新增恢复证据矩阵，分别标记 D1、控制 DO、Flue DO、Workflow/Queue、Vectorize、默认无 R2、未实现 SEARCH_DB、秘密、外部平台及含已删除数据备份。恢复顺序固定先关闭外发/模型，再恢复秘密和 D1，然后恢复或重建其余资源，核对 unknown 发送与费用，最后先开放只读/人工路径。D1-only restore 明确不是完整恢复。
+
+本地 D1/密钥/迁移 16 项通过，但这不证明真实 D1 Time Travel/导出、Cloudflare DO 快照恢复、生产规模时长、Vectorize 重建、备份到期或批准的 RPO/RTO。R22 继续进行中。
+
+### 7.55 R23-1：确定性本地容量夹具
+
+新增 `test:capacity-local`。它在 OS 临时目录创建当前完整 SQLite schema，以固定算法生成 1 公司、3 店铺、10,000 会话、100,000 消息及 10,000 控制投影；内容仅为固定 synthetic fixture。事务完成后核对三表精确数量、全部 foreign keys、3,334 个 needs_reply 积压、10,000 个首入站 cohort，以及会话首屏恰好 51 个候选。
+
+EXPLAIN 必须显示默认公司会话首屏使用 `conversation_org_time_idx` covering index，否则脚本失败。脚本记录 seed、首屏、积压和首入站聚合的墙钟观察值及进程 RSS；默认只输出 JSON，`--write` 才写入忽略的 `dist/compliance`，临时数据库无论成功失败均删除。
+
+本机 Node 24.14.0 本次观察：seed 约 30.53 秒，51 条首屏约 0.23 ms，当前积压约 3.83 ms，10,000 会话/100,000 消息首入站聚合约 45.26 ms，RSS 约 49.5 MB；外键错误为零。数字只用于发现本地回归，不设置产品 SLA，也不能外推到 D1 串行执行、Workers CPU、网络、并发租户、队列公平性或生产地区。R23 的真实 10/50 条每秒、P95、100,000 行异步导出、长时间故障及依赖审计仍未完成。
+
+### 7.56 R06-1：旧知识向量清理状态机
+
+迁移 0052 新增 `knowledge_vector_cleanup`。候选必须是既非 `draft_revision` 又非 `active_revision` 的不可变历史修订，且 revision 的 index/published profile 与当前固定 profile 匹配；当前草稿或当前发布修订不能排队。恢复历史资料仍通过创建新 revision 完成，因此不会把已排队的旧 chunk ID 重新变为当前 ID。
+
+每个 chunk 的 draft/published 两个精确 SHA-256 vector ID 冻结在无正文 JSON 中，单任务最多 32 个 ID。主键按公司、文档、修订和 profile 去重；领取使用 claim token、60 秒租约、最多 20 次尝试及指数退避。Vectorize `deleteByIds` 返回 mutation 只进入 `confirming`，不能冒充已删除；后续 `getByIds` 必须确认所有冻结 ID 均不可见才进入 `succeeded`。旧 Worker、过期 token 或租约不能结算新状态，供应商异常只保存固定 `VECTOR_OPERATION_FAILED`，不复制 payload。
+
+删除范围仅是可重建的重复向量。D1 `knowledge_revision`、原始 source JSON、chunk 正文、哈希、发布记录与引用依据都不删除；并发检索仍必须经现有 D1 当前发布快照二次解析。因此该增量不启用 D-06 尚未批准的内容保留删除，也不宣称 Vectorize 全 namespace 清空。
+
+本地状态机/异常最小化 2 项、Vectorize primitive 4 项和 0052 原子迁移 1 项通过。Cron 已按显式 `KNOWLEDGE_VECTOR_CLEANUP_ENABLED=true` 接入，每轮最多扫描/领取 10 项；默认 false。尚缺批准的修订保留期限、真实 Vectorize 最终可见性、全量盘点及 R2 原文件，R06 继续进行中。
+
+### 7.57 R07-1：扩大双语检索语料与大目录夹具
+
+固定语料升级为 `dingbell-semantic-ru-zh-v2`：20 份纯虚构中俄资料、52 个问题、75 个真实 production chunker/query 输入。40 个可回答问题包含 OR26/OR26X、L5/L5 Pro 等近名资料、4 个跨语言查询及 2 个答案位于多 chunk 长手册末尾的查询；12 个困难负例明确缺少实时订单、库存、折扣或个人审批事实。Calibration/holdout 各固定 20 个正例和 6 个负例。
+
+计划哈希继续冻结 corpus、label、模型/profile、精确输入和评分设置；上限扩为 128 输入、64,000 UTF-8 bytes，单次模型批次仍不超过 16。缺行、重复 key、旧 dataset hash、错误 profile/model、维度、NaN、全零向量全部拒绝。报告保留每个误命中，`unsupportedAboveThreshold` 不等于回答错误率；`answerQuality` 固定 `not_evaluated`，相似度不能证明段落含有事实。
+
+另有不调用模型的 10,000 文档临时 SQLite 大目录夹具。它应用当前全部迁移、事务写入双语 synthetic documents/revisions，核对外键、首/中部 keyset 页各 21 条和查询计划使用 knowledge document/revision 索引，最后删除数据库。本机 Node 24.14.0 观察 seed 约 304 ms、首屏约 0.18 ms、中部语言筛选约 0.08 ms、RSS 约 46.7 MB；只用于固定夹具回归，不能外推 D1、Vectorize、Workers、并发或 SLA。
+
+本地评估/目录合同 8/8 通过，未发起真实模型调用。真实 BGE-M3、Vectorize approximate ranking、至少 200 例独立语料、俄语人工事实审核及云端大目录性能仍待完成，R07 继续进行中。
+
+### 7.58 R10-1：主动通知时间与发送前门禁合同
+
+新增不产生外发的纯调度合同。它只接受已通过现有 strict notification policy schema 的事件、延迟、到期、每日上限、静默时段和模板；公司 IANA 时区在计算时验证。静默时段同时覆盖同日和跨午夜区间，并按实际可观察本地分钟推进，因此 DST 春季缺失小时和秋季重复小时都不会提前发送。
+
+`dueAt` 与绝对 `expiresAt` 分开保存语义：静默期可延迟 due，但不得延长事件到期；若静默期结束已越过 expiry，则固定 `expiredBeforeDue=true`。模板只替换 `store_name/order_number/tracking_number` 三个声明变量，缺变量、额外字段、空值、超长值或非法 Unicode 全部拒绝。
+
+发送前门禁按顺序重验规则仍启用、published revision 未变化、源事件未取消、已到期但尚未过期及公司本地日发送次数未达上限，结果分别为固定原因或 `ready`。该函数只生成判断，不创建 send intent，也不会绕过统一发送管道；当前平台 `proactive_chat` 能力仍为 unknown 时不得据此外发。
+
+本地 4/4 覆盖跨午夜、同日静默、Europe/Berlin DST gap/fold、到期、模板字段、暂停、规则变化、取消、未到期、过期和每日上限。尚缺事件持久状态机、真实订单状态来源、延迟队列、取消接线及真实平台主动会话能力，R10 继续进行中。
+
+### 7.59 本地演示账号（仅 local D1）
+
+新增 `npm run demo:local`，用于在不配置真实邮件时查看已认证 UI。命令先应用本地迁移，再校验 `.dev.vars` 仅使用 `http://127.0.0.1:5173` 且存在至少 32 字符身份 secret；Wrangler 配置必须仍是 `dingbell-local-only`，执行参数固定含 `--local`，不存在 remote 分支。
+
+账号邮箱固定为不可投递的 `demo@dingbell.invalid`，密码首次运行随机生成并仅写入 git 忽略的 `.dev.vars.demo-account.json`（0600）；数据库保存 Better Auth 哈希而非明文。脚本以固定 local IDs 幂等创建一个已验证 owner 和一个演示公司，碰到同邮箱、slug、账号或成员身份冲突时事务失败，不接管其他本地身份。删除 credential 文件后重跑会轮换密码。
+
+该能力没有 HTTP seed 路由、默认共享密码或生产开关；不能指向远端 D1，不能替代 `/setup`、真实邮箱验证、邀请或 R03 的邮件生命周期验收。脚本语法、类型和差异检查通过，未替用户写入本地账号。
+
+### 7.60 多店铺平台选择与页面凭据配置
+
+店铺管理主操作改为通用“添加店铺”。第一步显示平台选择器；当前唯一可选项为 Ozon，并明确同一公司可重复添加多个卖家账号。选择 Ozon 后进入既有严格表单，填写店铺名称、1—32 位数字 Client ID 和 API Key。每个账号仍生成独立 store UUID，以 `(organization,platform,platform_store_id)` 阻止同公司重复连接，但不限制不同 Client ID 的多店铺。
+
+Ozon API Key 只从当前页面提交，经服务端 AES-256-GCM envelope 加密后写入 D1，响应、列表、详情、浏览器 storage 和日志均不回显。`.dev.vars` 仅保存独立的本地 envelope 主密钥，不保存 Ozon Client ID/API Key。更新凭据继续只接收新 API Key 并清空旧能力证据。
+
+桌面和空状态入口均进入相同平台选择流程；店铺详情页保留顶端添加按钮，可继续添加下一家。TypeScript、生产构建和差异检查通过。Playwright 店铺套件已同步新两步流程，但当前机器缺少对应 Chromium 1248 二进制，6 项均在 browser launch 前失败，不能记为 UI 通过。
+
+### 7.61 商品、FBS 订单独立只读视图与真实同步复验
+
+新增当前成员授权范围内的只读 commerce API：商品列表/详情与 FBS 包裹列表/详情均要求公司、有效 session、已验证邮箱及当前店铺访问权；列表使用绑定公司、店铺、筛选的严格游标，每页最多 50 项。DTO 仅投影白名单事实，不返回 D1 原始 JSON、消费者资料、地址、电话、凭据信封或供应商 payload。商品展示 Ozon ID、货号、SKU、详情状态、价格观察值和 FBO/FBS 库存存在标记；包裹展示订单/包裹编号、平台原始状态、追踪号、时间及商品快照。观察价格、库存和状态均不冒充实时承诺。
+
+新增 `/workspace/products` 与 `/workspace/orders`，导航分别显示“商品资料”和“FBS 订单”。商品支持店铺切换、分页、详情及知识导入边界提示；订单支持店铺切换、完整订单号精确筛选、分页、包裹详情和商品明细。FBS 页面明确只覆盖当前持久同步窗口，不表示完整历史订单账本，不包含 FBO、退货、财务结算或消费者归属证明。
+
+真实授权本地店铺复验发现 Ozon `/v4/posting/fbs/list` 已将商品价格改为 `{amount,currency}`，而 `/v3/posting/fbs/get` 仍返回平铺 `price/currency_code`。适配器现严格接受这两种端点各自的金额形状，继续拒绝指数、负数、数字金额、非法币种和缺字段对象。修复后会话、商品与 FBS 三个来源均完成真实只读同步且无来源错误；只记录数量/状态验证，不保存诊断响应。整个过程保持 `OUTBOUND_ENABLED=false`、`AI_RECEPTION_ENABLED=false` 和店铺 `outbound_enabled=0`，没有发送客户消息。
+
+### 7.62 会话日志独立入口
+
+R14 的公司级最小化日志此前只通过消息中心“公司日志”弹窗开放，侧栏“会话日志”仍是占位项。现新增 `/workspace/activity` 独立页面并启用导航，复用既有权限绑定、HMAC 游标和最小化投影。页面支持店铺、类别、动作、会话状态、接待方式和半开时间范围筛选，可分页打开对应会话。
+
+日志仍只记录控制事件；同步成功本身不伪造人工业务动作。页面不展示消息、备注、草稿、译文、供应商响应或 API Key 正文，且不会触发模型、订单变更或客户发送。当前没有控制事件时显示真实空状态，而不是用同步记录填充日志。
+
+### 7.63 商品图片只读同步与安全展示
+
+Ozon `/v3/product/info/list` 的 `primary_image`、`images` 和 `color_image` 进入商品详情白名单。服务端最多保留 20 个去重 URL，只接受无用户信息、密码、端口和 fragment 的 HTTPS `ozone.ru` 子域地址；任意其他主机、HTTP、超长 URL、非数组或超过数量上限均使整批响应失败，不将未知 URL 传给浏览器。`images360` 暂不导入。
+
+当前详情事实增加 `primaryImage/images`，无需迁移；旧事实缺字段时返回空图片集。商品列表显示主图缩略图，详情显示有界图库；加载采用 lazy/async 和 `referrerPolicy=no-referrer`，失败时显示本地图标占位，不自动代理、缓存或把图片写入 R2/D1 二进制。图片仍由 Ozon CDN 提供，不能证明永久可用。
+
+授权本地店铺重新执行商品只读同步后，380 项详情全部完成且首屏 50/50 有主图；随机首图 CDN 返回 `200 image/jpeg`。该刷新不调用消息发送、AI 或订单写接口。
+
+### 7.64 消息中心右侧商品预览
+
+消息中心的“商品与订单”侧栏原先只有消息携带 SKU 时才能匹配商品；真实只读数据中 26 条有上下文的消息仅 3 条携带 SKU，另 23 条只有订单号，因此多数右侧商品区显示“没有 SKU”。现有精确订单号已能唯一匹配 FBS orderId 时，服务端从采用的包裹快照取首项商品，并用同店铺精确 SKU 投影匹配唯一商品主记录；匹配不唯一时不选择缩略图。
+
+响应新增有界 `order.previewProduct`，只含 orderId、SKU、货号、名称、可选商品 ID 与已验证 Ozon CDN 主图。直接 SKU 商品也新增主图。页面以 64px 缩略图、商品名、货号/SKU和“查看商品资料”链接展示；没有图片使用本地占位。订单预览明确标注为首项预览，不声称订单只有一项或消费者归属已验证。
+
+真实本地数据复验：26 条上下文消息中 3 条直接商品匹配，10 条取得订单商品预览且 10/10 有缩略图；其余订单在当前 30 日 FBS 导入窗口中没有唯一匹配，不伪造商品。
+
+### 7.65 桌面侧栏图标折叠模式
+
+桌面侧栏由 `offcanvas` 改为 `icon` 折叠：收起后保留 3rem 宽窄栏和右侧边框，所有功能图标、当前项状态、公司切换、账号和退出入口仍可访问；功能全名、分组标题、品牌文字、公司详情和帮助文字只在展开时显示。功能图标在收起状态提供右侧 tooltip，边缘 rail 与顶部按钮均可重新展开。
+
+移动端继续使用完整 offcanvas sheet，不缩成无法触控的图标栏。该改动只影响导航布局，不改变路由、权限、同步或外发状态。
+
+### 7.66 侧栏账户菜单
+
+侧栏页脚不再永久展示独立退出按钮。账户入口改为圆形文字头像、用户名和账号邮箱；图标折叠状态只保留头像。点击账户入口后才打开菜单，菜单重复显示当前用户名和邮箱，并仅提供需要现有未保存内容确认流程的“退出登录”，不会把头像点击转换为页面 URL。Base UI 的 `DropdownMenuLabel` 严格放在 `DropdownMenuGroup` 内，避免打开菜单时触发缺少 `MenuGroupContext` 的运行时错误。头像由名称或邮箱本地生成首字母，不加载第三方头像资源。
+
+### 7.67 DingBell 客服猫品牌标识
+
+首版原创矢量客服猫采用暖白猫脸、猫耳、腮红、青色耳麦及紫色圆角底；因小尺寸细节偏多且视觉更像卡通贴纸，已由 7.68 的几何版本替代。React 内联组件用于登录、安装和工作区品牌位；同几何的静态 `/dingbell-logo.svg` 作为浏览器 SVG favicon。标识不依赖第三方图片、字体、模型运行或外部请求。
+
+### 7.68 几何扁平客服猫 Logo
+
+当前标识收敛为两色几何系统：靛蓝猫头同时构成对话气泡轮廓，薄荷青圆弧、耳罩和话筒构成客服耳机，只保留双眼及一个极简鼻口符号。移除圆角底板、粗黑描边、腮红和写实面部细节，在透明背景、32px 侧栏和 favicon 尺寸下保持清晰。品牌色固定为靛蓝 `#5B5CE2` 与薄荷青 `#55D6BE`，白色仅用于负形面部标记。
+
+### 7.69 消息中心信息降噪
+
+默认会话列表不再把平台会话 ID 当标题。单项仅展示店铺名、最近时间、最新消息发送方与两行预览、处理状态，以及必要的“我负责”或“未分配”提示；其他负责人名称保留为非视觉辅助信息，并在打开会话后的控制区管理。选中后的标题统一为“买家咨询”，来源行只显示店铺和平台。
+
+消息气泡保留发送方、原文和平台时间；导入时间及历史/增量来源移入时间 tooltip，平台消息 ID 与发送者 ID 不再进入默认气泡。右侧默认只展示商品/订单和店铺来源；平台会话 ID、原始类型、导入时间及同步明细折叠在“技术与同步信息”中。异常、暂停或断连仍在默认层级显式提示，不因降噪隐藏风险。
+
+### 7.70 订单商品关联诊断
+
+消息携带订单号不等于对应订单已进入当前只读数据集。关联链固定为“消息订单号 → 同店铺唯一 FBS orderId → 包裹首项精确 SKU → 同店铺唯一商品”；任何一层缺失或歧义都不猜测商品。当前真实数据中 23 条仅携带订单号的消息有 10 条命中 FBS、商品和主图，另 13 条在当前 FBS 快照中没有订单；这些消息日期与已匹配消息重叠，不能只归因为历史窗口，可能是未同步范围或非 FBS 订单，现有证据不能进一步断言。
+
+界面明确区分“消息带订单号”与“已匹配订单”：未匹配时说明无法读取关联商品及可能原因；匹配后的平台 orderId 从默认订单区移至折叠关联依据，避免将技术 ID 当业务主信息。
+
+### 7.71 已发现会话与已导入消息的区别
+
+Ozon 会话发现和逐会话消息回填是两个持久阶段：发现列表会先创建会话及 backfill cursor，消息读取成功后才写入 message 并更新 latestMessage。因此会话卡没有预览不表示存在一条正文为“暂无消息”的消息，而表示该会话目前没有任何已导入 message。
+
+当前本地诊断为 49 个会话：25 个已完成历史回填并有 56 条消息，24 个 backfill `completed=0` 且 message 数量为零。chat source 在最后一次成功读取后连续出现 5 次 `network_error`，按既有故障边界自动停止，未完成 cursor 均被保留。列表文案改为“消息尚未导入”，会话详情优先提示上次同步失败和前往店铺管理重试，不再把同步中间态表达成业务空消息。
+
+### 7.72 刷新时的工作区恢复状态
+
+浏览器硬刷新会清空 React Query 内存状态，但认证仍保存在 HttpOnly session cookie。前端不能读取该 cookie 并自行假设登录有效，必须依次重新确认安装状态、服务端 session 和当前公司成员资格；权限撤销时继续显示旧工作区会泄露受保护数据，因此身份确认完成前仍失败关闭。
+
+原通用 LoadingPage 复用登录页 AuthFrame，视觉上容易误解为退出登录。`/workspace` 及其子路由现在使用不含用户名、公司或业务数据的 WorkspaceLoadingPage：保留中性侧栏、顶部栏和内容骨架，并显示“正在恢复工作区”。认证页继续使用 AuthFrame。该调整不缓存身份或绕过服务端复核；若复核最终无 session，仍正常转到登录页。
+
+### 7.73 原子工作区启动与并行预载
+
+原身份冷启动依次调用 setup、get-session、companies；其中 get-session 与 companies 分别执行一次 Better Auth session 验证，之后才触发当前 lazy route 下载。本地暖请求串行实测约 92–134ms，尚未包含分包与页面数据。
+
+`GET /api/workspace-bootstrap` 现在以一个 `Cache-Control: no-store` 响应返回 setup、经一次服务端验证的 session、公司列表及已重新核对的 activeCompanyId。未配置或匿名状态返回 session/companies null；客户端严格验证 session 与 companies 同时存在、activeCompanyId 一致且属于公司列表，矛盾快照不进入缓存。原独立 API 保留给管理与兼容调用。
+
+客户端冷启动只发一个身份请求，并在请求期间对根路径或当前 `/workspace/*` 路径并行预载 Workspace；已知子路由同时预载目标 route chunk。本地暖 bootstrap 实测约 24–47ms。窗口聚焦复核时，所有工作区路由统一通过 React Activity 隐藏受保护内容并保留已挂载组件；复核通过后恢复原组件状态，撤权、换账号或不一致则继续清理。没有把身份或客户数据写入 localStorage，也没有开启 Better Auth cookie cache。

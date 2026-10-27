@@ -24,6 +24,12 @@ import { registerReplyTestBudgetRoutes } from './modules/reply-tests/budget-http
 import { registerAiBudgetRoutes } from './modules/ai-runs/budget-http.ts';
 import { registerAiReceptionRoutes } from './modules/conversations/ai-http.ts';
 import { registerAiDraftRoutes } from './modules/ai-runs/draft-http.ts';
+import { registerBudgetAuditRoutes } from './modules/budget-audit/http.ts';
+import {registerExportRoutes} from './modules/exports/http.ts';
+import {registerAnalyticsRoutes} from './modules/analytics/http.ts';
+import {registerDataGovernanceRoutes} from './modules/data-governance/http.ts';
+import {registerDegradationRoutes} from './modules/degradation/http.ts';
+import {registerCommerceRoutes} from './modules/commerce/http.ts';
 
 export function createApp(deps: IdentityDependencies & StoreDependencies & TranslationServiceDeps & ReplyTestHttpDependencies = {}) {
   const app = new Hono<ApplicationEnv>();
@@ -39,7 +45,11 @@ export function createApp(deps: IdentityDependencies & StoreDependencies & Trans
     registration: { enabled: false },
     email: { configured: mailConfigured(c.env ?? {}, deps) },
   }));
-  registerIdentityRoutes(app);
+  registerIdentityRoutes(app, c => ({
+    identity: { configured: !!identityConfig(c.env ?? {}) },
+    registration: { enabled: false },
+    email: { configured: mailConfigured(c.env ?? {}, deps) },
+  }));
   registerBootstrapRoutes(app, deps);
   registerVerificationRoutes(app, deps);
   registerInvitationRoutes(app, deps);
@@ -49,12 +59,18 @@ export function createApp(deps: IdentityDependencies & StoreDependencies & Trans
   registerKnowledgeRoutes(app);
   registerStoreRoutes(app, deps);
   registerSyncRoutes(app);
+  registerCommerceRoutes(app);
   registerConversationRoutes(app);
   registerConversationControlRoutes(app);
   registerTranslationRoutes(app, deps);
   registerReplyTestRoutes(app, deps);
   registerReplyTestBudgetRoutes(app);
   registerAiBudgetRoutes(app);
+  registerBudgetAuditRoutes(app);
+  registerExportRoutes(app);
+  registerAnalyticsRoutes(app);
+  registerDataGovernanceRoutes(app);
+  registerDegradationRoutes(app);
   registerAiReceptionRoutes(app);
   registerAiDraftRoutes(app);
   app.notFound(c => apiError(c, 'NOT_FOUND', 'The resource is not available.', 404));

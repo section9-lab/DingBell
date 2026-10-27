@@ -43,36 +43,36 @@ test('identity reads stop before private requests when authentication is not con
   const calls: string[] = [];
   t.mock.method(globalThis, 'fetch', async (path: string) => {
     calls.push(path);
-    return Response.json({ ...setup, identity: { configured: false } });
+    return Response.json({ setup: { ...setup, identity: { configured: false } }, session: null, companies: null });
   });
   const result = await readIdentity();
   assert.equal(result.setup.identity.configured, false);
   assert.equal(result.session, null);
-  assert.deepEqual(calls, ['/api/setup']);
+  assert.deepEqual(calls, ['/api/workspace-bootstrap']);
 });
 
 test('a revoked session never returns the previously fetched identity or company', async (t) => {
-  const replies = [
-    Response.json(setup),
-    Response.json(session),
-    Response.json({ error: { code: 'UNAUTHENTICATED' } }, { status: 401 }),
-  ];
-  t.mock.method(globalThis, 'fetch', async () => replies.shift()!);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ setup, session: null, companies: null }));
   const result = await readIdentity();
   assert.equal(result.session, null);
   assert.equal(result.companies, null);
 });
 
 test('an invalid server payload is rejected instead of becoming cached company data', async (t) => {
-  const replies = [
-    Response.json(setup),
-    Response.json(session),
-    Response.json({
-      companies: [{ id: 'a', role: 'owner' }],
-      activeCompanyId: 'a',
-    }),
-  ];
-  t.mock.method(globalThis, 'fetch', async () => replies.shift()!);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    setup,
+    session,
+    companies: { companies: [{ id: 'a', role: 'owner' }], activeCompanyId: 'a' },
+  }));
+  await assert.rejects(readIdentity(), { code: 'INVALID_RESPONSE' });
+});
+
+test('workspace bootstrap rejects a session and company snapshot with different active scopes', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    setup,
+    session,
+    companies: { companies: [{ id: 'b', name: 'Other', slug: 'other', role: 'owner' }], activeCompanyId: 'b' },
+  }));
   await assert.rejects(readIdentity(), { code: 'INVALID_RESPONSE' });
 });
 

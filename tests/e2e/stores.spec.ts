@@ -24,7 +24,10 @@ async function openStores(page: Page, application: Application, actor = 'owner')
 }
 
 async function prepareStore(page: Page, name = '测试家居店', clientId = '910001') {
-  await page.getByRole('button', { name: '添加 Ozon 店铺', exact: true }).click();
+  await page.getByRole('button', { name: '添加店铺', exact: true }).click();
+  const platform = page.getByRole('dialog', { name: '选择店铺平台', exact: true });
+  await expect(platform.getByText('一个公司可以连接多个店铺。', { exact: false })).toBeVisible();
+  await platform.getByRole('button', { name: /Ozon/ }).click();
   const dialog = page.getByRole('dialog', { name: '添加 Ozon 店铺', exact: true });
   await dialog.getByLabel('店铺名称', { exact: true }).fill(name);
   await dialog.getByLabel('Client ID', { exact: true }).fill(clientId);
@@ -102,7 +105,7 @@ test.describe('store credential configuration is absent', () => {
   test('the account stays usable while credential forms fail closed', async ({ page, application }) => {
     await openStores(page, application);
     await expect(page.getByText('店铺凭证加密尚未配置', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '添加 Ozon 店铺', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '添加店铺', exact: true })).toBeDisabled();
     await expect(page.getByLabel('API Key', { exact: true })).toHaveCount(0);
     expect((await page.request.get(`${application.baseURL}/api/auth/get-session`)).status()).toBe(200);
     const response = await page.request.post(`${application.baseURL}/api/companies/company-a/stores`, {

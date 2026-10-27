@@ -47,8 +47,9 @@ AI_RECEPTION_CONFIG_JSON=
 # Optional search_knowledge tool: explicitly select promptVersion support-knowledge-v1 above.
 # support-answer-v1 additionally saves cited drafts and requests human review; it cannot send replies.
 # Requires KNOWLEDGE_AI and KNOWLEDGE_INDEX. Never reuses the staff test budget.
-# Shape: {"profile":"bge-m3-1024-bytes2400-v1","priceVersion":"<reviewed-price-version>","maxInputTokens":60000,"inputMicrosPerMillion":<reviewed-integer-price>}.
-# One embedding permit per answer run; token usage is unavailable, so its conservative allowance stays reserved.
+# Shape: {"profile":"bge-m3-1024-bytes2400-v1","priceVersion":"<reviewed-price-version>","maxInputTokens":60000,"inputMicrosPerMillion":<reviewed-integer-price>,"gatewayId":"<optional-ai-gateway>"}.
+# Without a Gateway log, the conservative allowance stays reserved. A configured Gateway must retain
+# metadata/tokens/cost without payload content; real log and invoice behavior still needs cloud acceptance.
 AI_KNOWLEDGE_QUERY_CONFIG_JSON=
 # TranslationConfig shape; prompt versions are described in architecture 7.10.
 # grounded-reply-v1 is preserved; grounded-reply-v2 is an unapproved evaluation candidate.
@@ -69,6 +70,9 @@ REPLY_TEST_QUERY_CONFIG_JSON=
 # an input allowance, not a currency budget or a guarantee of free provider use.
 KNOWLEDGE_INDEXING_ENABLED=false
 KNOWLEDGE_DAILY_INPUT_BYTES=
+# Optional bounded Cron cleanup of Vectorize duplicates for revisions that are no longer
+# draft or active. D1 source/chunks remain intact; keep false until cloud visibility is verified.
+KNOWLEDGE_VECTOR_CLEANUP_ENABLED=false
 
 # Model and Ozon credentials are not required for account and team workflows.
 # Public self-service registration remains disabled; new accounts use installation or invitation.

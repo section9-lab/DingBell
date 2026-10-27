@@ -79,6 +79,20 @@ export const knowledgeReviewJob = sqliteTable('knowledge_review_job', {
     AND (${table.vectorsJson} IS NULL OR (json_valid(${table.vectorsJson}) AND length(CAST(${table.vectorsJson} AS BLOB))<=1048576))
     AND (${table.resultsJson} IS NULL OR (json_valid(${table.resultsJson}) AND length(CAST(${table.resultsJson} AS BLOB))<=32768))`),
 ]);
+export const knowledgeVectorCleanup = sqliteTable('knowledge_vector_cleanup', {
+  organizationId: text('organization_id').notNull(), documentId: text('document_id').notNull(), revision: integer('revision').notNull(),
+  profile: text('profile').notNull(), vectorIdsJson: text('vector_ids_json').notNull(), state: text('state').notNull(), attempts: integer('attempts').notNull(),
+  claimToken: text('claim_token'), leaseUntil: integer('lease_until'), wakeAfter: integer('wake_after').notNull(), mutationId: text('mutation_id'),
+  errorCode: text('error_code'), createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull(),
+}, table => [
+  primaryKey({ columns: [table.organizationId, table.documentId, table.revision, table.profile] }),
+  foreignKey({ columns: [table.organizationId, table.documentId, table.revision], foreignColumns: [knowledgeRevision.organizationId, knowledgeRevision.documentId, knowledgeRevision.revision] }).onDelete('cascade'),
+  index('knowledge_vector_cleanup_due_idx').on(table.state, table.wakeAfter, table.leaseUntil),
+  check('knowledge_vector_cleanup_valid', sql`${table.revision}>0 AND json_valid(${table.vectorIdsJson}) AND json_array_length(${table.vectorIdsJson}) BETWEEN 1 AND 32
+    AND length(CAST(${table.vectorIdsJson} AS BLOB))<=4096 AND ${table.state} IN ('queued','deleting','confirming','succeeded','failed')
+    AND ${table.attempts} BETWEEN 0 AND 20 AND ((${table.claimToken} IS NULL AND ${table.leaseUntil} IS NULL) OR (length(${table.claimToken}) BETWEEN 1 AND 64 AND ${table.leaseUntil}>0))`),
+]);
+
 export const knowledgeIndexJob = sqliteTable('knowledge_index_job', {
   organizationId: text('organization_id').notNull(), id: text('id').notNull(), documentId: text('document_id').notNull(),
   revision: integer('revision').notNull(), documentVersion: integer('document_version').notNull(), contentHash: text('content_hash').notNull(), profile: text('profile').notNull(),

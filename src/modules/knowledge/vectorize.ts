@@ -7,14 +7,29 @@ function validVectors(value: unknown, count: number): value is number[][] {
   return Array.isArray(value) && value.length === count && value.every(row => Array.isArray(row) && row.length === knowledgeProfile.dimensions
     && row.every(item => typeof item === 'number' && Number.isFinite(item)) && row.some(item => item !== 0));
 }
-export async function embedKnowledge(ai: Ai, texts: string[]) {
+export type KnowledgeEmbeddingGateway = { id: string; eventId: string };
+/**
+ * The Workers AI embedding response contains vectors only. When a Gateway is
+ * explicitly configured, retain its log ID as a correlation handle; callers
+ * must still treat cost as unknown until a durable log/billing reconciliation.
+ */
+export async function embedKnowledgeWithReceipt(ai: Ai, texts: string[], gateway?: KnowledgeEmbeddingGateway) {
   if (!texts.length || texts.length > 16 || texts.some(text => !text.trim() || !text.isWellFormed() || new TextEncoder().encode(text).length > 2400))
     throw new Error('KNOWLEDGE_INPUT_LIMIT');
-  const response = await ai.run(knowledgeProfile.model, { text: texts, truncate_inputs: false });
+  const input = { text: texts, truncate_inputs: false };
+  const response = gateway
+    ? await ai.run(knowledgeProfile.model, input, { gateway: { id: gateway.id, eventId: gateway.eventId, collectLog: true, skipCache: true,
+      metadata: { dingbellPurpose: 'ai-knowledge', dingbellRunId: gateway.eventId } } })
+    : await ai.run(knowledgeProfile.model, input);
   if (!response || typeof response !== 'object' || !('data' in response) || !validVectors(response.data, texts.length)
     || (response.shape && (response.shape.length !== 2 || response.shape[0] !== texts.length || response.shape[1] !== knowledgeProfile.dimensions)))
     throw new Error('KNOWLEDGE_EMBEDDING_INVALID');
-  return response.data;
+  const logId = gateway ? ai.aiGatewayLogId : null;
+  if (logId !== null && (typeof logId !== 'string' || !logId || logId.length > 256)) throw new Error('KNOWLEDGE_GATEWAY_LOG_INVALID');
+  return { vectors: response.data, gatewayLogId: logId };
+}
+export async function embedKnowledge(ai: Ai, texts: string[]) {
+  return (await embedKnowledgeWithReceipt(ai, texts)).vectors;
 }
 async function keys(orgId: string, scope: Pick<KnowledgeScope, 'storeId' | 'productRef'>) {
   return { namespace: await knowledgeHash(['company', orgId]), scopeKey: scope.storeId === null ? 'all' : await knowledgeHash(['store', orgId, scope.storeId]),
@@ -29,6 +44,26 @@ type Manifest = Awaited<ReturnType<typeof knowledgeManifest>>;
 export type KnowledgeActiveRevision = { documentId: string; revision: number; contentHash: string };
 export const knowledgeRevisionBatchSize = 20;
 const vectorId = (chunkId: string, eligible: boolean) => knowledgeHash([knowledgeProfile.id, eligible ? 'published' : 'draft', chunkId]);
+export async function knowledgeVectorIds(chunkIds: string[]) {
+  if (!chunkIds.length || chunkIds.length > 16 || new Set(chunkIds).size !== chunkIds.length
+    || chunkIds.some(id => !/^[a-f0-9]{64}$/.test(id))) throw new Error('KNOWLEDGE_INPUT_LIMIT');
+  return Promise.all(chunkIds.flatMap(id => [vectorId(id, false), vectorId(id, true)]));
+}
+export async function deleteKnowledgeVectors(index: Vectorize, ids: string[]) {
+  if (!ids.length || ids.length > 32 || new Set(ids).size !== ids.length || ids.some(id => !/^[a-f0-9]{64}$/.test(id)))
+    throw new Error('KNOWLEDGE_INPUT_LIMIT');
+  const receipt = await index.deleteByIds(ids);
+  if (!receipt || typeof receipt.mutationId !== 'string' || !receipt.mutationId) throw new Error('KNOWLEDGE_INDEX_INVALID');
+  return receipt.mutationId;
+}
+export async function areKnowledgeVectorsDeleted(index: Vectorize, ids: string[]) {
+  if (!ids.length || ids.length > 32 || new Set(ids).size !== ids.length || ids.some(id => !/^[a-f0-9]{64}$/.test(id)))
+    throw new Error('KNOWLEDGE_INPUT_LIMIT');
+  const rows = await index.getByIds(ids);
+  if (!Array.isArray(rows) || rows.some(row => !row || typeof row.id !== 'string' || !ids.includes(row.id))
+    || new Set(rows.map(row => row.id)).size !== rows.length) throw new Error('KNOWLEDGE_INDEX_INVALID');
+  return rows.length === 0;
+}
 function metadata(manifest: Manifest, chunk: Manifest['chunks'][number], eligible: boolean) {
   return { scope: manifest.scopeKey, product: manifest.productKey, language: manifest.language, revision: manifest.revisionKey,
     documentId: manifest.documentId, revisionNumber: manifest.revision, profile: knowledgeProfile.id, chunkId: chunk.id, bodyHash: chunk.bodyHash, eligible };

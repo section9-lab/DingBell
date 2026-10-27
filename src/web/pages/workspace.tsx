@@ -11,11 +11,12 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  PackageSearch,
+  ShoppingBag,
   Settings,
   SlidersHorizontal,
   Store,
   Users,
-  UserRound,
 } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -49,6 +50,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
+  SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from '../components/ui/sidebar';
@@ -68,6 +70,11 @@ type Props = {
   logout: () => void;
   notice?: unknown;
 };
+
+function accountInitials(name: string | undefined, email: string | undefined) {
+  const source = name?.trim() || email?.split('@')[0]?.trim() || '?';
+  return Array.from(source).slice(0, 2).join('').toLocaleUpperCase();
+}
 
 function NavigationLink(props: ComponentProps<typeof Link>) {
   const { setOpenMobile } = useSidebar();
@@ -159,6 +166,8 @@ const groups = [
     title: '工作台',
     items: [
       { name: '消息中心', icon: Inbox },
+      { name: '商品资料', icon: PackageSearch },
+      { name: 'FBS 订单', icon: ShoppingBag },
       { name: '会话日志', icon: History },
     ],
   },
@@ -179,7 +188,7 @@ const groups = [
   },
 ];
 
-type WorkspaceProps = Props & { company: Company; children?: ReactNode; section?: 'home' | 'team' | 'stores' | 'messages' | 'settings' | 'policies' | 'knowledge' };
+type WorkspaceProps = Props & { company: Company; children?: ReactNode; section?: 'home' | 'team' | 'stores' | 'messages' | 'products' | 'orders' | 'activity' | 'settings' | 'policies' | 'knowledge' };
 export function WorkspacePage(props: WorkspaceProps) {
   return <WorkspaceExitProvider><WorkspaceContent {...props}/></WorkspaceExitProvider>;
 }
@@ -202,27 +211,28 @@ function WorkspaceContent({
       >
         跳到主要内容
       </a>
-      <Sidebar collapsible="offcanvas">
-        <SidebarHeader className="gap-7 px-4 pt-6 pb-3">
+      <Sidebar collapsible="icon">
+        <SidebarHeader className="gap-7 px-4 pt-6 pb-3 group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
           <Brand />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <Button
                   variant="outline"
-                  className="h-auto w-full justify-start gap-2.5 px-3 py-3"
+                  className="h-auto w-full justify-start gap-2.5 px-3 py-3 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-2"
                   aria-label="切换公司"
+                  title="切换公司"
                 />
               }
             >
               <Building2 aria-hidden="true" />
-              <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+              <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 group-data-[collapsible=icon]:hidden">
                 <span className="max-w-full truncate">{company.name}</span>
                 <span className="text-xs text-muted-foreground">
                   公司工作区
                 </span>
               </span>
-              <ChevronsUpDown aria-hidden="true" />
+              <ChevronsUpDown className="group-data-[collapsible=icon]:hidden" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuGroup>
@@ -249,7 +259,7 @@ function WorkspaceContent({
           <SidebarGroup>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={section === 'home'} aria-current={section === 'home' ? 'page' : undefined} render={<NavigationLink to="/workspace" />}>
+                <SidebarMenuButton tooltip="开始使用" isActive={section === 'home'} aria-current={section === 'home' ? 'page' : undefined} render={<NavigationLink to="/workspace" />}>
                   <LayoutDashboard />
                   <span>开始使用</span>
                 </SidebarMenuButton>
@@ -264,15 +274,16 @@ function WorkspaceContent({
                   {group.items.map(({ name, icon: Icon }) => (
                     <SidebarMenuItem key={name}>
                       <SidebarMenuButton
-                        disabled={!['团队成员', '店铺管理', '消息中心', '公司设置', '回复策略', '知识库'].includes(name)}
-                        isActive={(name === '团队成员' && section === 'team') || (name === '店铺管理' && section === 'stores') || (name === '消息中心' && section === 'messages') || (name === '公司设置' && section === 'settings') || (name === '回复策略' && section === 'policies') || (name === '知识库' && section === 'knowledge')}
-                        aria-current={(name === '团队成员' && section === 'team') || (name === '店铺管理' && section === 'stores') || (name === '消息中心' && section === 'messages') || (name === '公司设置' && section === 'settings') || (name === '回复策略' && section === 'policies') || (name === '知识库' && section === 'knowledge') ? 'page' : undefined}
-                        aria-label={['团队成员', '店铺管理', '消息中心', '公司设置', '回复策略', '知识库'].includes(name) ? name : `${name}，尚未开放`}
-                        {...(name === '知识库' ? { render: <NavigationLink to="/workspace/knowledge" /> } : name === '团队成员' ? { render: <NavigationLink to="/workspace/team" /> } : name === '店铺管理' ? { render: <NavigationLink to="/workspace/stores" /> } : name === '消息中心' ? { render: <NavigationLink to="/workspace/messages" /> } : name === '回复策略' ? { render: <NavigationLink to="/workspace/reply-policies" /> } : name === '公司设置' ? { render: <NavigationLink to="/workspace/settings" /> } : {})}
+                        tooltip={name}
+                        disabled={!['团队成员', '店铺管理', '消息中心', '商品资料', 'FBS 订单', '会话日志', '公司设置', '回复策略', '知识库'].includes(name)}
+                        isActive={(name === '团队成员' && section === 'team') || (name === '店铺管理' && section === 'stores') || (name === '消息中心' && section === 'messages') || (name === '商品资料' && section === 'products') || (name === 'FBS 订单' && section === 'orders') || (name === '会话日志' && section === 'activity') || (name === '公司设置' && section === 'settings') || (name === '回复策略' && section === 'policies') || (name === '知识库' && section === 'knowledge')}
+                        aria-current={(name === '团队成员' && section === 'team') || (name === '店铺管理' && section === 'stores') || (name === '消息中心' && section === 'messages') || (name === '商品资料' && section === 'products') || (name === 'FBS 订单' && section === 'orders') || (name === '会话日志' && section === 'activity') || (name === '公司设置' && section === 'settings') || (name === '回复策略' && section === 'policies') || (name === '知识库' && section === 'knowledge') ? 'page' : undefined}
+                        aria-label={['团队成员', '店铺管理', '消息中心', '商品资料', 'FBS 订单', '会话日志', '公司设置', '回复策略', '知识库'].includes(name) ? name : `${name}，尚未开放`}
+                        {...(name === '知识库' ? { render: <NavigationLink to="/workspace/knowledge" /> } : name === '团队成员' ? { render: <NavigationLink to="/workspace/team" /> } : name === '店铺管理' ? { render: <NavigationLink to="/workspace/stores" /> } : name === '消息中心' ? { render: <NavigationLink to="/workspace/messages" /> } : name === '商品资料' ? { render: <NavigationLink to="/workspace/products" /> } : name === 'FBS 订单' ? { render: <NavigationLink to="/workspace/orders" /> } : name === '会话日志' ? { render: <NavigationLink to="/workspace/activity" /> } : name === '回复策略' ? { render: <NavigationLink to="/workspace/reply-policies" /> } : name === '公司设置' ? { render: <NavigationLink to="/workspace/settings" /> } : {})}
                       >
                         <Icon />
                         <span>{name}</span>
-                        {!['团队成员', '店铺管理', '消息中心', '公司设置', '回复策略', '知识库'].includes(name) && <span className="ml-auto text-[10px]">未开放</span>}
+                        {!['团队成员', '店铺管理', '消息中心', '商品资料', 'FBS 订单', '会话日志', '公司设置', '回复策略', '知识库'].includes(name) && <span className="ml-auto text-[10px]">未开放</span>}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
@@ -281,40 +292,58 @@ function WorkspaceContent({
             </SidebarGroup>
           ))}
         </SidebarContent>
-        <SidebarFooter className="gap-4 p-4">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <SidebarFooter className="gap-4 p-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
             <CircleHelp className="size-4" />
             需要帮助？请联系部署管理员
           </div>
-          <Separator />
-          <div className="flex min-w-0 items-center gap-2">
-            <UserRound className="size-4 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">
-                {identity.session?.user.name}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {roleLabel(company.role)}
-              </p>
-            </div>
-          </div>
-          <Button variant="ghost" className="justify-start" onClick={() => confirmExit(logout)}>
-            <LogOut data-icon="inline-start" />
-            退出登录
-          </Button>
+          <Separator className="group-data-[collapsible=icon]:hidden" />
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="h-auto w-full justify-start gap-2 px-2 py-2 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0"
+                  aria-label={`打开账户菜单：${identity.session?.user.email ?? ''}`}
+                  title={identity.session?.user.email ?? '账户菜单'}
+                />
+              }
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground" aria-hidden="true">
+                {accountInitials(identity.session?.user.name, identity.session?.user.email)}
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 group-data-[collapsible=icon]:hidden">
+                <span className="max-w-full truncate text-sm font-medium">{identity.session?.user.name}</span>
+                <span className="max-w-full truncate text-xs text-muted-foreground">{identity.session?.user.email}</span>
+              </span>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="right" align="end" className="w-64">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="mb-1 flex flex-col gap-1 border-b px-2 py-2">
+                  <span className="truncate text-sm font-medium text-foreground">{identity.session?.user.name}</span>
+                  <span className="truncate font-normal">{identity.session?.user.email}</span>
+                </DropdownMenuLabel>
+                <DropdownMenuItem variant="destructive" onClick={() => confirmExit(logout)}>
+                  <LogOut />
+                  退出登录
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </SidebarFooter>
+        <SidebarRail aria-label="展开或收起侧边栏" title="展开或收起侧边栏" />
       </Sidebar>
       <SidebarInset className="min-w-0">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
           <SidebarTrigger aria-label="打开或收起导航" />
-          <Separator orientation="vertical" className="h-4" />
           <span className="truncate text-sm text-muted-foreground">
             {company.name}
           </span>
           <span className="text-muted-foreground" aria-hidden="true">
             /
           </span>
-          <span className="text-sm">{section === 'knowledge' ? '知识库' : section === 'policies' ? '回复策略' : section === 'settings' ? '公司设置' : section === 'team' ? '团队成员' : section === 'stores' ? '店铺管理' : section === 'messages' ? '消息中心' : '开始使用'}</span>
+          <span className="text-sm">{section === 'knowledge' ? '知识库' : section === 'policies' ? '回复策略' : section === 'settings' ? '公司设置' : section === 'team' ? '团队成员' : section === 'stores' ? '店铺管理' : section === 'messages' ? '消息中心' : section === 'products' ? '商品资料' : section === 'orders' ? 'FBS 订单' : section === 'activity' ? '会话日志' : '开始使用'}</span>
           <NavigationLink to="/workspace/settings" className="ml-auto max-w-[50%] truncate text-xs text-muted-foreground" title={query.isError ? `时区读取失败，暂按 ${timeZone} 显示，请进入公司设置重试。` : `公司时区：${timeZone}`} >{query.isError ? `时区读取失败 · ${timeZone}` : query.isPending ? '时区读取中 · UTC' : timeZone}</NavigationLink>
         </header>
         <div

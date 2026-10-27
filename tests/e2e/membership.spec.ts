@@ -123,7 +123,7 @@ test('another session demotion clears an already-open administration page on rev
     const dialog = await roleDialog(page, 'Fixture Admin', 'member');
     await dialog.getByRole('button', { name: '保存角色', exact: true }).click();
     await expect(dialog).toBeHidden();
-    const refreshed = administrator.waitForResponse(response => new URL(response.url()).pathname === '/api/companies');
+    const refreshed = administrator.waitForResponse(response => new URL(response.url()).pathname === '/api/workspace-bootstrap');
     await administrator.evaluate(`(() => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
       document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
@@ -164,7 +164,7 @@ test('an uncertain self-demotion rereads identity without retrying its committed
   let writes = 0;
   let companyReads = 0;
   page.on('request', request => {
-    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/companies') companyReads += 1;
+    if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/workspace-bootstrap') companyReads += 1;
   });
   await page.route('**/api/companies/company-a/members/admin-a/role', async route => {
     writes += 1;

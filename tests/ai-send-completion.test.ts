@@ -22,7 +22,7 @@ test('failed and unknown AI deliveries retain their deadline fallback without an
   const x=await aiSendFixture({aiTimeoutMs:5000});try{
    await x.ready();x.f.provider(mode!);await enqueue(x);await waitAiSend(async()=>(await x.reply()).status===status);
    await expire(x);const paused=await state(x);assert.equal(paused.reception,'paused');assert.equal(paused.controlEpoch,x.run.controlEpoch+1);
-   const events=await handoffs(x);assert.equal(events.length,1);const receipt=JSON.parse(events[0]!.receipt);assert.equal(receipt.input.reason,'tool_failure');assert.match(receipt.input.summary,/deadline/i);
+   const events=await handoffs(x);assert.equal(events.length,1);const receipt=JSON.parse(events[0]!.receipt);assert.equal(receipt.input.reason,'tool_failure');assert.equal(receipt.input.schemaVersion,2);assert.deepEqual(receipt.input.neededInformation,[]);
    await x.f.call('repair',{},x.scope);assert.equal((await x.reply()).status,status);assert.equal(x.f.providerRequests.length,1);assert.equal((await handoffs(x)).length,1);
   }finally{await x.f.close();}
  }

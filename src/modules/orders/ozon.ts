@@ -27,6 +27,14 @@ function currency(value: unknown): string | null {
   if (typeof value !== 'string' || !/^[A-Z]{3}$/.test(value)) invalid();
   return value;
 }
+function productPrice(item: Record<string, unknown>) {
+  if (item.price && typeof item.price === 'object' && !Array.isArray(item.price)) {
+    const current = object(item.price);
+    if (typeof current.amount !== 'string' || typeof current.currency !== 'string') invalid();
+    return { price: price(current.amount), currency: currency(current.currency) };
+  }
+  return { price: price(item.price), currency: currency(item.currency_code) };
+}
 function posting(value: unknown): OzonFbsPosting {
   const row = object(value);
   if (!Array.isArray(row.products)) invalid();
@@ -35,7 +43,7 @@ function posting(value: unknown): OzonFbsPosting {
     products: row.products.map(value => {
       const item = object(value);
       if (typeof item.quantity !== 'number' || !Number.isSafeInteger(item.quantity) || item.quantity < 0) invalid();
-      return { sku: id(item.sku), offerId: text(item.offer_id), name: optionalText(item.name, 4096), quantity: item.quantity, price: price(item.price), currency: currency(item.currency_code) };
+      return { sku: id(item.sku), offerId: text(item.offer_id), name: optionalText(item.name, 4096), quantity: item.quantity, ...productPrice(item) };
     }),
     inProcessAt: optionalTime(row.in_process_at), shipmentDate: optionalTime(row.shipment_date), deliveringDate: optionalTime(row.delivering_date), trackingNumber: optionalText(row.tracking_number),
   };

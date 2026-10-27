@@ -9,9 +9,9 @@ test('AI reception is explicit while legacy authority and incompatible lifecycle
  const {workStatus,...legacy}=state;assert.throws(()=>normalizeControlState({...legacy,schemaVersion:1}));
  for(const change of [{lifecycle:'resolved',workStatus:null},{assignedMemberId:'staff'},{workStatus:'waiting_customer'}])assert.throws(()=>normalizeControlState({...state,...change}));
 });
-test('the model handoff input has no authority fields, customer text or executable action',async()=>{
- const m=await api(),input={reason:'customer_request',summary:'Клиент просит человека.',neededInformation:[]};assert.equal(v.is(m.aiHandoffSchema,input),true);
- for(const change of [{runId:'chosen'},{organizationId:'other'},{body:'Я уже вернул деньги'},{reason:'refund'},{summary:' '},{neededInformation:Array(9).fill('x')}])assert.equal(v.is(m.aiHandoffSchema,{...input,...change}),false);
- assert.equal(v.is(m.aiHandoffSchema,{...input,summary:'x'.repeat(1001)}),false);
+test('new model handoffs expose only allowlisted non-sensitive requirement kinds while legacy receipts remain readable',async()=>{
+ const m=await api(),input={reason:'customer_request',neededInformation:['product_model','issue_description']};assert.equal(v.is(m.aiHandoffToolInputSchema,input),true);assert.equal(v.is(m.aiHandoffSchema,{...input,schemaVersion:2}),true);
+ assert.equal(v.is(m.aiHandoffSchema,{reason:'customer_request',summary:'Legacy receipt.',neededInformation:['Old free text']}),true,'stored legacy receipts remain parseable');
+ for(const change of [{runId:'chosen'},{organizationId:'other'},{body:'Я уже вернул деньги'},{reason:'refund'},{summary:'free text'},{neededInformation:['phone']},{neededInformation:['address']},{neededInformation:['payment_card']},{neededInformation:['order_reference']},{neededInformation:['product_model','product_model']},{neededInformation:Array(6).fill('issue_description')}])assert.equal(v.is(m.aiHandoffToolInputSchema,{...input,...change}),false);
  assert.throws(()=>m.handoffNotice({kind:'handoff',body:'transferred'}),'model output alone is not a committed handoff');
 });

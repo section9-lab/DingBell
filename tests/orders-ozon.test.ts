@@ -26,6 +26,15 @@ test('FBS listing uses the current cursor endpoint and freezes the supplied time
   assert.equal(calls, 1); assert.deepEqual(result, { postings: [expected], cursor: 'opaque-after', hasNext: true });
 });
 
+test('FBS v4 listings accept the current nested money shape without weakening v3 detail parsing', async () => {
+  const current = { ...posting, products: [{ ...product, price: { amount: product.price, currency: product.currency_code }, currency_code: undefined }] };
+  const result = await listOzonFbsPostings(credentials, window, response({ postings: [current], has_next: false }));
+  assert.deepEqual(result.postings, [expected]);
+  for (const price of [{ amount: '1e5', currency: 'RUB' }, { amount: '1.00', currency: 643 }, { currency: 'RUB' }, []]) {
+    await assert.rejects(listOzonFbsPostings(credentials, window, response({ postings: [{ ...current, products: [{ ...current.products[0], price }] }], has_next: false })), fails('invalid_response'));
+  }
+});
+
 test('FBS terminal pages preserve observations without inventing a status version', async () => {
   let body: unknown;
   const result = await listOzonFbsPostings(credentials, window, (async (_input, init) => {

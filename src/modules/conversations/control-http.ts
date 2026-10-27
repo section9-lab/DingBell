@@ -6,6 +6,12 @@ import { getConversationController } from './control-bindings.ts';
 import { ensureControlDirectory, listControlTransferTargets, readControlAccess, readControlAssignee } from './control-storage.ts';
 import { controlCommandSchema } from './control-state.ts';
 import { reconcileConversationAi } from '../ai-runs/execution.ts';
+import { acknowledgeHandoffRequirements, changeHandoffItem, readHandoffBrief } from './handoff-brief.ts';
+import {InvalidConversationActivityCursor,readConversationActivity} from './activity.ts';
+import {InvalidCompanyActivityCursor,readCompanyConversationActivity,type CompanyActivityOptions} from './company-activity.ts';
+import {InvalidConversationTimelineCursor,readConversationTimeline} from './timeline.ts';
+import { acknowledgeHandoffRequestSchema, changeHandoffItemRequestSchema } from '../../shared/handoff-brief.ts';
+import {aiRunResultSchema,conversationActivityActionSchema} from '../../shared/conversation-activity.ts';
 import type { ReplyView } from './reply-types.ts';
 import type { ControlActor, ControlAssignee, ControlScope, StoredControlState, ControlView } from './control-types.ts';
 
@@ -89,6 +95,51 @@ export function registerConversationControlRoutes(app: Hono<ApplicationEnv>) {
       if (result.outcome === 'not_found') return notFound(c);
       return jsonResponse(c, { companyId: actor.orgId, conversationId, reply: replyDTO(result.reply) });
     } catch { return apiError(c, 'CONTROL_UNAVAILABLE', 'The reply result is temporarily unavailable.', 503); }
+  });
+  app.get('/api/companies/:companyId/conversation-activities',configured,signedIn,async c=>{
+    const query=new URL(c.req.url).searchParams,allowed=['limit','cursor','storeId','category','action','from','to','stage','assignee','reception','lifecycle','deliveryState','policyId','policyRevision','aiResult','channel'],single=[...query.keys()].every(key=>allowed.includes(key)&&query.getAll(key).length===1),companyId=c.req.param('companyId'),limit=query.get('limit')??'20',category=query.get('category')??'all',number=(name:string)=>{const raw=query.get(name);return raw===null?undefined:/^\d{1,16}$/.test(raw)&&Number.isSafeInteger(Number(raw))?Number(raw):null;},identifier=(name:string)=>{const raw=query.get(name);return raw===null?undefined:v.is(cursorId,raw)&&raw===raw.trim()&&raw.isWellFormed()?raw:null;};
+    const from=number('from'),to=number('to'),policyRevision=number('policyRevision'),storeId=identifier('storeId'),assignee=identifier('assignee'),policyId=identifier('policyId'),action=query.get('action'),stage=query.get('stage'),reception=query.get('reception'),lifecycle=query.get('lifecycle'),deliveryState=query.get('deliveryState'),aiResult=query.get('aiResult'),channel=query.get('channel')??'private';
+    if(!companyId||!v.is(cursorId,companyId)||!single||!/^\d{1,2}$/.test(limit)||Number(limit)<1||Number(limit)>50||!['all','human_action','ai_action','customer_event'].includes(category)||(action!==null&&!v.is(conversationActivityActionSchema,action))||(stage!==null&&!['presale','order','aftersale'].includes(stage))||(reception!==null&&!['paused','human','ai'].includes(reception))||(lifecycle!==null&&!['open','resolved'].includes(lifecycle))||(deliveryState!==null&&!['queued','sending','sent','failed','unknown','skipped','canceled'].includes(deliveryState))||(aiResult!==null&&!v.is(aiRunResultSchema,aiResult))||channel!=='private'||from===null||to===null||policyRevision===null||storeId===null||assignee===null||policyId===null||(from!==undefined&&to!==undefined&&from>=to)||policyRevision===0)return invalid(c);
+    const options:CompanyActivityOptions={limit:Number(limit),category:category as CompanyActivityOptions['category'],channel:'private',...(query.has('cursor')?{cursor:query.get('cursor')!}:{}),...(storeId?{storeId}:{}),...(action?{action:action as CompanyActivityOptions['action']}:{}),...(from!==undefined?{from}:{}),...(to!==undefined?{to}:{}),...(stage?{stage:stage as CompanyActivityOptions['stage']}:{}),...(assignee?{assignee}:{}),...(reception?{reception:reception as CompanyActivityOptions['reception']}:{}),...(lifecycle?{lifecycle:lifecycle as CompanyActivityOptions['lifecycle']}:{}),...(deliveryState?{deliveryState:deliveryState as CompanyActivityOptions['deliveryState']}:{}),...(policyId?{policyId}:{}),...(policyRevision!==undefined?{policyRevision}: {}),...(aiResult?{aiResult:aiResult as CompanyActivityOptions['aiResult']}: {})};
+    const actor=actorFor(c);try{const result=await readCompanyConversationActivity(c.env.DB!,actor,c.env.BETTER_AUTH_SECRET!,options);return result?jsonResponse(c,{companyId:actor.orgId,...result}):notFound(c);}catch(error){return error instanceof InvalidCompanyActivityCursor||error instanceof RangeError?invalid(c):apiError(c,'CONTROL_UNAVAILABLE','The company conversation activity is temporarily unavailable.',503);}
+  });
+  app.get(`${path}/timeline`,configured,signedIn,async c=>{
+    const query=new URL(c.req.url).searchParams,limit=query.get('limit')??'20';if(!validPath(c,true)||[...query.keys()].some(key=>!['limit','cursor'].includes(key))||[...query.keys()].some(key=>query.getAll(key).length>1)||!/^\d{1,2}$/.test(limit)||Number(limit)<1||Number(limit)>50)return invalid(c);const actor=actorFor(c),conversationId=c.req.param('id')!;try{const result=await readConversationTimeline(c.env.DB!,actor,conversationId,c.env.BETTER_AUTH_SECRET!,{limit:Number(limit),...(query.has('cursor')?{cursor:query.get('cursor')!}:{})});return result?jsonResponse(c,{companyId:actor.orgId,conversationId,...result}):notFound(c);}catch(error){return error instanceof InvalidConversationTimelineCursor||error instanceof RangeError?invalid(c):apiError(c,'CONTROL_UNAVAILABLE','The conversation timeline is temporarily unavailable.',503);}
+  });
+  app.get(`${path}/activity`,configured,signedIn,async c=>{
+    const query=new URL(c.req.url).searchParams,value=query.get('limit')??'20',category=query.get('category')??'all',action=query.get('action'),fromRaw=query.get('from'),toRaw=query.get('to'),time=(raw:string|null)=>raw!==null&&/^\d{1,16}$/.test(raw)&&Number.isSafeInteger(Number(raw))?Number(raw):raw===null?undefined:null;
+    if(!validPath(c,true)||[...query.keys()].some(key=>!['limit','cursor','category','action','from','to'].includes(key))||[...query.keys()].some(key=>query.getAll(key).length>1)||!/^[1-9][0-9]?$/.test(value)||Number(value)>50||!['all','human_action','ai_action','customer_event'].includes(category)||(action!==null&&!v.is(conversationActivityActionSchema,action))||time(fromRaw)===null||time(toRaw)===null||(time(fromRaw)!==undefined&&time(toRaw)!==undefined&&time(fromRaw)!>=time(toRaw)!))return invalid(c);
+    const actor=actorFor(c),conversationId=c.req.param('id')!;try{const result=await readConversationActivity(c.env.DB!,actor,conversationId,c.env.BETTER_AUTH_SECRET!,{limit:Number(value),category:category as 'all'|'human_action'|'ai_action'|'customer_event',...(action!==null?{action:action as v.InferOutput<typeof conversationActivityActionSchema>}:{}),...(time(fromRaw)!==undefined?{from:time(fromRaw)!}:{}),...(time(toRaw)!==undefined?{to:time(toRaw)!}:{}),...(query.has('cursor')?{cursor:query.get('cursor')!}:{})});return result?jsonResponse(c,{companyId:actor.orgId,conversationId,...result}):notFound(c);}catch(error){return error instanceof InvalidConversationActivityCursor?invalid(c):apiError(c,'CONTROL_UNAVAILABLE','The conversation activity is temporarily unavailable.',503);}
+  });
+  app.get(`${path}/handoff-brief`, configured, signedIn, async c => {
+    if (!validPath(c)) return invalid(c);
+    const actor = actorFor(c), conversationId = c.req.param('id')!;
+    try {
+      const result = await readHandoffBrief(c.env.DB!, actor, conversationId);
+      return result ? jsonResponse(c, { companyId: actor.orgId, conversationId, ...result }) : notFound(c);
+    } catch { return apiError(c, 'CONTROL_UNAVAILABLE', 'The human follow-up requirements are temporarily unavailable.', 503); }
+  });
+  app.post(`${path}/handoff-reviews`, configured, limitedBody, signedIn, async c => {
+    if (!validPath(c)) return invalid(c);
+    const parsed=v.safeParse(acknowledgeHandoffRequestSchema,await c.req.json().catch(()=>null)),memberId=replyMemberHeader(c);
+    if(!parsed.success||memberId===null)return invalid(c);
+    const actor=actorFor(c),conversationId=c.req.param('id')!;actor.expectedMemberId=memberId;
+    try{
+      const result=await acknowledgeHandoffRequirements(c.env.DB!,actor,conversationId,parsed.output);
+      if(result.outcome==='not_found')return notFound(c);
+      if(result.outcome==='conflict')return apiError(c,'HANDOFF_REVIEW_CONFLICT','Refresh the human follow-up requirements before acknowledging them.',409);
+      const row=result.row;return jsonResponse(c,{companyId:actor.orgId,conversationId,viewerMemberId:result.viewerMemberId,commandId:row.commandId,runId:row.runId,sourceSequence:row.sourceSequence,outcome:'acknowledged',
+        review:{status:'reviewed',reviewerMemberId:row.reviewerMemberId,reviewerName:row.reviewerName,reviewedAt:new Date(row.reviewedAt).toISOString(),customerDataCollected:false,businessActionCompleted:false}});
+    }catch{return apiError(c,'OPERATION_UNCONFIRMED','The requirements may have been acknowledged. Refresh before trying again.',503);}
+  });
+  app.post(`${path}/handoff-items`, configured, limitedBody, signedIn, async c => {
+    if(!validPath(c))return invalid(c);const parsed=v.safeParse(changeHandoffItemRequestSchema,await c.req.json().catch(()=>null)),memberId=replyMemberHeader(c);if(!parsed.success||memberId===null)return invalid(c);
+    const actor=actorFor(c),conversationId=c.req.param('id')!;actor.expectedMemberId=memberId;
+    try{
+      const result=await changeHandoffItem(c.env.DB!,actor,conversationId,parsed.output);if(result.outcome==='not_found')return notFound(c);if(result.outcome==='conflict')return apiError(c,'HANDOFF_ITEM_CONFLICT','Refresh the follow-up requirements before changing this item.',409);
+      const row=result.row,item={itemIndex:row.itemIndex,kind:result.kind,revision:row.revision,status:row.status,evidence:row.status==='evidence_linked'?{messageId:row.evidenceMessageId,eventAt:new Date(row.evidenceEventAt!).toISOString()}:null,updatedBy:{memberId:row.actorMemberId,name:row.actorName,at:new Date(row.createdAt).toISOString()}};
+      return jsonResponse(c,{companyId:actor.orgId,conversationId,viewerMemberId:result.viewerMemberId,commandId:row.commandId,runId:row.runId,sourceSequence:row.sourceSequence,outcome:'updated',item,customerDataCopied:false,businessActionCompleted:false});
+    }catch{return apiError(c,'OPERATION_UNCONFIRMED','The follow-up item may have changed. Refresh before trying again.',503);}
   });
   app.get(`${path}/notes`, configured, signedIn, async c => {
     const query = new URL(c.req.url).searchParams, value = query.get('limit') ?? '20';

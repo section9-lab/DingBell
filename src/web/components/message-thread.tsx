@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { ArrowLeft, ArrowDown, Info, MessagesSquare, ImageOff } from 'lucide-react';
 import type { ConversationDetail, ConversationMessage } from '../lib/conversations-api';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from './ui/sheet';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from './ui/empty';
@@ -25,20 +24,21 @@ function ConversationContext({ conversation, messages, ...scope }: ContextProps)
   return <div className="flex flex-col gap-5 p-5 text-sm">
     <MessageContext {...scope} conversationId={conversation.id} storeId={store.id} messages={messages} />
     <Separator />
-    <div className="flex flex-col gap-2"><h3 className="font-medium">会话来源</h3><p>{store.name} · Ozon</p><dl className="flex flex-col gap-3 text-xs">
-      <div><dt className="text-muted-foreground">平台会话 ID</dt><dd className="mt-1 break-all">{conversation.platformThreadId}</dd></div>
-      <div><dt className="text-muted-foreground">平台原始类型 / 状态</dt><dd className="mt-1 break-all">{conversation.platformType} / {conversation.platformStatus}</dd></div>
-      <div><dt className="text-muted-foreground">平台创建时间</dt><dd className="mt-1">{messageDate(conversation.platformCreatedAt)}</dd></div>
-      <div><dt className="text-muted-foreground">首次导入时间</dt><dd className="mt-1">{messageDate(conversation.importedAt)}</dd></div>
-    </dl></div>
-    <Separator />
-    <div className="flex flex-col gap-2"><h3 className="font-medium">同步范围</h3><p className="text-xs text-muted-foreground">{store.status === 'disconnected' ? '店铺已断开连接，保留已导入历史。' : store.status === 'paused' ? '店铺已暂停，保留已导入历史。' : sync.enabled ? '会话同步已启用。' : '会话同步未启用。'}</p>
-      <p className="text-xs">{sync.backfillComplete === true ? '本次历史分页已读完' : sync.backfillComplete === false ? '历史消息仍在补拉' : '历史范围尚未确认'}</p>
-      <p className="text-xs text-muted-foreground">最近成功读取：{messageDate(sync.lastSuccessAt)}</p>
-      {sync.lastError && <p className="text-xs text-destructive">同步遇到异常，请在店铺管理查看原因。</p>}
-      <p className="text-xs text-muted-foreground">这里只显示已导入记录；时间按公司时区 {timeZone} 显示。新记录持续补读，翻阅历史时可通过提示查看更新。</p>
+    <div className="flex flex-col gap-2"><h3 className="font-medium">会话来源</h3><p>{store.name} · Ozon</p>
+      {(store.status === 'disconnected' || store.status === 'paused' || !sync.enabled || sync.lastError) && <p className="text-xs text-destructive">{store.status === 'disconnected' ? '店铺已断开，当前显示已导入历史。' : store.status === 'paused' ? '店铺同步已暂停。' : sync.lastError ? '上次同步失败，当前已停止，请在店铺管理中重试。' : !sync.enabled ? '会话同步尚未启用。' : '同步遇到异常，请在店铺管理查看。'}</p>}
     </div>
-    <Separator />
+    <details className="rounded-md border px-3 py-2 text-xs">
+      <summary className="cursor-pointer text-muted-foreground">技术与同步信息</summary>
+      <dl className="mt-3 flex flex-col gap-3">
+        <div><dt className="text-muted-foreground">平台会话 ID</dt><dd className="mt-1 break-all">{conversation.platformThreadId}</dd></div>
+        <div><dt className="text-muted-foreground">平台类型 / 状态</dt><dd className="mt-1 break-all">{conversation.platformType} / {conversation.platformStatus}</dd></div>
+        <div><dt className="text-muted-foreground">平台创建时间</dt><dd className="mt-1">{messageDate(conversation.platformCreatedAt)}</dd></div>
+        <div><dt className="text-muted-foreground">首次导入时间</dt><dd className="mt-1">{messageDate(conversation.importedAt)}</dd></div>
+        <div><dt className="text-muted-foreground">历史读取</dt><dd className="mt-1">{sync.backfillComplete === true ? '已完成' : sync.backfillComplete === false ? '仍在读取' : '范围尚未确认'}</dd></div>
+        <div><dt className="text-muted-foreground">最近成功读取</dt><dd className="mt-1">{messageDate(sync.lastSuccessAt)}</dd></div>
+      </dl>
+      <p className="mt-3 text-muted-foreground">时间按公司时区 {timeZone} 显示。</p>
+    </details>
   </div>;
 }
 
@@ -64,7 +64,7 @@ export function MessageTimeline({ messages, pageKey, earlier, anchorId, view, on
       <ReadingPosition anchorId={anchorId} view={view} onPosition={onPosition} />
       <MessageScrollerViewport aria-label="消息记录" role="region" tabIndex={0}>
         <MessageScrollerContent className="p-4 sm:p-6">
-          <MessageScrollerItem messageId="page-marker"><Marker variant="separator"><MarkerContent>平台原文 · 当前页 {messages.length} 条</MarkerContent></Marker></MessageScrollerItem>
+          <MessageScrollerItem messageId="page-marker"><Marker variant="separator"><MarkerContent>当前页 {messages.length} 条消息</MarkerContent></Marker></MessageScrollerItem>
           {messages.map(message => {
             const outbound = message.direction === 'outbound';
             const sender = outbound ? '商家' : message.direction === 'inbound' ? '买家' : '未知发送者';
@@ -77,7 +77,7 @@ export function MessageTimeline({ messages, pageKey, earlier, anchorId, view, on
                       {message.isImage ? <Marker><MarkerIcon><ImageOff /></MarkerIcon><MarkerContent>图片消息暂不展示</MarkerContent></Marker> : message.content.length ? <p dir="auto" className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content.join('\n')}</p> : <p>此消息没有可显示的文本。</p>}
                     </BubbleContent>
                   </Bubble>
-                  <MessageFooter><div className="flex flex-col gap-1"><time dateTime={message.eventAt}>平台时间 {messageDate(message.eventAt)}</time><span title={`平台消息 ID：${message.platformMessageId}；发送者：${message.senderId ?? '未知'}（${message.senderType}）`}>导入 {messageDate(message.receivedAt)} · {message.ingestMode === 'backfill' ? '历史导入' : '增量导入'}</span></div></MessageFooter>
+                  <MessageFooter><time dateTime={message.eventAt} title={`导入时间：${messageDate(message.receivedAt)}；${message.ingestMode === 'backfill' ? '历史导入' : '增量导入'}`}>平台时间 {messageDate(message.eventAt)}</time></MessageFooter>
                 </MessageContent>
               </Message>
             </MessageScrollerItem>;
@@ -93,8 +93,7 @@ export function ConversationHeader({ conversation, messages, back, ...scope }: C
   const [open, setOpen] = useState(false);
   return <header className="flex shrink-0 items-center gap-3 border-b p-4">
     <Button variant="ghost" size="icon-sm" aria-label="返回会话列表" onClick={back} className="md:hidden"><ArrowLeft /></Button>
-    <div className="min-w-0 flex-1"><h2 className="truncate font-semibold" title={`会话 ${conversation.platformThreadId}`}>会话 {conversation.platformThreadId}</h2><p className="mt-1 truncate text-xs text-muted-foreground">{conversation.store.name} · Ozon · 使用平台原文</p></div>
-    <Badge variant="outline" className="hidden sm:inline-flex">平台原文</Badge>
+    <div className="min-w-0 flex-1"><h2 className="truncate font-semibold" aria-label={`会话 ${conversation.platformThreadId}`}>买家咨询</h2><p className="mt-1 truncate text-xs text-muted-foreground">{conversation.store.name} · Ozon</p></div>
     <Sheet open={open} onOpenChange={setOpen}><SheetTrigger render={<Button variant="outline" size="icon-sm" aria-label="会话详情" />}><Info /></SheetTrigger><SheetContent className="w-full overflow-y-auto"><SheetHeader><SheetTitle>会话详情</SheetTitle><SheetDescription>查看商品、订单包裹、消息来源与同步范围。</SheetDescription></SheetHeader><ConversationContext {...scope} conversation={conversation} messages={messages} /></SheetContent></Sheet>
   </header>;
 }

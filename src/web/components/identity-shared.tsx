@@ -1,17 +1,16 @@
 import type { ReactNode } from 'react';
-import { MessagesSquare, CircleAlert } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
 import { Spinner } from './ui/spinner';
 import { ApiError } from '../lib/api';
+import { DingBellLogo } from './dingbell-logo';
 
 export function Brand() {
   return (
-    <div className="flex items-center gap-2.5 font-semibold tracking-tight">
-      <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-        <MessagesSquare className="size-4" aria-hidden="true" />
-      </span>
-      <span className="text-lg">DingBell</span>
+    <div className="flex items-center gap-2.5 font-semibold tracking-tight group-data-[collapsible=icon]:justify-center">
+      <DingBellLogo className="size-8 shrink-0" />
+      <span className="text-lg group-data-[collapsible=icon]:hidden">DingBell</span>
     </div>
   );
 }
@@ -76,6 +75,38 @@ export function ErrorNotice({ error }: { error: unknown }) {
         )}
       </AlertDescription>
     </Alert>
+  );
+}
+
+export function WorkspaceLoadingPage({ message = '正在恢复工作区…' }: { message?: string }) {
+  return (
+    <div className="flex min-h-svh bg-background">
+      <aside className="hidden w-56 shrink-0 flex-col border-r bg-sidebar p-4 md:flex">
+        <Brand />
+        <div className="mt-10 flex flex-col gap-3" aria-hidden="true">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-4/5" />
+          <Skeleton className="h-8 w-11/12" />
+          <Skeleton className="h-8 w-3/4" />
+        </div>
+      </aside>
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
+          <DingBellLogo className="size-7 md:hidden" />
+          <Skeleton className="h-4 w-32" />
+        </header>
+        <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-6 py-8 lg:px-10 lg:py-12" role="status" aria-live="polite">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner aria-hidden="true" />{message}</div>
+          <Skeleton className="h-8 w-48" />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
+          <Skeleton className="h-40 w-full" aria-hidden="true" />
+        </div>
+      </main>
+    </div>
   );
 }
 

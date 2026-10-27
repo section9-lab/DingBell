@@ -395,7 +395,7 @@ for (const firstCheck of ['list', 'identity'] as const) test(`queue counts and m
     await application.rejoinFixtureMember(first);
     if (firstCheck === 'identity') {
       const identityGate = new Promise<void>(resolve => { releaseIdentity = resolve; });
-      await member.route('**/api/setup', async route => { await identityGate; await route.continue(); });
+      await member.route('**/api/workspace-bootstrap', async route => { await identityGate; await route.continue(); });
       await member.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});window.dispatchEvent(new Event('visibilitychange'));Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});window.dispatchEvent(new Event('visibilitychange'));");
       await expect(member.getByRole('heading', { name: '消息中心', exact: true })).toHaveCount(0);
       releaseIdentity();

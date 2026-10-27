@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import {aiScopeSchema} from '../conversations/ai-state.ts';
 import type {ControlScope} from '../conversations/control-types.ts';
 import {reconcileAiExecution,type SupportBindings} from './execution.ts';
+import {reconcileAiKnowledgeUsage} from './knowledge.ts';
 
 const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8640000000000000-300000));
 const uuid=v.pipe(v.string(),v.uuid());
@@ -19,17 +20,19 @@ export async function claimAiRepairs(db:D1Database,now:number,limit=50):Promise<
 export async function finishAiRepair(db:D1Database,value:AiRepair){
  const {runId,scope,token}=v.parse(claimSchema,value),now=Date.now();v.parse(time,now);
  await db.prepare(`UPDATE ai_execution SET repair_token=NULL,repair_due_at=CASE
-  WHEN closure IS NOT NULL AND NOT EXISTS(SELECT 1 FROM ai_generation WHERE run_id=ai_execution.id AND usage IS NULL) THEN NULL
+  WHEN closure IS NOT NULL AND NOT EXISTS(SELECT 1 FROM ai_generation WHERE run_id=ai_execution.id AND usage IS NULL)
+   AND NOT EXISTS(SELECT 1 FROM ai_knowledge_query WHERE run_id=ai_execution.id AND gateway_log_id IS NOT NULL AND charged_micros IS NULL) THEN NULL
   WHEN closure IS NOT NULL THEN ? ELSE ? END
   WHERE id=? AND organization_id=? AND store_id=? AND conversation_id=? AND controller_id=? AND repair_token=?`)
   .bind(now+300000,now+60000,runId,scope.organizationId,scope.storeId,scope.conversationId,scope.controllerId,token).run();
 }
-export async function repairAiExecutions(env:SupportBindings,deps:{reconcile?:typeof reconcileAiExecution}={}){
- if(!env.DB||!env.FLUE_SUPPORT_AGENT||!env.CONVERSATION_CONTROLLER)return;
- const claims=await claimAiRepairs(env.DB,Date.now()),reconcile=deps.reconcile??reconcileAiExecution;
+export async function repairAiExecutions(env:SupportBindings,deps:{reconcile?:typeof reconcileAiExecution;reconcileKnowledge?:typeof reconcileAiKnowledgeUsage}={}){
+ if(!env.DB||(!env.KNOWLEDGE_AI&&(!env.FLUE_SUPPORT_AGENT||!env.CONVERSATION_CONTROLLER)))return;
+ const claims=await claimAiRepairs(env.DB,Date.now()),reconcile=deps.reconcile??reconcileAiExecution,reconcileKnowledge=deps.reconcileKnowledge??reconcileAiKnowledgeUsage;
  for(let offset=0;offset<claims.length;offset+=5)await Promise.allSettled(claims.slice(offset,offset+5).map(async claim=>{
   let timer:ReturnType<typeof setTimeout>|undefined;
-  try{await Promise.race([reconcile(env,claim.scope,claim.runId),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('AI_REPAIR_TIMEOUT')),3000);})]);}
+  try{await Promise.race([Promise.allSettled([reconcile(env,claim.scope,claim.runId),reconcileKnowledge(env,claim.scope,claim.runId)]),
+   new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('AI_REPAIR_TIMEOUT')),3000);})]);}
   finally{clearTimeout(timer);await finishAiRepair(env.DB!,claim);}
  }));
 }

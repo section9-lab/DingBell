@@ -55,13 +55,19 @@ export const aiExecution=sqliteTable('ai_execution',{
 export const aiKnowledgeQuery=sqliteTable('ai_knowledge_query',{
  runId:text('run_id').primaryKey().references(()=>aiExecution.id,{onDelete:'restrict'}),
  config:text('config').notNull(),scope:text('scope').notNull(),questionHash:text('question_hash').notNull(),reservedMicros:integer('reserved_micros').notNull(),
- createdAt:integer('created_at').notNull(),vectors:text('vectors'),evidence:text('evidence'),
+ createdAt:integer('created_at').notNull(),vectors:text('vectors'),evidence:text('evidence'),gatewayLogId:text('gateway_log_id'),
+ gatewayUsage:text('gateway_usage'),chargedMicros:integer('charged_micros'),settledAt:integer('settled_at'),
 },table=>[
  check('ai_knowledge_query_json',sql`json_valid(${table.config}) AND json_type(${table.config})='object' AND json_valid(${table.scope}) AND json_type(${table.scope})='object'
   AND (${table.vectors} IS NULL OR (json_valid(${table.vectors}) AND json_type(${table.vectors})='array'))
   AND (${table.evidence} IS NULL OR (${table.vectors} IS NOT NULL AND json_valid(${table.evidence}) AND json_type(${table.evidence})='object'))`),
  check('ai_knowledge_query_amount',sql`typeof(${table.reservedMicros})='integer' AND ${table.reservedMicros} BETWEEN 0 AND 9007199254740991`),
  check('ai_knowledge_query_identity',sql`length(${table.questionHash})=64 AND ${table.questionHash} NOT GLOB '*[^0-9a-f]*' AND typeof(${table.createdAt})='integer' AND ${table.createdAt} BETWEEN 0 AND 8640000000000000`),
+ check('ai_knowledge_query_gateway_log_valid',sql`${table.gatewayLogId} IS NULL OR length(${table.gatewayLogId}) BETWEEN 1 AND 256`),
+ check('ai_knowledge_query_settlement_valid',sql`(${table.gatewayUsage} IS NULL AND ${table.chargedMicros} IS NULL AND ${table.settledAt} IS NULL) OR
+  (${table.gatewayLogId} IS NOT NULL AND json_valid(${table.gatewayUsage}) AND json_type(${table.gatewayUsage})='object'
+    AND typeof(${table.chargedMicros})='integer' AND ${table.chargedMicros} BETWEEN 0 AND ${table.reservedMicros}
+    AND typeof(${table.settledAt})='integer' AND ${table.settledAt} BETWEEN ${table.createdAt} AND 8640000000000000)`),
 ]);
 export const aiAnswer=sqliteTable('ai_answer',{
  runId:text('run_id').primaryKey().references(()=>aiExecution.id,{onDelete:'restrict'}),body:text('body').notNull(),citations:text('citations').notNull(),

@@ -25,7 +25,7 @@ function listing(item: OzonProductListItem) {
 }
 function facts(item: OzonProductDetails) {
   if (typeof item.id !== 'string' || !decimalId.test(item.id) || item.price !== null && (typeof item.price !== 'string' || !/^[0-9]+(?:\.[0-9]+)?$/.test(item.price))) throw new Error('INVALID_PRODUCT_PAGE');
-  return { id:item.id,offerId:item.offerId,name:item.name,sku:item.sku,sources:item.sources.map(source=>({sku:source.sku,source:source.source})),price:item.price,currency:item.currency,archived:item.archived };
+  return { id:item.id,offerId:item.offerId,name:item.name,sku:item.sku,sources:item.sources.map(source=>({sku:source.sku,source:source.source})),price:item.price,currency:item.currency,archived:item.archived,primaryImage:item.primaryImage,images:item.images };
 }
 
 export async function getDueProductWork(db: D1Database, lease: SyncLease, limit = 50): Promise<ProductWork | null> {

@@ -26,12 +26,13 @@ export const replyTestRun=sqliteTable('reply_test_run',{
   budgetId:text('budget_id').notNull(),payload:text('payload').notNull(),payloadHash:text('payload_hash').notNull(),config:text('config').notNull(),
   reservedMicros:integer('reserved_micros').notNull(),createdAt:integer('created_at').notNull(),receipt:text('receipt'),
   providerRequestClaimedAt:integer('provider_request_claimed_at'),settlement:text('settlement').notNull().default('held'),usage:text('usage'),
-  chargedMicros:integer('charged_micros'),settledAt:integer('settled_at'),releaseEvidence:text('release_evidence'),
+  chargedMicros:integer('charged_micros'),settledAt:integer('settled_at'),releaseEvidence:text('release_evidence'),repairDueAt:integer('repair_due_at').default(0),repairToken:text('repair_token'),
 },table=>[
   foreignKey({columns:[table.conversationId,table.organizationId,table.storeId],foreignColumns:[conversation.id,conversation.organizationId,conversation.storeId]}).onDelete('restrict'),
   foreignKey({columns:[table.budgetId,table.organizationId],foreignColumns:[replyTestBudget.id,replyTestBudget.organizationId]}).onDelete('restrict'),
   uniqueIndex('reply_test_request_unique').on(table.organizationId,table.requestId),
   index('reply_test_financial_idx').on(table.settlement,table.createdAt,table.id),
+  index('reply_test_repair_idx').on(table.settlement,table.repairDueAt,table.id),
   check('reply_test_payload_valid',sql`json_valid(${table.payload}) AND json_type(${table.payload})='object' AND length(CAST(${table.payload} AS BLOB)) BETWEEN 1 AND 98304
     AND length(${table.payloadHash})=64 AND ${table.payloadHash} NOT GLOB '*[^0-9a-f]*' AND json_valid(${table.config}) AND json_type(${table.config})='object'`),
   check('reply_test_receipt_valid',sql`${table.receipt} IS NULL OR (json_valid(${table.receipt}) AND json_type(${table.receipt})='object')`),
@@ -40,6 +41,7 @@ export const replyTestRun=sqliteTable('reply_test_run',{
   check('reply_test_time_valid',sql`typeof(${table.createdAt})='integer' AND ${table.createdAt} BETWEEN 0 AND 8640000000000000
     AND (${table.settledAt} IS NULL OR (typeof(${table.settledAt})='integer' AND ${table.settledAt} BETWEEN ${table.createdAt} AND 8640000000000000))`),
   check('reply_test_permit_valid',sql`${table.providerRequestClaimedAt} IS NULL OR (typeof(${table.providerRequestClaimedAt})='integer' AND ${table.providerRequestClaimedAt} BETWEEN ${table.createdAt} AND 8640000000000000 AND ${table.settlement}<>'released')`),
+  check('reply_test_repair_valid',sql`${table.repairDueAt} IS NULL OR (typeof(${table.repairDueAt})='integer' AND ${table.repairDueAt} BETWEEN 0 AND 8640000000000000)`),
   check('reply_test_settlement_valid',sql`(${table.settlement}='held' AND ${table.usage} IS NULL AND ${table.chargedMicros} IS NULL AND ${table.settledAt} IS NULL AND ${table.releaseEvidence} IS NULL)
     OR (${table.settlement}='settled' AND ${table.receipt} IS NOT NULL AND ${table.providerRequestClaimedAt} IS NOT NULL AND ${table.usage} IS NOT NULL AND json_valid(${table.usage}) AND json_type(${table.usage})='object' AND ${table.chargedMicros} IS NOT NULL AND ${table.settledAt} IS NOT NULL AND ${table.releaseEvidence} IS NULL)
     OR (${table.settlement}='released' AND ${table.providerRequestClaimedAt} IS NULL AND ${table.usage} IS NULL AND ${table.chargedMicros} IS NOT NULL AND ${table.chargedMicros}=0 AND ${table.settledAt} IS NOT NULL AND ${table.releaseEvidence} IS NOT NULL AND json_valid(${table.releaseEvidence}) AND json_type(${table.releaseEvidence})='object')`),

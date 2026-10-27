@@ -40,7 +40,7 @@ test('product persistence uses real D1 transactions and current source authoriza
   const capabilities = JSON.stringify(['auth', 'products_read', 'chats_read'].map(code => ({ code, status: 'available', reason: 'read_verified' })));
   const productId = '9000000000817031942';
   const item = (id = productId): OzonProductListItem => ({ id, offerId: `offer-${id}`, sku: '9000000000817031941', archived: false, hasFboStocks: false, hasFbsStocks: true });
-  const facts = (id = productId, price = '000012.3400'): OzonProductDetails => ({ id, offerId: `offer-${id}`, name: 'Синтетический товар', sku: '9000000000817031941', sources: [{ sku: '9000000000817031941', source: 'fbs' }], price, currency: 'RUB', archived: false });
+  const facts = (id = productId, price = '000012.3400'): OzonProductDetails => ({ id, offerId: `offer-${id}`, name: 'Синтетический товар', sku: '9000000000817031941', sources: [{ sku: '9000000000817031941', source: 'fbs' }], price, currency: 'RUB', archived: false, primaryImage: 'https://ir-20.ozone.ru/s3/product-1.jpg', images: ['https://ir-20.ozone.ru/s3/product-1.jpg'] });
   async function addStore(id: string) {
     await db.prepare(`INSERT INTO store (id,organization_id,name,platform_store_id,status,credential_key_version,credential_nonce,credential_ciphertext,capabilities,checked_at,expires_at,created_at,updated_at)
       VALUES (?,?,'Products',?,'verified','synthetic','synthetic','synthetic',?,1,?,1,1)`).bind(id, actor.orgId, id, capabilities, Date.now() + 3_600_000).run();

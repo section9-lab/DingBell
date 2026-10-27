@@ -67,6 +67,30 @@ test('classification selects the server policy and persists a bound next-run ide
  await f.restart();assert.deepEqual((await f.call('ai-classified-input')).body,next);assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);
  assert.equal((await f.call('ai-start',{request:{...next.request,stage:'presale'}})).body.outcome,'conflict');assert.equal((await f.call('ai-start',{request:next.request})).body.outcome,'accepted');assert.equal((await f.call('ai-classified-input')).body,null);
 });
+test('classification committed during a live read replays its original receipt and rejects a different decision',{timeout:30000},async t=>{
+ const f=await fixture();t.after(f.close);assert.equal((await f.start()).body.outcome,'accepted');
+ await f.call('classification-read-race',{classification:f.classification});
+ const replay=await f.classify();assert.equal(replay.body.outcome,'accepted',JSON.stringify(replay.body));
+ const receipt=replay.body.receipt,next=(await f.call('ai-classified-input')).body;
+ assert.equal(receipt.decision.kind,'ready');assert.equal(next.request.runId,receipt.decision.nextRunId);
+ assert.deepEqual((await f.classify()).body.receipt,receipt);
+ assert.equal((await f.classify({...f.classification,customerRequestedHuman:true})).body.outcome,'conflict');
+ assert.deepEqual((await f.call('ai-classified-input')).body,next);
+ assert.equal(await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='ai_classification'").first('n'),1);
+ assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);
+ assert.deepEqual(f.providerRequests,[]);
+});
+test('a different classification racing the live read cannot replace the already committed decision',{timeout:30000},async t=>{
+ const f=await fixture();t.after(f.close);assert.equal((await f.start()).body.outcome,'accepted');
+ await f.call('classification-read-race',{classification:f.classification});
+ assert.equal((await f.classify({...f.classification,customerRequestedHuman:true})).body.outcome,'conflict');
+ const next=(await f.call('ai-classified-input')).body,receipt=(await f.classify()).body.receipt;
+ assert.equal(receipt.decision.kind,'ready');assert.equal(next.request.runId,receipt.decision.nextRunId);
+ assert.equal((await f.call('read')).body.view.state.reception,'ai');
+ assert.equal(await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='ai_classification'").first('n'),1);
+ assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);
+ assert.deepEqual(f.providerRequests,[]);
+});
 test('unknown classification and explicit requests for a person enter the human queue; historical replies cannot restore authority',{timeout:30000},async t=>{
  for(const input of [{stage:'unknown',language:'ru',customerRequestedHuman:false},{stage:'order',language:'unknown',customerRequestedHuman:false},{stage:'order',language:'ru',customerRequestedHuman:true}]){
   const f=await fixture();try{assert.equal((await f.start()).body.outcome,'accepted');const r=await f.classify(input);assert.equal(r.body.outcome,'accepted');assert.equal(r.body.receipt.decision.kind,'handoff');assert.equal(r.body.state.reception,'paused');assert.equal(r.body.state.workStatus,'needs_reply');assert.equal((await f.call('ai-classified-input')).body,null);

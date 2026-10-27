@@ -6,6 +6,8 @@ import {conversationControlFixture} from './fixtures/conversation-control.ts';
 import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.ts';
 import {ensureControlDirectory} from '../src/modules/conversations/control-storage.ts';
 import {changeAiBudget,reserveAiExecution} from '../src/modules/ai-runs/storage.ts';
+import {bindAiExecutionReceipt,claimAiGeneration,closeAiExecution,settleAiGeneration} from '../src/modules/ai-runs/storage.ts';
+import {readCompanyBudgetAudit} from '../src/modules/budget-audit/storage.ts';
 import {prepareKnowledge} from '../src/modules/knowledge/content.ts';
 import {writeKnowledge,publishKnowledge,withdrawKnowledge} from '../src/modules/knowledge/storage.ts';
 import {knowledgeManifest,indexKnowledge,knowledgeProfile} from '../src/modules/knowledge/vectorize.ts';
@@ -14,6 +16,26 @@ const vector=Array.from({length:1024},(_,i)=>i===0?1:0);
 const config={model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-knowledge-v1',maxInputTokens:100,maxOutputTokens:10,
  pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}},maxGenerations:3};
 const queryConfig={profile:knowledgeProfile.id,priceVersion:'synthetic-query',maxInputTokens:60000,inputMicrosPerMillion:1000};
+test('financial audit remains balanced through closure, takeover, restart and late usage without releasing embedding costs',{timeout:30000},async t=>{
+ const x=await fixture();t.after(x.f.close);await x.source('published');
+ const receipt={submissionId:'synthetic-audit',uid:'synthetic-incarnation',acceptedAt:new Date().toISOString()};
+ const audit=()=>readCompanyBudgetAudit(x.f.db,x.actor,'ai',x.budgetId);
+ assert.equal((await audit())!.expected.reservedMicros,'330');
+ await bindAiExecutionReceipt(x.f.db,x.scope,x.run.request.runId,receipt);
+ assert.equal(await claimAiGeneration(x.f.db,x.read,x.scope,x.run.request.runId,1),true);
+ assert.equal((await search()).status,'found');
+ async function search(){return (await api()).searchAiKnowledge(x.env,x.read,x.scope,x.run.request.runId);}
+ assert.equal((await audit())!.expected.reservedMicros,'390');
+ assert.equal((await x.f.call('execute',{command:{commandId:crypto.randomUUID(),action:'takeover',expectedVersion:1}},x.scope)).body.outcome,'accepted');
+ const proof={kind:'runtime_closed',evidenceId:crypto.randomUUID(),instanceId:`ai-support:${x.run.request.runId}`,receipt,outcome:'aborted',executionClosed:true,providerPermits:1,verifiedAt:Date.now()};
+ await closeAiExecution(x.f.db,x.scope,x.run.request.runId,proof);
+ const closed=await audit();assert.equal(closed!.status,'balanced');assert.equal(closed!.expected.reservedMicros,'170');
+ await x.f.restart();assert.deepEqual({...await audit(),at:0},{...closed,at:0});
+ const usage={input:10,output:5,cacheRead:0,cacheWrite:0};
+ await Promise.all([1,2].map(()=>settleAiGeneration(x.f.db,x.scope,x.run.request.runId,1,receipt,usage)));
+ const settled=await audit();assert.equal(settled!.status,'balanced');assert.equal(settled!.expected.reservedMicros,'60');assert.equal(settled!.expected.spentMicros,'15');assert.equal(settled!.embeddingReservedMicros,'60');assert.equal(x.calls(),1);
+ await closeAiExecution(x.f.db,x.scope,x.run.request.runId,proof);assert.deepEqual({...await audit(),at:0},{...settled,at:0});
+});
 async function api(){const m=await import('../src/modules/ai-runs/knowledge.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.searchAiKnowledge,'function','AI knowledge retrieval needs a run-bound authorization and production embedding allowance');return m!;}
 async function fixture(upTo?:string){
  const f=await conversationControlFixture(upTo,{aiEnabled:'true'}),actor={...f.actor(),expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
@@ -68,6 +90,30 @@ test('an ambiguous embedding response is never retried and insufficient producti
  assert.equal((await m.searchAiKnowledge(x.env,x.read,x.scope,x.run.request.runId)).status,'unconfirmed');assert.equal((await m.searchAiKnowledge(x.env,x.read,x.scope,x.run.request.runId)).status,'unconfirmed');assert.equal(x.calls(),1);
  assert.equal(await x.f.db.prepare('SELECT reserved_micros FROM ai_budget WHERE id=?').bind(x.budgetId).first('reserved_micros'),390);
 });
+test('a matching AI Gateway log settles one embedding hold without becoming invoice evidence',{timeout:30000},async t=>{
+ const m=await api(),x=await fixture();t.after(x.f.close);await x.source('published');let options:unknown,calls=0,valid=false,cost=0.00000002,logReads=0;
+ x.env.AI_KNOWLEDGE_QUERY_CONFIG_JSON=JSON.stringify({...queryConfig,gatewayId:'dingbell-production'});
+ x.env.KNOWLEDGE_AI={aiGatewayLogId:'gateway-log-1',run:async(_model:string,_input:unknown,value:unknown)=>{calls++;options=value;return {shape:[1,1024],data:[vector]};},
+  gateway:(id:string)=>{assert.equal(id,'dingbell-production');return {getLog:async(logId:string)=>{logReads++;return {id:logId,provider:'workers-ai',model:knowledgeProfile.model,path:'',duration:1,status_code:200,success:true,cached:false,
+   tokens_in:10,tokens_out:0,cost,custom_cost:false,metadata:{dingbellPurpose:'ai-knowledge',dingbellRunId:valid?x.run.request.runId:'wrong'},request_size:1,request_head_complete:false,response_size:1,response_head_complete:false,created_at:new Date()};}};}} as unknown as Ai;
+ assert.equal((await m.searchAiKnowledge(x.env,x.read,x.scope,x.run.request.runId)).status,'found');assert.equal(calls,1);
+ assert.deepEqual(options,{gateway:{id:'dingbell-production',eventId:x.run.request.runId,collectLog:true,skipCache:true,
+  metadata:{dingbellPurpose:'ai-knowledge',dingbellRunId:x.run.request.runId}}});
+ assert.equal(await x.f.db.prepare('SELECT gateway_log_id FROM ai_knowledge_query WHERE run_id=?').bind(x.run.request.runId).first('gateway_log_id'),'gateway-log-1');
+ let audit=await readCompanyBudgetAudit(x.f.db,x.actor,'ai',x.budgetId);assert.equal(audit!.embeddingReservedMicros,'60');assert.equal(audit!.embeddingCorrelatedMicros,'60');assert.equal(audit!.embeddingUncorrelatedMicros,'0');
+ await closeAiExecution(x.f.db,x.scope,x.run.request.runId,{kind:'unstarted_closed',evidenceId:crypto.randomUUID(),instanceId:`ai-support:${x.run.request.runId}`,executionClosed:true,providerPermits:0,verifiedAt:Date.now()});
+ audit=await readCompanyBudgetAudit(x.f.db,x.actor,'ai',x.budgetId);assert.equal(audit!.expected.reservedMicros,'60');
+ assert.equal((await m.reconcileAiKnowledgeUsage(x.env,x.scope,x.run.request.runId)).status,'unconfirmed');valid=true;
+ assert.equal((await m.reconcileAiKnowledgeUsage(x.env,x.scope,x.run.request.runId)).status,'unconfirmed');cost=0.00000001;
+ const reconciled=await Promise.all([1,2].map(()=>m.reconcileAiKnowledgeUsage(x.env,x.scope,x.run.request.runId)));
+ assert.deepEqual(reconciled.map(row=>row.status).sort(),['already_settled','settled']);assert.equal(logReads,4);
+ assert.equal((await m.reconcileAiKnowledgeUsage(x.env,x.scope,x.run.request.runId)).status,'already_settled');assert.equal(logReads,4);
+ audit=await readCompanyBudgetAudit(x.f.db,x.actor,'ai',x.budgetId);assert.equal(audit!.expected.reservedMicros,'0');assert.equal(audit!.expected.spentMicros,'1');
+ assert.equal(audit!.embeddingReservedMicros,'0');assert.equal(audit!.supplierCostsVerified,false);assert.equal(audit!.canRelease,false);
+ const settled=await x.f.db.prepare('SELECT gateway_usage,charged_micros,settled_at FROM ai_knowledge_query').first<any>();assert.equal(settled.charged_micros,1);assert.ok(settled.settled_at);assert.equal(JSON.parse(settled.gateway_usage).tokensIn,10);
+ await assert.rejects(()=>x.f.db.prepare("UPDATE ai_knowledge_query SET gateway_log_id='changed'").run(),/AI_KNOWLEDGE_QUERY_IMMUTABLE/);
+ await assert.rejects(()=>x.f.db.prepare('UPDATE ai_knowledge_query SET charged_micros=2').run(),/AI_KNOWLEDGE_QUERY_IMMUTABLE/);
+});
 test('concurrent searches share one provider permit; saved evidence is immutable and must still be currently published',{timeout:30000},async t=>{
  const m=await api(),x=await fixture();t.after(x.f.close);const source=await x.source('published');let entered!:()=>void,release!:()=>void;
  const started=new Promise<void>(r=>{entered=r;}),waiting=new Promise<void>(r=>{release=r;});x.embedding(async()=>{entered();await waiting;});
@@ -118,6 +164,22 @@ test('the product filter comes only from the original platform message and a cha
  const result=await m.searchAiKnowledge(x.env,x.read,x.scope,x.run.request.runId);assert.equal(result.status,'found');assert.deepEqual(result.evidence!.chunks.map(c=>c.documentId),[expected.id]);
  await x.f.db.prepare("INSERT INTO product_sku(organization_id,store_id,sku,product_id,source) VALUES('org','store','platform-sku','product-b','list')").run();
  assert.equal(await m.reviewAiKnowledgeEvidence(x.env,x.read,x.scope,x.run.request.runId,result.evidence),null);assert.equal((await m.searchAiKnowledge(x.env,x.read,x.scope,x.run.request.runId)).status,'changed');assert.equal(x.calls(),1);
+});
+test('0045 adds an immutable nullable gateway correlation without rewriting historical query authority',{timeout:30000},async t=>{
+ const x=await fixture('0044');t.after(x.f.close);
+ await x.f.db.prepare("INSERT INTO ai_knowledge_query(run_id,config,scope,question_hash,reserved_micros,created_at,vectors,evidence) VALUES(?,?,?,?,?,1,NULL,NULL)")
+  .bind(x.run.request.runId,JSON.stringify(queryConfig),JSON.stringify({storeId:'store',productRef:null,language:'ru'}),'a'.repeat(64),60).run();
+ const before=JSON.stringify((await x.f.db.prepare('SELECT run_id,config,scope,question_hash,reserved_micros,created_at,vectors,evidence FROM ai_knowledge_query').all()).results);
+ const statements=(await readFile(new URL('../migrations/0045_ai_knowledge_gateway_log.sql',import.meta.url),'utf8')).split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean);
+ await x.f.db.batch(statements.map(sql=>x.f.db.prepare(sql)));
+ assert.equal(JSON.stringify((await x.f.db.prepare('SELECT run_id,config,scope,question_hash,reserved_micros,created_at,vectors,evidence FROM ai_knowledge_query').all()).results),before);
+ const added=await x.f.db.prepare('SELECT gateway_log_id,gateway_usage,charged_micros,settled_at FROM ai_knowledge_query').first<any>();
+ assert.deepEqual(added,{gateway_log_id:null,gateway_usage:null,charged_micros:null,settled_at:null});
+ await assert.rejects(()=>x.f.db.prepare('UPDATE ai_knowledge_query SET charged_micros=1').run(),/CHECK constraint failed/);
+ await x.f.db.prepare("UPDATE ai_knowledge_query SET gateway_log_id='historical-log'").run();
+ await assert.rejects(()=>x.f.db.prepare("UPDATE ai_knowledge_query SET gateway_log_id='changed'").run(),/AI_KNOWLEDGE_QUERY_IMMUTABLE/);
+ await assert.rejects(()=>x.f.db.prepare('DELETE FROM ai_knowledge_query').run(),/AI_KNOWLEDGE_QUERY_IMMUTABLE/);
+ assert.deepEqual((await x.f.db.prepare('PRAGMA foreign_key_check').all()).results,[]);
 });
 test('0041 preserves existing financial and knowledge rows, rolls back failures and never creates historical query grants',{timeout:30000},async t=>{
  const x=await fixture('0040');t.after(x.f.close);await x.source('prior knowledge');

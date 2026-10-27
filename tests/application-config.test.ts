@@ -9,6 +9,17 @@ test('setup reports missing identity and mail configuration without requiring mo
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
 
+test('workspace bootstrap returns one public unconfigured snapshot without private reads', async () => {
+  const response = await app.request('/api/workspace-bootstrap');
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    setup: { identity: { configured: false }, registration: { enabled: false }, email: { configured: false } },
+    session: null,
+    companies: null,
+  });
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
+
 test('identity endpoints fail closed with a safe error and a server-generated request ID', async () => {
   for (const [method, path] of [['GET', '/api/companies'], ['GET', '/api/auth/get-session'], ['POST', '/api/auth/sign-in/email'], ['POST', '/api/auth/request-password-reset'], ['POST', '/api/auth/send-verification-email'], ['POST', '/api/auth/verify-email'], ['POST', '/api/auth/reset-password']]) {
     const response = await app.request(path, { method, headers: { 'x-request-id': 'untrusted-id' } });

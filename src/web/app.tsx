@@ -19,6 +19,7 @@ import {
   AuthFrame,
   ErrorNotice,
   LoadingPage,
+  WorkspaceLoadingPage,
 } from './components/identity-shared';
 import { CompanySettingsProvider } from './components/company-settings-provider';
 import { Button } from './components/ui/button';
@@ -30,23 +31,42 @@ import { clearAiResumptions } from './lib/ai-reception-pending';
 import { clearReplyDrafts } from './lib/conversation-draft';
 import { clearConversationPositions } from './lib/conversation-position';
 
-const BootstrapPage = lazy(async () => ({ default: (await import('./pages/bootstrap')).BootstrapPage }));
-const AccountEmailPage = lazy(async () => ({ default: (await import('./pages/account-email')).AccountEmailPage }));
-const ConfirmAccountPage = lazy(async () => ({ default: (await import('./pages/account-email')).ConfirmAccountPage }));
-const TeamPage = lazy(async () => ({ default: (await import('./pages/team')).TeamPage }));
-const StoresPage = lazy(async () => ({ default: (await import('./pages/stores')).StoresPage }));
-const CompanySettingsPage = lazy(async () => ({ default: (await import('./pages/company-settings')).CompanySettingsPage }));
-const KnowledgePage = lazy(async () => ({ default: (await import('./pages/knowledge')).KnowledgePage }));
-const ReplyPoliciesPage = lazy(async () => ({ default: (await import('./pages/reply-policies')).ReplyPoliciesPage }));
-const MessagesPage = lazy(async () => ({ default: (await import('./pages/messages')).MessagesPage }));
-const InvitationPage = lazy(async () => ({ default: (await import('./pages/invitation')).InvitationPage }));
-
-const CompanySelection = lazy(async () => ({
-  default: (await import('./pages/workspace')).CompanySelection,
-}));
-const WorkspacePage = lazy(async () => ({
-  default: (await import('./pages/workspace')).WorkspacePage,
-}));
+const loadBootstrap = () => import('./pages/bootstrap');
+const loadAccountEmail = () => import('./pages/account-email');
+const loadTeam = () => import('./pages/team');
+const loadStores = () => import('./pages/stores');
+const loadCompanySettings = () => import('./pages/company-settings');
+const loadKnowledge = () => import('./pages/knowledge');
+const loadReplyPolicies = () => import('./pages/reply-policies');
+const loadMessages = () => import('./pages/messages');
+const loadProducts = () => import('./pages/products');
+const loadOrders = () => import('./pages/orders');
+const loadActivity = () => import('./pages/activity');
+const loadInvitation = () => import('./pages/invitation');
+const loadWorkspace = () => import('./pages/workspace');
+const BootstrapPage = lazy(async () => ({ default: (await loadBootstrap()).BootstrapPage }));
+const AccountEmailPage = lazy(async () => ({ default: (await loadAccountEmail()).AccountEmailPage }));
+const ConfirmAccountPage = lazy(async () => ({ default: (await loadAccountEmail()).ConfirmAccountPage }));
+const TeamPage = lazy(async () => ({ default: (await loadTeam()).TeamPage }));
+const StoresPage = lazy(async () => ({ default: (await loadStores()).StoresPage }));
+const CompanySettingsPage = lazy(async () => ({ default: (await loadCompanySettings()).CompanySettingsPage }));
+const KnowledgePage = lazy(async () => ({ default: (await loadKnowledge()).KnowledgePage }));
+const ReplyPoliciesPage = lazy(async () => ({ default: (await loadReplyPolicies()).ReplyPoliciesPage }));
+const MessagesPage = lazy(async () => ({ default: (await loadMessages()).MessagesPage }));
+const ProductsPage = lazy(async () => ({ default: (await loadProducts()).ProductsPage }));
+const OrdersPage = lazy(async () => ({ default: (await loadOrders()).OrdersPage }));
+const ActivityPage = lazy(async () => ({ default: (await loadActivity()).ActivityPage }));
+const InvitationPage = lazy(async () => ({ default: (await loadInvitation()).InvitationPage }));
+const CompanySelection = lazy(async () => ({ default: (await loadWorkspace()).CompanySelection }));
+const WorkspacePage = lazy(async () => ({ default: (await loadWorkspace()).WorkspacePage }));
+const workspaceLoaders: Record<string, () => Promise<unknown>> = {
+  '/workspace/team': loadTeam, '/workspace/stores': loadStores, '/workspace/settings': loadCompanySettings,
+  '/workspace/knowledge': loadKnowledge, '/workspace/reply-policies': loadReplyPolicies, '/workspace/messages': loadMessages,
+  '/workspace/products': loadProducts, '/workspace/orders': loadOrders, '/workspace/activity': loadActivity,
+};
+function preloadWorkspaceRoute(pathname: string) {
+  return Promise.allSettled([loadWorkspace(), workspaceLoaders[pathname]?.() ?? Promise.resolve()]);
+}
 const subscribeOnline = (listener: () => void) =>
   onlineManager.subscribe(listener);
 
@@ -65,6 +85,9 @@ function createClient() {
 }
 
 export function App() {
+  const location = useLocation();
+  const workspaceRoute = location.pathname === '/' || location.pathname === '/workspace' || location.pathname.startsWith('/workspace/');
+  useEffect(() => { if (workspaceRoute) void preloadWorkspaceRoute(location.pathname); }, [workspaceRoute, location.pathname]);
   const [boundary, setBoundary] = useState(() => ({
     client: createClient(),
     version: 0,
@@ -81,7 +104,7 @@ export function App() {
   }
   return (
     <QueryClientProvider client={boundary.client}>
-      <Suspense fallback={<LoadingPage />}>
+      <Suspense fallback={workspaceRoute ? <WorkspaceLoadingPage /> : <LoadingPage />}>
         <Routes>
           <Route path="/setup" element={<BootstrapPage reset={reset} />} />
           <Route path="/verify-email" element={<ConfirmAccountPage key="verify" kind="verification" />} />
@@ -103,6 +126,7 @@ function IdentityPages({
   notice?: unknown;
 }) {
   const location = useLocation();
+  const workspaceRoute = location.pathname === '/' || location.pathname === '/workspace' || location.pathname.startsWith('/workspace/');
   const online = useSyncExternalStore(subscribeOnline, () =>
     onlineManager.isOnline(),
   );
@@ -152,11 +176,9 @@ function IdentityPages({
       </AuthFrame>
     );
   if (changing || wasOffline.current)
-    return <LoadingPage message="正在确认账号状态…" />;
-  // Knowledge edits survive a successful background check, hidden until access is confirmed.
-  const preserveKnowledge = location.pathname === '/workspace/knowledge';
-  if (identity.isPending || (identity.isFetching && identity.data?.session && !preserveKnowledge))
-    return <LoadingPage />;
+    return workspaceRoute ? <WorkspaceLoadingPage message="正在确认账号状态…" /> : <LoadingPage message="正在确认账号状态…" />;
+  if (identity.isPending || (identity.isFetching && identity.data?.session && !workspaceRoute))
+    return workspaceRoute ? <WorkspaceLoadingPage /> : <LoadingPage />;
   if (identity.isError || !identity.data)
     return (
       <AuthFrame>
@@ -190,9 +212,9 @@ function IdentityPages({
       }}
       logout={logout}
       notice={notice}
-      section={location.pathname === '/workspace/knowledge' ? 'knowledge' : location.pathname === '/workspace/reply-policies' ? 'policies' : location.pathname === '/workspace/settings' ? 'settings' : location.pathname === '/workspace/team' ? 'team' : location.pathname === '/workspace/stores' ? 'stores' : location.pathname === '/workspace/messages' ? 'messages' : 'home'}
+      section={location.pathname === '/workspace/knowledge' ? 'knowledge' : location.pathname === '/workspace/reply-policies' ? 'policies' : location.pathname === '/workspace/settings' ? 'settings' : location.pathname === '/workspace/team' ? 'team' : location.pathname === '/workspace/stores' ? 'stores' : location.pathname === '/workspace/messages' ? 'messages' : location.pathname === '/workspace/products' ? 'products' : location.pathname === '/workspace/orders' ? 'orders' : location.pathname === '/workspace/activity' ? 'activity' : 'home'}
     >
-      {location.pathname === '/workspace/knowledge' ? <KnowledgePage company={active} refresh={reset} /> : location.pathname === '/workspace/reply-policies' ? <ReplyPoliciesPage company={active} refresh={reset} /> : location.pathname === '/workspace/settings' ? <CompanySettingsPage /> : location.pathname === '/workspace/team' ? <TeamPage company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/stores' ? <StoresPage company={active} refresh={reset} /> : location.pathname === '/workspace/messages' ? <MessagesPage company={active} userId={data.session.user.id} refresh={reset} /> : undefined}
+      {location.pathname === '/workspace/knowledge' ? <KnowledgePage company={active} refresh={reset} /> : location.pathname === '/workspace/reply-policies' ? <ReplyPoliciesPage company={active} refresh={reset} /> : location.pathname === '/workspace/settings' ? <CompanySettingsPage /> : location.pathname === '/workspace/team' ? <TeamPage company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/stores' ? <StoresPage company={active} refresh={reset} /> : location.pathname === '/workspace/messages' ? <MessagesPage company={active} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/products' ? <ProductsPage company={active} /> : location.pathname === '/workspace/orders' ? <OrdersPage company={active} /> : location.pathname === '/workspace/activity' ? <ActivityPage company={active} refresh={reset} /> : undefined}
     </WorkspacePage>
     </CompanySettingsProvider>
   ) : (
@@ -205,6 +227,7 @@ function IdentityPages({
       notice={notice}
     />
   );
+  const workspaceView = <>{identity.isFetching && <WorkspaceLoadingPage message="正在确认账号状态…" />}<Activity mode={identity.isFetching ? 'hidden' : 'visible'}>{workspace}</Activity></>;
   return (
     <Routes>
       <Route
@@ -230,13 +253,16 @@ function IdentityPages({
           )
         }
       />
-      <Route path="/workspace" element={workspace} />
-      <Route path="/workspace/team" element={workspace} />
-      <Route path="/workspace/stores" element={workspace} />
-      <Route path="/workspace/settings" element={workspace} />
-      <Route path="/workspace/reply-policies" element={workspace} />
-      <Route path="/workspace/knowledge" element={<>{identity.isFetching && <LoadingPage message="正在确认账号状态…"/>}<Activity mode={identity.isFetching ? 'hidden' : 'visible'}>{workspace}</Activity></>} />
-      <Route path="/workspace/messages" element={workspace} />
+      <Route path="/workspace" element={workspaceView} />
+      <Route path="/workspace/team" element={workspaceView} />
+      <Route path="/workspace/stores" element={workspaceView} />
+      <Route path="/workspace/settings" element={workspaceView} />
+      <Route path="/workspace/reply-policies" element={workspaceView} />
+      <Route path="/workspace/knowledge" element={workspaceView} />
+      <Route path="/workspace/messages" element={workspaceView} />
+      <Route path="/workspace/products" element={workspaceView} />
+      <Route path="/workspace/orders" element={workspaceView} />
+      <Route path="/workspace/activity" element={workspaceView} />
       <Route path="/invite/:id" element={<InvitationPage identity={data} reset={reset} logout={logout} />} />
       <Route
         path="*"

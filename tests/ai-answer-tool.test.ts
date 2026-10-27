@@ -8,7 +8,7 @@ function run():AiRun{return {schemaVersion:1,scope:{organizationId:'org',storeId
 test('answer submission has no model-selected authority, saves once and confirms a separate human-review handoff',async()=>{
  const m=await api(),work=run(),data={body:'Ширина — 26 см.',citations:['a'.repeat(64)]};let submissions=0,handoffs=0;
  const tool=m.createAnswerTool(work,{async submit(scope,id,input){assert.deepEqual(scope,work.scope);assert.equal(id,work.request.runId);assert.deepEqual(input,data);submissions++;return {status:'submitted',canSend:false,reviewRequired:true};},async requestHandoff(scope,id,input){
-  assert.deepEqual(scope,work.scope);assert.equal(id,work.request.runId);assert.equal(input.reason,'merchant_decision');assert.match(input.summary,/draft.*human review/i);handoffs++;
+  assert.deepEqual(scope,work.scope);assert.equal(id,work.request.runId);assert.equal(input.reason,'merchant_decision');assert.equal('schemaVersion' in input&&input.schemaVersion,2);assert.deepEqual(input.neededInformation,[]);handoffs++;
   return {outcome:'accepted',receipt:{action:'request_handoff',origin:'agent',commandId:`ai-handoff:${id}`,expectedVersion:1,actorUserId:null,actorMemberId:null,run:work,input,
    appliedState:{schemaVersion:2,lifecycle:'open',reception:'paused',workStatus:'needs_reply',assignedMemberId:null,version:2,sequence:2,controlEpoch:2,updatedAt:2}}};
  }});

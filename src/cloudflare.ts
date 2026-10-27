@@ -10,13 +10,18 @@ import type { SupportBindings } from './modules/ai-runs/execution.ts';
 import { repairAiExecutions } from './modules/ai-runs/repair.ts';
 import { deliverInboundEvents } from './modules/conversations/inbound-delivery.ts';
 import { dispatchAiReceptions } from './modules/ai-runs/dispatch.ts';
+import type {TranslationBindings} from './modules/translations/bindings.ts';
+import type {ReplyTestBindings} from './modules/reply-tests/execution.ts';
+import {repairFinancialUsage} from './modules/usage-repair.ts';
+import {repairKnowledgeVectorCleanups} from './modules/knowledge/vector-cleanup.ts';
+import {reconcileBudgetLedgers} from './modules/budget-audit/reconciliation.ts';
 
 export { StoreCoordinator } from './modules/sync/coordinator.ts';
 export { ConversationController } from './modules/conversations/controller.ts';
 export { KnowledgeIndexWorkflow } from './modules/knowledge/index-workflow.ts';
 export { KnowledgeReviewWorkflow } from './modules/knowledge/review-workflow.ts';
 
-type Bindings=SyncBindings&ControlBindings&KnowledgeBindings&SupportBindings;
+type Bindings=SyncBindings&ControlBindings&KnowledgeBindings&SupportBindings&TranslationBindings&ReplyTestBindings;
 async function wakeStores(env:Bindings) {
   if(!env.DB||!env.STORE_COORDINATOR)return;
   const stores=await listDueSyncStores(env.DB,50);
@@ -42,6 +47,6 @@ async function repairControls(env:Bindings) {
 export default {
   async scheduled(_controller:ScheduledController,env:Bindings) {
     const reception=async()=>{try{await deliverInboundEvents(env);}finally{await dispatchAiReceptions(env);}};
-    await Promise.allSettled([wakeStores(env),reception(),repairControls(env),repairKnowledgeIndexes(env),repairKnowledgeReviews(env),repairAiExecutions(env)]);
+    await Promise.allSettled([wakeStores(env),reception(),repairControls(env),repairKnowledgeIndexes(env),repairKnowledgeReviews(env),repairKnowledgeVectorCleanups(env),repairAiExecutions(env),repairFinancialUsage(env),reconcileBudgetLedgers(env)]);
   },
 } satisfies ExportedHandler<Bindings>;

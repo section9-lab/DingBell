@@ -57,7 +57,30 @@ function unconfirmed(c: Context<ApplicationEnv>, response: Response) {
   return apiError(c, 'OPERATION_UNCONFIRMED', 'The operation may have completed. Refresh the session to confirm its state.', 503, response);
 }
 
-export function registerIdentityRoutes(app: Hono<ApplicationEnv>) {
+type WorkspaceSetup = { identity: { configured: boolean }; registration: { enabled: boolean }; email: { configured: boolean } };
+
+export function registerIdentityRoutes(app: Hono<ApplicationEnv>, workspaceSetup?: (c: Context<ApplicationEnv>) => WorkspaceSetup) {
+  if (workspaceSetup) app.get('/api/workspace-bootstrap', async c => {
+    const setup = workspaceSetup(c);
+    if (!setup.identity.configured) return jsonResponse(c, { setup, session: null, companies: null });
+    const identity = services(c.env ?? {});
+    if (!identity) return apiError(c, 'IDENTITY_NOT_CONFIGURED', 'Identity service requires database and authentication configuration.', 503);
+    c.set('identity', identity);
+    const value = await identity.auth.api.getSession({
+      headers: c.req.raw.headers, query: { disableCookieCache: true, disableRefresh: true },
+    });
+    if (!value || !value.user.emailVerified) return jsonResponse(c, { setup, session: null, companies: null });
+    const companies = await identity.db.select(companyFields).from(schema.organization).innerJoin(schema.member, and(
+      eq(schema.member.organizationId, schema.organization.id), eq(schema.member.userId, value.user.id),
+    )).orderBy(asc(schema.organization.name), asc(schema.organization.id));
+    const activeCompanyId = companies.find(company => company.id === value.session.activeOrganizationId)?.id ?? null;
+    return jsonResponse(c, {
+      setup,
+      session: { user: userDTO(value.user), session: { id: value.session.id, expiresAt: value.session.expiresAt, activeOrganizationId: activeCompanyId } },
+      companies: { companies, activeCompanyId },
+    });
+  });
+
   app.get('/api/auth/get-session', configured, async c => {
     const response = await c.get('identity').auth.handler(c.req.raw);
     if (!response.ok) return authError(c, response);

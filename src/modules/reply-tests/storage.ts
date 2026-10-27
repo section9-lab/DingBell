@@ -49,6 +49,8 @@ async function internalRead(db:D1Database,scope:ControlScope,runId:string){
   return row?decode(row):null;
 }
 async function required(db:D1Database,scope:ControlScope,runId:string){const run=await internalRead(db,scope,runId);if(!run)throw new Error('REPLY_TEST_RUN_NOT_FOUND');return run;}
+/** Internal financial repair read; it confers no permission to display test inputs or output. */
+export async function readReplyTestForRepair(db:D1Database,scope:ControlScope,runId:string){return internalRead(db,scope,runId);}
 function authorizedRead(db:D1Database,actor:ControlActor,requestId:string,memberId:string){
   v.parse(id,requestId);v.parse(id,memberId);
   return db.prepare(`SELECT ${runColumns} FROM reply_test_run AS run WHERE run.organization_id=? AND run.request_id=? AND run.actor_user_id=? AND run.actor_member_id=?
@@ -153,7 +155,7 @@ async function finish(db:D1Database,scope:ControlScope,run:ReplyTestRun,settleme
         AND EXISTS (SELECT 1 FROM reply_test_run AS run WHERE ${runWhere} AND settlement='held'
           ${settlement==='settled'?'AND provider_request_claimed_at IS NOT NULL AND receipt=?':'AND provider_request_claimed_at IS NULL'})`)
       .bind(run.reservedMicros,charged,token,run.budgetId,run.organizationId,run.reservedMicros,charged,...bound,...(settlement==='settled'?[receipt]:[])),
-    db.prepare(`UPDATE reply_test_run AS run SET settlement=?,usage=?,charged_micros=?,settled_at=MAX(created_at,${now}),release_evidence=?
+    db.prepare(`UPDATE reply_test_run AS run SET settlement=?,usage=?,charged_micros=?,settled_at=MAX(created_at,${now}),release_evidence=?,repair_due_at=NULL,repair_token=NULL
       WHERE ${runWhere} AND settlement='held' AND EXISTS (SELECT 1 FROM reply_test_budget WHERE id=? AND organization_id=? AND commit_token=?)`)
       .bind(settlement,usage,charged,evidence,...bound,...marker),
     db.prepare('UPDATE reply_test_budget SET commit_token=NULL WHERE id=? AND organization_id=? AND commit_token=?').bind(...marker),

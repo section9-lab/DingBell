@@ -24,7 +24,7 @@ export function createReplyTool(value:AiRun,services:Services){
     let observation:'scheduled'|'unconfirmed'='unconfirmed';try{await wake({...run.scope},run.request.runId);observation='scheduled';}catch{}
     signal?.throwIfAborted();return {output:{status,observation,handoff:'none' as const,canSend:false as const,sent:false as const},terminate:true};
    }
-   const input:AiHandoff={reason:'tool_failure',summary:'The AI reply preparation could not be confirmed. Human review is required; no customer reply has been sent.',neededInformation:[]};
+   const input:AiHandoff={schemaVersion:2,reason:'tool_failure',neededInformation:[]};
    const receipt=await handoff.run({...context,data:input});
    return {output:{status,observation:'not_requested' as const,handoff:receipt.output.status,canSend:false as const,sent:false as const},terminate:true};
   },

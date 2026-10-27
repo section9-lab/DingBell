@@ -7,6 +7,15 @@ import type { ControlOutboxEvent as ControlEvent, ControlScope } from '../../src
 
 export class TestConversationController extends ConversationController {
   protected override aiTimeoutMs(){return Number((this.env as any).TEST_AI_TIMEOUT_MS??60000);}
+  private classificationReadRace:unknown;
+  async raceClassificationRead(value:unknown){this.classificationReadRace=value;}
+  override async readAiWork(scope:ControlScope,runId:string){
+    if(this.classificationReadRace!==undefined){
+      const classification=this.classificationReadRace;this.classificationReadRace=undefined;
+      await this.recordAiClassification(scope,runId,classification);
+    }
+    return super.readAiWork(scope,runId);
+  }
   private releaseProjection: (() => void) | undefined;
   private projectionHeld = false;
   private releaseExpiry:(()=>void)|undefined;
@@ -76,6 +85,10 @@ export default {
   async fetch(request: Request, env: any) {
     const input=await request.json() as any;
     try {
+      if(input.op==='fixture-migrate') {
+        await env.DB.batch(input.statements.map((sql:string)=>env.DB.prepare(sql)));
+        return Response.json({ok:true});
+      }
       if(input.op==='cron') {
         const actualDB=env.DB;
         const repairs:string[]=[],wakes:string[]=[];
@@ -94,6 +107,7 @@ export default {
       }
       const stub=env.CONVERSATION_CONTROLLER.get(env.CONVERSATION_CONTROLLER.idFromName(input.name??input.scope.controllerId));
       switch(input.op) {
+        case 'classification-read-race':await stub.raceClassificationRead(input.classification);break;
         case 'ai-reception-read':return Response.json(await stub.readAiReception(input.scope,input.actor,input.commandId));
         case 'inbound':return Response.json(await stub.receiveInbound(input.scope,input.eventId));
         case 'ai-pending-input':return Response.json(await stub.readPendingAiInput(input.scope));

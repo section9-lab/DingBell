@@ -1,0 +1,9 @@
+import * as v from 'valibot';
+import {conversationActivityActionSchema,conversationActivityResponseSchema} from '../../shared/conversation-activity.ts';
+import {ApiError,request} from './api.ts';
+const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value=>value===value.trim()&&value.isWellFormed()&&!/[\u0000-\u001f\u007f]/.test(value))),cursor=v.pipe(v.string(),v.minLength(1),v.maxLength(4096));
+export async function readConversationActivity(companyId:string,conversationId:string,options:{limit?:number;cursor?:string;category?:'all'|'human_action'|'ai_action'|'customer_event';action?:v.InferOutput<typeof conversationActivityActionSchema>;from?:number;to?:number}={},signal?:AbortSignal){
+ if(!v.is(id,companyId)||!v.is(id,conversationId)||options.limit!==undefined&&(!Number.isInteger(options.limit)||options.limit<1||options.limit>50)||options.cursor!==undefined&&!v.is(cursor,options.cursor)||options.category!==undefined&&!['all','human_action','ai_action','customer_event'].includes(options.category)||options.action!==undefined&&!v.is(conversationActivityActionSchema,options.action)||options.from!==undefined&&(!Number.isSafeInteger(options.from)||options.from<0)||options.to!==undefined&&(!Number.isSafeInteger(options.to)||options.to<0)||options.from!==undefined&&options.to!==undefined&&options.from>=options.to)throw new ApiError('INVALID_REQUEST');
+ const params=new URLSearchParams();for(const [key,value] of Object.entries(options))if(value!==undefined)params.set(key,String(value));
+ const schema=v.pipe(conversationActivityResponseSchema,v.check(value=>value.companyId===companyId&&value.conversationId===conversationId));return request(`/api/companies/${encodeURIComponent(companyId)}/conversations/${encodeURIComponent(conversationId)}/activity${params.size?`?${params}`:''}`,schema,{signal});
+}

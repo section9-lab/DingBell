@@ -2,7 +2,7 @@
 export function conversationContextSQL(organizationId:string,storeId:string,orderNumber='order-1',sku='9007199254740993') {
   const q=(value:unknown)=>`'${String(value).replaceAll("'","''")}'`;
   const scope=`${q(organizationId)},${q(storeId)}`;
-  const product=JSON.stringify({id:'901',offerId:'DESK-BOX',name:'桌面收纳盒',sku:'11',sources:[{sku,source:'fbs'}],price:'1099.00',currency:'RUB',archived:false,private_note:'DO_NOT_EXPOSE'});
+  const product=JSON.stringify({id:'901',offerId:'DESK-BOX',name:'桌面收纳盒',sku:'11',sources:[{sku,source:'fbs'}],price:'1099.00',currency:'RUB',archived:false,primaryImage:'https://ir-20.ozone.ru/s3/context-product.jpg',images:['https://ir-20.ozone.ru/s3/context-product.jpg'],private_note:'DO_NOT_EXPOSE'});
   const statements=[`INSERT INTO product (id,organization_id,store_id,listing,list_observed_at,facts,facts_observed_at,detail_epoch,detail_generation,detail_due_at) VALUES ('901',${scope},'{"id":"901","offerId":"DESK-BOX","sku":null}',500,${q(product)},600,1,1,1)`];
   for(let index=1;index<=12;index++) {
     const postingNumber=`${orderNumber}-${String(index).padStart(2,'0')}`;

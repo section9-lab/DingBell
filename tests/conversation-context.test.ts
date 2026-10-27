@@ -13,7 +13,7 @@ test('message context reads require a stored reference and current store authori
     assert.equal(empty.viewerMemberId,'staff-member');assert.equal(empty.storeId,'store-a');
     assert.deepEqual(empty.source,{kind:'ozon_message_context',messageId:'msg-a1',platformMessageId:'18446744073709551614',orderNumber:'order-1',sku:'9007199254740993',eventAt:new Date(200).toISOString(),receivedAt:new Date(400).toISOString()});
     assert.deepEqual(empty.product,{state:'not_imported',item:null});
-    assert.deepEqual(empty.order,{state:'not_imported',orderId:null,postings:[],nextPosting:null});
+    assert.deepEqual(empty.order,{state:'not_imported',orderId:null,previewProduct:null,postings:[],nextPosting:null});
     const noReference=await (await f.request('/conv-a/messages/msg-a2/context')).json() as any;
     assert.equal(noReference.product.state,'not_provided');assert.equal(noReference.order.state,'not_provided');
     for(const suffix of ['/conv-b/messages/msg-a1/context','/conv-a/messages/msg-b/context','/conv-empty/messages/msg-a1/context','/missing/messages/msg-a1/context'])assert.equal((await f.request(suffix)).status,404,suffix);
@@ -75,10 +75,13 @@ test('structured references resolve exact store snapshots, SKU aliases and all s
     const response=await f.request(path,'staff');assert.equal(response.status,200);
     const first=await response.json() as any;
     assert.equal(first.product.state,'matched');assert.equal(first.product.item.id,'901');assert.equal(first.product.item.name,'桌面收纳盒');assert.equal(first.product.item.skuSource,'details');
-    assert.equal(first.product.item.price,'1099.00');assert.equal(first.product.item.factsObservedAt,new Date(600).toISOString());
-    assert.equal(first.order.state,'matched');assert.equal(first.order.orderId,'801');assert.equal(first.order.postings.length,10);assert.equal(first.order.nextPosting,'order-1-10');
+    assert.equal(first.product.item.price,'1099.00');assert.equal(first.product.item.primaryImage,'https://ir-20.ozone.ru/s3/context-product.jpg');assert.equal(first.product.item.factsObservedAt,new Date(600).toISOString());
+    assert.equal(first.order.state,'matched');assert.deepEqual(first.order.previewProduct,{orderId:'801',sku:'9007199254740993',offerId:'DESK-BOX',name:'桌面收纳盒',productId:'901',primaryImage:'https://ir-20.ozone.ru/s3/context-product.jpg'});assert.equal(first.order.orderId,'801');assert.equal(first.order.postings.length,10);assert.equal(first.order.nextPosting,'order-1-10');
     const posting=first.order.postings[0];assert.equal(posting.status,'delivering');assert.equal(posting.source,'list');assert.equal(posting.observedAt,new Date(800).toISOString());assert.equal(posting.productCount,1);
     assert.equal(JSON.stringify(first).includes('DO_NOT_EXPOSE'),false);
+    await f.DB.prepare(`INSERT INTO message (id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,order_number,event_at,received_at,ingest_mode)
+      VALUES ('order-only','company','store-a','conv-a','order-only-platform','Customer','inbound','["order context"]',0,0,'order-1',500,600,'incremental')`).run();
+    const orderOnly=await (await f.request('/conv-a/messages/order-only/context')).json() as any;assert.equal(orderOnly.product.state,'not_provided');assert.equal(orderOnly.order.state,'matched');assert.equal(orderOnly.order.previewProduct.name,'桌面收纳盒');assert.equal(orderOnly.order.previewProduct.primaryImage,'https://ir-20.ozone.ru/s3/context-product.jpg');
     const second=await (await f.request(path+'?afterPosting='+first.order.nextPosting)).json() as any;
     assert.deepEqual(second.order.postings.map((p:any)=>p.postingNumber),['order-1-11','order-1-12']);assert.equal(second.order.nextPosting,null);
     // Newer detail observations replace the list as a whole, rather than mixing times and fields.
@@ -90,7 +93,7 @@ test('structured references resolve exact store snapshots, SKU aliases and all s
       VALUES ('body-only','company','store-a','conv-a','9999','Customer','inbound','["order-1 9007199254740993"]',0,0,500,600,'incremental')`).run();
     const bodyOnly=await (await f.request('/conv-a/messages/body-only/context')).json() as any;assert.equal(bodyOnly.order.state,'not_provided');assert.equal(bodyOnly.product.state,'not_provided');
     await f.DB.prepare("UPDATE fbs_posting SET order_id='802' WHERE store_id='store-a' AND posting_number='order-1-12'").run();
-    const ambiguous=await (await f.request(path)).json() as any;assert.deepEqual(ambiguous.order,{state:'ambiguous',orderId:null,postings:[],nextPosting:null});
+    const ambiguous=await (await f.request(path)).json() as any;assert.deepEqual(ambiguous.order,{state:'ambiguous',orderId:null,previewProduct:null,postings:[],nextPosting:null});
     await f.DB.prepare("INSERT INTO product (id,organization_id,store_id,listing,list_observed_at,detail_epoch,detail_generation,detail_due_at) VALUES ('902','company','store-a','{\"sku\":\"9007199254740993\",\"offerId\":\"OTHER\"}',500,1,1,1)").run();
     assert.equal((await (await f.request(path)).json() as any).product.state,'ambiguous');
     await f.DB.prepare("UPDATE product SET listing='{\"sku\":\"222\",\"offerId\":\"OTHER\"}' WHERE store_id='store-a' AND id='902'").run();

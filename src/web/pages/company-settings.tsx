@@ -13,6 +13,9 @@ import { NativeSelect, NativeSelectOption } from '../components/ui/native-select
 import { Spinner } from '../components/ui/spinner';
 import { BudgetPanel } from '../components/budget-panel';
 import { Tabs,TabsList,TabsTrigger,TabsContent } from '../components/ui/tabs';
+import {AnalyticsPanel} from '../components/analytics-panel';
+import {DataGovernancePanel} from '../components/data-governance-panel';
+import {DegradationPanel} from '../components/degradation-panel';
 
 const timeZones = [...new Set(['UTC', ...Intl.supportedValuesOf('timeZone')])];
 export function CompanySettingsPage() {
@@ -74,6 +77,9 @@ export function CompanySettingsPage() {
         <Button variant="outline" disabled={pending || query.isFetching} onClick={() => void readLatest()}>读取最新设置</Button>
       </CardFooter>
     </Card>
+    {data.canManage&&!query.isError&&<AnalyticsPanel companyId={data.companyId}/>}
+    {data.canManage&&!query.isError&&<DataGovernancePanel companyId={data.companyId}/>}
+    {data.canManage&&!query.isError&&<DegradationPanel companyId={data.companyId}/>}
     {data.canManage&&!query.isError&&<section className="flex flex-col gap-3"><div className="flex flex-col gap-1"><h2 className="text-lg font-semibold">AI 用量预算</h2><p className="text-sm text-muted-foreground">接待消费者与内部策略测试使用各自的额度。</p></div>
       <Tabs key={data.companyId} defaultValue="reception"><TabsList aria-label="预算用途"><TabsTrigger value="reception">AI 接待</TabsTrigger><TabsTrigger value="test">策略测试</TabsTrigger></TabsList>
         <TabsContent value="reception"><BudgetPanel companyId={data.companyId} kind="reception" /></TabsContent>

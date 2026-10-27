@@ -6,10 +6,10 @@ import { hashPassword } from 'better-auth/crypto';
 import { createApp } from '../../src/application.ts';
 import { services } from '../../src/modules/identity/services.ts';
 
-export async function knowledgeFixture() {
+export async function knowledgeFixture(lastMigration?:string) {
   const sqlite=new DatabaseSync(':memory:'); sqlite.exec('PRAGMA foreign_keys=ON');
   const folder=new URL('../../migrations/',import.meta.url);
-  for(const file of readdirSync(folder).filter(file=>file.endsWith('.sql')).sort()) sqlite.exec(readFileSync(new URL(file,folder),'utf8'));
+  for(const file of readdirSync(folder).filter(file=>file.endsWith('.sql')&&(!lastMigration||file.slice(0,4)<=lastMigration)).sort()) sqlite.exec(readFileSync(new URL(file,folder),'utf8'));
   let beforeStatement:((sql:string)=>void)|undefined;
   let afterStatement:((sql:string)=>void)|undefined;
   function prepare(sql:string,parameters:SQLInputValue[]=[]) {
