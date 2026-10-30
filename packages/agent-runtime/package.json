@@ -1,0 +1,23 @@
+{
+  "name": "@dingbell/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit",
+    "test": "node --test *.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/chord": "1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2"
+  },
+  "license": "MIT"
+}

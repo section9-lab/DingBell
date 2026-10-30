@@ -22,7 +22,7 @@ async function fixture(through=Number.POSITIVE_INFINITY){
   try{
     const db=await mf.getD1Database('DB') as unknown as D1Database;
     const files=readdirSync(folder).filter(name=>name.endsWith('.sql')).sort();
-    for(const file of files.filter(name=>Number(name.slice(0,4))<=through))for(const sql of statements(file))await db.prepare(sql).run();
+    for(const file of files.filter(name=>Number(name.slice(0,4))<=through))await db.batch(statements(file).map(sql=>db.prepare(sql)));
     await db.batch([
       db.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES ('org','Org','org',1),('other','Other','other',1)"),
       db.prepare("INSERT INTO user(id,name,email,email_verified) VALUES ('owner','Owner','owner@example.invalid',1),('staff','Staff','staff@example.invalid',1)"),

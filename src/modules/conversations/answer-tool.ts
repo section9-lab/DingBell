@@ -1,4 +1,4 @@
-import {defineTool} from '@flue/runtime/tool';
+import {defineTool} from '../../platform/core/tool.ts';
 import * as v from 'valibot';
 import {aiRunSchema,type AiRun,type AiHandoff} from './ai-state.ts';
 import {aiAnswerInputSchema,aiAnswerResultSchema,type AiAnswerInput} from '../ai-runs/answer.ts';
@@ -20,7 +20,7 @@ export function createAnswerTool(value:AiRun,services:Services){
    const input:AiHandoff=status==='submitted'?{schemaVersion:2,reason:'merchant_decision',neededInformation:[]}:
     {schemaVersion:2,reason:'tool_failure',neededInformation:[]};
    const receipt=await handoff.run({...context,data:input});
-   return {output:{status,reviewRequired:true,handoff:receipt.output.status,canSend:false,sent:false},terminate:true};
+   return {output:{status,reviewRequired:true as const,handoff:receipt.output.status,canSend:false as const,sent:false as const},terminate:true};
   },
  });
 }

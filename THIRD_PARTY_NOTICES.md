@@ -2,18 +2,19 @@
 
 Generated/reviewed against `package-lock.json` on 2026-10-11. This file records direct packages and design assets; `npm run licenses:check` validates every locked installed package has declared license metadata and emits the machine-readable inventory under `dist/compliance/`. Package license files remain authoritative.
 
-**DingBell's own license has not yet been selected.** Third-party terms below do not license DingBell source code.
+DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29. Dependencies retain their respective licenses. Platform adapter inventories include the independent lockfiles in `packages/agent-runtime`, `deploy/cloudflare` and `deploy/vercel`.
 
-## Runtime packages
+## Root packages
 
 | Package | Locked version | Declared license |
 | --- | ---: | --- |
 | @base-ui/react | 1.8.0 | MIT |
 | @better-auth/drizzle-adapter | 1.7.7 | MIT |
-| @earendil-works/pi-ai | 0.87.1 | MIT |
-| @flue/runtime | 2.2.2 | Apache-2.0 |
+| @earendil-works/pi-ai (legacy development fixtures) | 0.87.1 | MIT |
+| @flue/runtime (legacy development fixtures) | 2.2.2 | Apache-2.0 |
 | @fontsource-variable/geist | 5.3.0 | OFL-1.1 |
 | @fontsource/noto-sans-sc | 5.3.0 | OFL-1.1 |
+| @hono/node-server | 2.1.4 | MIT |
 | @json2csv/whatwg | 7.0.8 | MIT |
 | @shadcn/react | 0.3.1 | MIT |
 | @tanstack/react-query | 5.104.1 | MIT |
@@ -49,4 +50,8 @@ Cloudflare, Ozon, NVIDIA/model providers, Resend and any object storage are exte
 
 ## Release rule
 
-Before distribution, run the locked inventory, inspect `UNKNOWN`/custom/copyleft/license-reference results, retain required license and NOTICE text, scan the exact release archive for secrets/customer data, and have the repository owner select DingBell's project license. This document is an engineering inventory, not legal advice.
+Before distribution, run the locked inventory, inspect `UNKNOWN`/custom/copyleft/license-reference results, retain required license and NOTICE text, scan the exact release archive for secrets/customer data, and preserve DingBell's approved MIT license. This document is an engineering inventory, not legal advice.
+
+## Portable runtime adapters (2026-10-29)
+
+Pi AI, Pi Durable and Chord 1.4.0 declare MIT. Cloudflare agents 0.30.0 declares MIT. Vercel durable-harness 0.0.1, Sandbox 3.9.1 and Functions 3.10.4 declare Apache-2.0. The generated inventory is authoritative for exact transitive versions and terms. Historical Flue dependencies are retained for migration regression fixtures and are excluded from portable production artifacts.

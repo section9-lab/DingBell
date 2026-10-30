@@ -7,10 +7,10 @@ type Application = Awaited<ReturnType<typeof startLocalApplication>>;
 const evidence = fileURLToPath(new URL('../../test-results/stage2c-2026-10-09/', import.meta.url));
 const test = base.extend<{ application: Application; empty: boolean }>({
   empty: [false, { option: true }],
-  application: async ({ empty }, use) => {
+  application: [async ({ empty }, use) => {
     const app = await startLocalApplication(true, { mail: true, empty });
     try { await use(app); } finally { await app.close(); }
-  },
+  }, { timeout: 90_000 }],
 });
 
 async function expectNoPageOverflow(page: Page) {

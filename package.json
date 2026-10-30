@@ -8,9 +8,11 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "build": "node scripts/build-cloudflare.mjs",
+    "deploy": "node scripts/deploy-cloudflare.ts",
+    "deploy:cloudflare": "npm run deploy --",
     "check:types": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
-    "test": "node --test --test-concurrency=4 tests/*.test.ts src/web/lib/*.test.ts probes/flue/app.test.ts",
+    "test": "node --test --test-concurrency=2 tests/*.test.ts src/web/lib/*.test.ts probes/flue/app.test.ts",
     "test:web": "playwright test --config tests/e2e/playwright.config.ts",
     "probe:dev": "vite --config probes/flue/vite.config.ts --host 127.0.0.1",
     "probe:build": "vite build --config probes/flue/vite.config.ts",
@@ -30,15 +32,20 @@
     "test:upgrade-local": "node --test --test-concurrency=1 tests/d1-backup-upgrade.test.ts tests/stores-credentials.test.ts tests/conversation-work-status-migration.test.ts tests/ai-send-contracts.test.ts tests/knowledge-vector-cleanup-migration.test.ts",
     "test:capacity-local": "node scripts/local-capacity-check.mjs",
     "test:knowledge-evaluation-local": "node --test --test-concurrency=1 tests/knowledge-evaluation.test.ts tests/knowledge-directory-capacity.test.ts",
-    "check": "npm run check:types && npm test && npm run build && node --test tests/integration/build.test.ts"
+    "check": "npm run setup:runtimes && npm run check:platforms && npm test && npm run test:portable && node --test tests/integration/build.test.ts && npm run check:release",
+    "build:node": "vite build --config deploy/node/vite.config.ts && vite build --config deploy/node/vite.config.ts --ssr",
+    "start:node": "node dist/node/server/server.mjs",
+    "build:vercel": "node scripts/build-vercel.ts",
+    "check:platforms": "npm run check:types && npm run check:types --prefix packages/agent-runtime && tsc --noEmit -p deploy/vercel/tsconfig.json",
+    "setup:runtimes": "node scripts/setup-runtimes.mjs",
+    "test:portable": "npm run build:node && npm run build && npm test --prefix packages/agent-runtime && node --test --test-concurrency=1 tests/node-application.test.ts tests/node-objects.test.ts tests/node-support.test.ts tests/vercel-response.test.ts tests/integration/node-server.test.ts tests/integration/portable-runtime.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",
     "@better-auth/drizzle-adapter": "1.7.7",
-    "@earendil-works/pi-ai": "0.87.1",
-    "@flue/runtime": "2.2.2",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource/noto-sans-sc": "5.3.0",
+    "@hono/node-server": "2.1.4",
     "@json2csv/whatwg": "7.0.8",
     "@shadcn/react": "0.3.1",
     "@tanstack/react-query": "5.104.1",
@@ -60,7 +67,9 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.49.0",
     "@cloudflare/workers-types": "5.20261008.1",
+    "@earendil-works/pi-ai": "0.87.1",
     "@flue/cli": "2.2.2",
+    "@flue/runtime": "2.2.2",
     "@flue/vite": "2.2.2",
     "@playwright/test": "1.64.0",
     "@tailwindcss/vite": "4.3.3",
@@ -78,5 +87,34 @@
     "typescript": "7.0.2",
     "vite": "8.1.2",
     "wrangler": "4.116.0"
-  }
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "DingBell business data. A new D1 database is provisioned; migrations run before deployment."
+      },
+      "APP_BASE_URL": {
+        "description": "Exact HTTPS origin of this installation, with no path, e.g. https://your-worker.your-subdomain.workers.dev. Replace the localhost development value."
+      },
+      "BETTER_AUTH_SECRET": {
+        "description": "Generate a unique identity secret of at least 32 characters, e.g. `openssl rand -hex 32`."
+      },
+      "BOOTSTRAP_SECRET": {
+        "description": "Generate a different random secret (at least 32 characters). Enter it on `/setup` after deployment; remove it after installing the first owner."
+      },
+      "RESEND_API_KEY": {
+        "description": "Your Resend API key for verification and invitation email. Required to complete first-owner installation."
+      },
+      "MAIL_FROM": {
+        "description": "A verified sender address in your Resend account, e.g. DingBell <support@your-domain.example>."
+      },
+      "STORE_CREDENTIAL_KEYS": {
+        "description": "Independent AES-256 key ring: JSON object with `v1` mapped to `openssl rand -base64 32`. Required before saving store credentials."
+      },
+      "STORE_CREDENTIAL_ACTIVE_KEY": {
+        "description": "Active encryption-key version in STORE_CREDENTIAL_KEYS. Keep `v1` for the initial installation."
+      }
+    }
+  },
+  "license": "MIT"
 }

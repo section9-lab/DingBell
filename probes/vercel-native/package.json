@@ -1,0 +1,15 @@
+{
+  "name": "dingbell-vercel-native-probe",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "dependencies": {
+    "@vercel/sandbox": "3.9.1"
+  },
+  "scripts": {
+    "check:types": "node ../../node_modules/typescript/bin/tsc --ignoreConfig --strict --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ESNext --types node --skipLibCheck --allowImportingTsExtensions run.ts",
+    "test:cloud": "node run.ts --isolated-cloud"
+  }
+}

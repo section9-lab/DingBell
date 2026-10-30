@@ -1,0 +1,18 @@
+{
+  "name": "@dingbell/vercel",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/sandbox": "3.9.1",
+    "@vercel/functions": "3.10.4",
+    "durable-harness": "0.0.1",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/chord": "1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2"
+  },
+  "license": "MIT"
+}

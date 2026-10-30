@@ -3,15 +3,34 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ESNext"],
-    "types": ["node", "@cloudflare/workers-types"],
+    "lib": [
+      "ESNext"
+    ],
+    "types": [
+      "node",
+      "@cloudflare/workers-types"
+    ],
     "allowImportingTsExtensions": true,
-    "paths": { "@/*": ["./src/web/*"] },
+    "paths": {
+      "@/*": [
+        "./src/web/*"
+      ]
+    },
     "verbatimModuleSyntax": true,
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "tests", "probes", "*.config.ts"],
-  "exclude": ["src/web"]
+  "include": [
+    "src",
+    "tests",
+    "probes",
+    "*.config.ts"
+  ],
+  "exclude": [
+    "src/web",
+    "probes/pi-portability",
+    "probes/vercel-native",
+    "packages/agent-runtime"
+  ]
 }

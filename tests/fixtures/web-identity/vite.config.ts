@@ -57,5 +57,11 @@ if (process.env.DINGBELL_TEST_MAILBOX || process.env.DINGBELL_TEST_STORE_CHECKER
     DINGBELL_TEST_AI_DRAFT_TOKEN: JSON.stringify(process.env.DINGBELL_TEST_AI_DRAFT_TOKEN ?? ''),
   };
 }
+config.cacheDir=fileURLToPath(new URL('vite-cache/', 'file://'+process.env.DINGBELL_WEB_IDENTITY_STATE_PATH!+'/'));
+config.environments={...config.environments,dingbell:{...config.environments?.dingbell,optimizeDeps:{include:[
+  '@flue/runtime','@flue/runtime/cloudflare','@earendil-works/pi-ai/providers/nvidia','@flue/runtime/cloudflare/internal','@flue/runtime/internal','agents','valibot','hono','hono/body-limit','hono/utils/buffer',
+  'better-auth/api','better-auth/plugins','better-auth/minimal','@better-auth/drizzle-adapter','drizzle-orm','drizzle-orm/d1','drizzle-orm/sqlite-core',
+  'csv-parse/browser/esm/sync','@json2csv/whatwg','@valibot/to-json-schema','eventsource-parser',
+]}}};
 return config;
 });

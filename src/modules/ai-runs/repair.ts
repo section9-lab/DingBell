@@ -27,7 +27,7 @@ export async function finishAiRepair(db:D1Database,value:AiRepair){
   .bind(now+300000,now+60000,runId,scope.organizationId,scope.storeId,scope.conversationId,scope.controllerId,token).run();
 }
 export async function repairAiExecutions(env:SupportBindings,deps:{reconcile?:typeof reconcileAiExecution;reconcileKnowledge?:typeof reconcileAiKnowledgeUsage}={}){
- if(!env.DB||(!env.KNOWLEDGE_AI&&(!env.FLUE_SUPPORT_AGENT||!env.CONVERSATION_CONTROLLER)))return;
+ if(!env.DB||(!env.KNOWLEDGE_AI&&((!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)||!env.CONVERSATION_CONTROLLER)))return;
  const claims=await claimAiRepairs(env.DB,Date.now()),reconcile=deps.reconcile??reconcileAiExecution,reconcileKnowledge=deps.reconcileKnowledge??reconcileAiKnowledgeUsage;
  for(let offset=0;offset<claims.length;offset+=5)await Promise.allSettled(claims.slice(offset,offset+5).map(async claim=>{
   let timer:ReturnType<typeof setTimeout>|undefined;

@@ -2,6 +2,8 @@
 
 版本：0.2，评审稿。日期：2026-10-08。首版目标：Cloudflare 上的开源、多租户、AI 与人工协作客服系统。
 
+**2026-10-29 架构更新：** 完整部署目标已扩展为 Cloudflare、Vercel、自建服务器，采用共用业务核心、Pi Durable 与平台适配层。以[ADR-11](04-research-and-decisions.md#adr-11-共用核心与三个完整部署目标2026-10-29)确定新方向与迁移验收。2026-10-30 的实际运行时与业务适配见[7.74](#774-pi-durable-与三种宿主2026-10-30)及[部署证据](../probes/deployment/README.md)。下文 Flue 章节保留历史 Cloudflare 合同和升级依据；原回执、预算和发送保护继续保留。
+
 本文件给出拟实施合同。Flue、Cloudflare 和 Ozon 的能力边界见[调研与决策](04-research-and-decisions.md)；阶段与验收见[实施计划](01-implementation-plan.md)和[验收清单](03-acceptance.md)。
 
 ## 1. 架构原则与技术基线
@@ -1979,3 +1981,18 @@ Ozon 会话发现和逐会话消息回填是两个持久阶段：发现列表会
 `GET /api/workspace-bootstrap` 现在以一个 `Cache-Control: no-store` 响应返回 setup、经一次服务端验证的 session、公司列表及已重新核对的 activeCompanyId。未配置或匿名状态返回 session/companies null；客户端严格验证 session 与 companies 同时存在、activeCompanyId 一致且属于公司列表，矛盾快照不进入缓存。原独立 API 保留给管理与兼容调用。
 
 客户端冷启动只发一个身份请求，并在请求期间对根路径或当前 `/workspace/*` 路径并行预载 Workspace；已知子路由同时预载目标 route chunk。本地暖 bootstrap 实测约 24–47ms。窗口聚焦复核时，所有工作区路由统一通过 React Activity 隐藏受保护内容并保留已挂载组件；复核通过后恢复原组件状态，撤权、换账号或不一致则继续清理。没有把身份或客户数据写入 localStorage，也没有开启 Better Auth cookie cache。
+
+
+2026-10-29 D-04 更新：用户已明确选择 MIT；仓库增加 [LICENSE](../LICENSE)，package.json 与发布检查同步为 MIT。此前“许可证待定”的记录保留为当时状态，不再作为当前发布阻塞项。第三方依赖保持各自许可证。
+
+### 7.74 Pi Durable 与三种宿主（2026-10-30）
+
+默认生产入口已切换到 Pi Durable。`packages/agent-runtime` 固定 Pi AI / Pi Durable / Chord 1.4.0，管理模型、原始 submission 与受控工具；业务层的运行定义、权限、预算、接管、回执和单次尝试发送继续复用。业务工具使用已有 Valibot 校验，发送前权限不会由模型选择。Flue 仅供旧路径开发回归，便携产物有依赖图检查，禁止夹带旧引擎或多份 Pi。
+
+Cloudflare 使用官方 PiHarness/Lifecycle 和 native DO SQL，业务数据保留 D1。新增迁移 0053 保存不可变运行绑定；DO v6 新增 Pi 类，v1–v5 不删除。旧 Flue 类成为保留数据的归档，残留 alarm 只清除唤醒，不恢复旧执行。升级脚本要求先收尾旧运行，无法读出完整零计数证明则不迁移、不上传。旧检查点不转换为新回执。
+
+Node 使用同步 SQLite 的事务及 checksum 迁移账本，在持久目录获得进程独占写锁；会话与店铺对象保留可重入 RPC、串行存储事务和持久闹钟。闹钟目录只在事务提交后更新，启动时从原存储复核。HTTP 使用官方 `@hono/node-server`，编译产物自包含，进程重启恢复原运行。此配置支持单进程，不宣称分布式多写。
+
+Vercel Functions 使用官方 durable-harness/World 原生队列；业务 SQL 由私有 Node Sandbox 挂载平台自有 Drive 保存，不放 Function 临时目录。每个 Sandbox 使用唯一名称，Drive 独占挂载防止多写，生产部署 ID 阻止旧发布替换新后端。升级先停止旧会话并确认磁盘释放，再删除旧实例。请求取消信号向下传递，同时保留 45 秒网络上限；未知业务写入不重试。JSON 与有界 CSV 在交付前读完，避免升级截断被误报为成功；Vercel 同步响应限制为 4 MiB。
+
+原生队列已被动观察到在停止 Sandbox 后重新挂载并执行维护，无需浏览器请求。最终云端基线验证连续两次升级保留设置和会话，详见[部署证据](../probes/deployment/README.md)。真实 owner 邮件和部署向导待验收；默认 Node/Vercel 没有 Cloudflare Workers AI/Vectorize 知识索引。完整跨服务灾备、真实模型与真实店铺能力不由这些合成验证推定通过。

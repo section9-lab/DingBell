@@ -7,7 +7,7 @@ import type { PreviewEvidence } from '../translations/transport.ts';
 import { bindReplyTestReceipt,readReplyTestRun,settleReplyTestUsage,type ReplyTestRun } from './storage.ts';
 import { reviewReplyTest,type ReplyTestControlReader } from './service.ts';
 
-export interface ReplyTestBindings extends ControlBindings {REPLY_TEST_ENABLED?:string;NVAPI_KEY?:string;FLUE_REPLY_TEST_AGENT?:DurableObjectNamespace<Agent>}
+export interface ReplyTestBindings extends ControlBindings {REPLY_TEST_ENABLED?:string;NVAPI_KEY?:string;FLUE_REPLY_TEST_AGENT?:DurableObjectNamespace<Agent>;AGENT_RUNTIME?:import('../../platform/agents/bindings.ts').PortableAgents}
 export interface ReplyTestInspection {run:ReplyTestRun;generation:number;http:number;closed:boolean;evidence:PreviewEvidence|null}
 export interface ReplyTestRuntime {
   lookup(id:string):Promise<{uid?:string}|null>;

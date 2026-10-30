@@ -1,0 +1,55 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --include=dev --ignore-scripts --no-audit --no-fund",
+  "buildCommand": "npm run build:vercel",
+  "outputDirectory": "dist/node/client",
+  "functions": {
+    "api/app.js": {
+      "maxDuration": 300,
+      "includeFiles": "{dist/node/server/**,migrations/*.sql}"
+    },
+    "api/harness.js": {
+      "maxDuration": 300
+    },
+    "api/flow.js": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "__harness_wkf_workflow_*",
+          "retryAfterSeconds": 5,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "api/maintenance.js": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "__dingbell_wkf_workflow_*",
+          "retryAfterSeconds": 15,
+          "initialDelaySeconds": 0
+        }
+      ]
+    }
+  },
+  "routes": [
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/api(?:/.*)?",
+      "dest": "/api/app"
+    },
+    {
+      "src": "/(?:agents|__probe|__internal)(?:/.*)?",
+      "dest": "/api/app"
+    },
+    {
+      "src": "/(?!assets/).*",
+      "dest": "/index.html"
+    }
+  ]
+}

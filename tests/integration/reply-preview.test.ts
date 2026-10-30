@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn,type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp,readFile,readdir,rm,writeFile } from 'node:fs/promises';
+import { mkdir,mkdtemp,readFile,readdir,rm,writeFile } from 'node:fs/promises';
 import { createServer,type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -65,7 +65,7 @@ async function fixture(){
   }catch(error){await close();throw error;}
 }
 test('native Flue translation uses a prepared budget run and never exposes public agent routes',{timeout:180_000},async t=>{
-  const f=await fixture();t.after(async()=>{await writeFile(join(root,'test-results/stage4c3b1-2026-10-10/native-server-latest.txt'),f.logs());await f.close();});
+  const f=await fixture();t.after(async()=>{try{await mkdir(join(root,'test-results/portable-validation'),{recursive:true});await writeFile(join(root,'test-results/portable-validation/legacy-translation-server.log'),f.logs());}finally{await f.close();}});
   const args=(run:TranslationRun)=>({runId:run.id,requestId:run.requestId});
   await t.test('prepared immutable scope uses the actual generated extension',async()=>{
     const run=await f.reserve();const result=await f.call('prepare',args(run));assert.equal(result.status,200,JSON.stringify(result.body));

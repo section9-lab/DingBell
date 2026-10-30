@@ -223,7 +223,7 @@ export function registerConversationControlRoutes(app: Hono<ApplicationEnv>) {
         if (result.code === 'REPLY_UNAVAILABLE') return apiError(c, result.code, 'The conversation or store is not currently eligible for replies.', 412);
         return apiError(c, result.code, 'The store reply capability has not been verified.', 412);
       }
-      if(c.env.FLUE_SUPPORT_AGENT)c.executionCtx.waitUntil(reconcileConversationAi(c.env,directory.scope));
+      if((c.env.FLUE_SUPPORT_AGENT||c.env.AGENT_RUNTIME))c.executionCtx.waitUntil(reconcileConversationAi(c.env,directory.scope));
       const metadata = await readControlAssignee(c.env.DB!, actor, conversationId, result.view.state.assignedMemberId, result.view.viewerMemberId);
       if (!metadata) return notFound(c);
       return jsonResponse(c, { companyId: actor.orgId, conversationId,

@@ -73,7 +73,7 @@ export async function submitReplyPreview(env:TranslationBindings,actor:Translati
   if(run){if(run.source!==input.source||run.sourceRevision!==input.sourceRevision)return {outcome:'conflict'};}
   else{
     if(env.TRANSLATION_ENABLED!=='true')return {outcome:'rejected',code:'TRANSLATION_DISABLED'};
-    if(!env.FLUE_REPLY_PREVIEW_AGENT||typeof env.NVAPI_KEY!=='string'||!env.NVAPI_KEY.trim())return {outcome:'rejected',code:'RUNTIME_UNAVAILABLE'};
+    if((!env.FLUE_REPLY_PREVIEW_AGENT&&!env.AGENT_RUNTIME)||typeof env.NVAPI_KEY!=='string'||!env.NVAPI_KEY.trim())return {outcome:'rejected',code:'RUNTIME_UNAVAILABLE'};
     const admitted=await admitTranslationPreview(env.DB,actor,{...access.query,source:input.source,sourceRevision:input.sourceRevision},env);
     if(admitted.outcome==='not_found'||admitted.outcome==='conflict')return {outcome:admitted.outcome};
     if(!('run'in admitted))return {outcome:'rejected',code:admitted.outcome==='disabled'?'TRANSLATION_DISABLED':admitted.outcome==='budget_unavailable'?'BUDGET_UNAVAILABLE':'PRICING_UNAVAILABLE'};

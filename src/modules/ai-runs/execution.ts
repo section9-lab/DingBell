@@ -6,7 +6,7 @@ import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGenera
 import {selectAiBudget} from './budget.ts';
 import type {SupportInspection} from './ledger.ts';
 import type {AiKnowledgeBindings} from './knowledge.ts';
-export interface SupportBindings extends ControlBindings,AiKnowledgeBindings {NVAPI_KEY?:string;AI_RECEPTION_CONFIG_JSON?:string;FLUE_SUPPORT_AGENT?:DurableObjectNamespace<Agent>}
+export interface SupportBindings extends ControlBindings,AiKnowledgeBindings {NVAPI_KEY?:string;AI_RECEPTION_CONFIG_JSON?:string;FLUE_SUPPORT_AGENT?:DurableObjectNamespace<Agent>;AGENT_RUNTIME?:import('../../platform/agents/bindings.ts').PortableAgents}
 export interface SupportRuntime {
  lookup(run:AiExecution):Promise<{uid?:string}|null>;prepare(run:AiExecution):Promise<void>;inspect(run:AiExecution):Promise<SupportInspection|null>;
  dispatch(run:AiExecution):Promise<TranslationReceipt>;read(run:AiExecution):Promise<'completed'|'failed'|'aborted'|'pending'>;close(run:AiExecution):Promise<void>;
@@ -21,7 +21,7 @@ export function matchingSupport(state:SupportInspection,run:AiExecution){
 type Dependencies={runtime?:SupportRuntime};
 type Status='unavailable'|'unconfirmed'|'pending'|'completed'|'failed'|'aborted'|'closed';
 const view=(status:Status)=>({status,canSend:false as const});
-async function native(env:SupportBindings,deps:Dependencies){return deps.runtime??(await import('./runtime.ts')).createSupportRuntime(env);}
+async function native(env:SupportBindings,deps:Dependencies){return deps.runtime??(await import('./runtime.ts')).supportRuntime(env);}
 async function observe(env:SupportBindings,run:AiExecution,runtime:SupportRuntime){
  if(!run.receipt)return view(run.closure?'closed':'unconfirmed');
  try{
@@ -38,7 +38,7 @@ async function observe(env:SupportBindings,run:AiExecution,runtime:SupportRuntim
 export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:string,deps:Dependencies={}){
  if(!env.DB)return view('unavailable');let run=await readAiExecution(env.DB,scope,id);
  if(!run){
-  if(env.AI_RECEPTION_ENABLED!=='true'||!env.NVAPI_KEY?.trim()||!env.FLUE_SUPPORT_AGENT||!env.CONVERSATION_CONTROLLER)return view('unavailable');
+  if(env.AI_RECEPTION_ENABLED!=='true'||!env.NVAPI_KEY?.trim()||(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)||!env.CONVERSATION_CONTROLLER)return view('unavailable');
   let cost;
   try{
    const raw=env.AI_RECEPTION_CONFIG_JSON;if(!raw||raw.length>32768)return view('unavailable');
@@ -74,7 +74,7 @@ export async function readExecutedAiRun(env:SupportBindings,scope:ControlScope,i
 }
 /** Reconciles the original execution even after the conversation moves to another run. */
 export async function reconcileAiExecution(env:SupportBindings,scope:ControlScope,id:string,deps:Dependencies={}){
- if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&!env.FLUE_SUPPORT_AGENT))return view('unavailable');
+ if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)))return view('unavailable');
  try{
   let run=await readAiExecution(env.DB,scope,id);if(!run)return view('unavailable');
   if(run.closure&&run.status==='settled')return view(run.closure.kind==='runtime_closed'?run.closure.outcome:'closed');
@@ -101,6 +101,6 @@ export async function reconcileAiExecution(env:SupportBindings,scope:ControlScop
 }
 /** Prompt wake after a human command. Historical executions have their own repair cursor. */
 export async function reconcileConversationAi(env:SupportBindings,scope:ControlScope,deps:Dependencies={}){
- if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&!env.FLUE_SUPPORT_AGENT))return view('unavailable');
+ if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)))return view('unavailable');
  try{const id=await getConversationController(env,scope.controllerId).readAiRunTarget(scope);return id?reconcileAiExecution(env,scope,id,deps):view('unavailable');}catch{return view('unconfirmed');}
 }

@@ -1,0 +1,31 @@
+{
+  "name": "dingbell-pi-portability-probe",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "scripts": {
+    "check:types": "tsc --noEmit",
+    "test:node": "node --test node.test.ts",
+    "test:local": "node --test --test-concurrency=1 node.test.ts cloudflare.test.ts",
+    "test:cloud": "node cloud-check-run.ts --isolated-cloud",
+    "test:vercel": "node vercel-check-run.ts",
+    "build:cloudflare": "wrangler deploy --dry-run --outdir dist --config wrangler.jsonc"
+  },
+  "dependencies": {
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/chord": "1.4.0",
+    "agents": "0.30.0",
+    "durable-harness": "0.0.1"
+  },
+  "devDependencies": {
+    "wrangler": "4.155.0",
+    "typescript": "7.0.2",
+    "@types/node": "24.19.1",
+    "@cloudflare/workers-types": "5.20261029.1",
+    "@workflow/world-local": "5.1.2"
+  }
+}

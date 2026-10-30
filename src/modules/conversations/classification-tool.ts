@@ -1,4 +1,4 @@
-import {defineTool} from '@flue/runtime/tool';
+import {defineTool} from '../../platform/core/tool.ts';
 import * as v from 'valibot';
 import {aiIntakeRunSchema,aiClassificationSchema,aiIntakeReceiptSchema,type AiIntakeRun,type AiClassification} from './ai-intake.ts';
 import type {ControlScope} from './control-types.ts';
@@ -20,7 +20,7 @@ export function createClassificationTool(value:AiIntakeRun,controller:Classifica
     const receipt=parsed.output.receipt;
     return receipt.action==='ai_classification'&&receipt.origin==='agent'&&JSON.stringify(receipt.run)===JSON.stringify(run)&&JSON.stringify(receipt.classification)===JSON.stringify(data)?'committed' as const:'unconfirmed' as const;
    });
-   return {output:{status,canSend:false,sent:false},terminate:true};
+   return {output:{status,canSend:false as const,sent:false as const},terminate:true};
   },
  });
 }

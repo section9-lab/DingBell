@@ -5,10 +5,10 @@ type Application = Awaited<ReturnType<typeof startLocalApplication>>;
 const test = base.extend<{ application: Application; mailEnabled: boolean; empty: boolean }>({
   mailEnabled: [false, { option: true }],
   empty: [false, { option: true }],
-  application: async ({ mailEnabled, empty }, use) => {
+  application: [async ({ mailEnabled, empty }, use) => {
     const app = await startLocalApplication(true, { mail: mailEnabled, empty });
     try { await use(app); } finally { await app.close(); }
-  },
+  }, { timeout: 90_000 }],
 });
 
 async function mailLink(application: Application, recipient: string, path: string) {

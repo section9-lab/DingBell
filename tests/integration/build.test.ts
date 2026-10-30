@@ -7,7 +7,7 @@ import { fileURLToPath, URL } from 'node:url';
 const distribution = fileURLToPath(new URL('../../dist/', import.meta.url));
 const output = join(distribution, 'dingbell');
 const clientOutput = join(distribution, 'client');
-const probeMarkers = ['SUPPORT_TRANSPORT_BOUND', 'DINGBELL_SUPPORT_TOKEN', 'support-runtime-fixture', 'synthetic support policy failed', 'ReplyQualityEvaluation', 'REPLY_QUALITY_EXPLICIT_SELECTION_REQUIRED', 'dingbell-reply-quality-200-v1', 'DINGBELL_TEST_ANSWER_TOKEN', '/__test/answer', 'synthetic answer seed missing', 'reply-test-runtime-fixture', 'REPLY_TEST_TRANSPORT_BOUND', 'DINGBELL_REPLY_TEST_GATE', 'DINGBELL_REPLY_TEST_TOKEN', 'DINGBELL_TEST_KNOWLEDGE_TOKEN', '/__test/knowledge', 'TestKnowledgeReviewWorkflow', 'TestKnowledgeIndexWorkflow', '/__fixture/', 'test_index_gate', 'DINGBELL_TEST_PREVIEW_TOKEN', '/__test/translation', 'synthetic preview not prepared', 'preview-fixture', 'synthetic-never-real', 'DINGBELL_PREVIEW_GATE', 'DINGBELL_PREVIEW_TOKEN', 'PREVIEW_NOT_IMPLEMENTED', 'TestConversationController', 'test:faults', 'synthetic projection failure', 'DINGBELL_TEST_STORE_CHECKER', 'Unexpected synthetic connector destination', 'dingbell-test-mailbox', 'DINGBELL_TEST_MAILBOX', 'dingbell-fixture', 'dingbell-flue-probe', 'dingbell-identity-probe', 'dingbell-application-identity-test', 'dingbell-platform-probe', 'dingbell-flue-schema8-probe', 'dingbell-external-probe', 'fixture-ok', '/__probe', 'probeInterrupt', 'probeDestroy', 'probeObserverFailure', 'ProbeGate', 'BoundedProbe', 'HistoricalProbe', 'PlatformProbeState', 'NvidiaSyntheticProbe', 'FlueExternalProbeAgent', 'NvidiaEvaluation', 'lookup_test_order', 'nvidia-probe-fixture', 'DINGBELL_KNOWLEDGE_EVAL', 'synthetic-semantic-company', 'dingbell-semantic-ru-zh-v1'];
+const probeMarkers = ['SUPPORT_TRANSPORT_BOUND', 'DINGBELL_SUPPORT_TOKEN', 'support-runtime-fixture', 'synthetic support policy failed', 'ReplyQualityEvaluation', 'REPLY_QUALITY_EXPLICIT_SELECTION_REQUIRED', 'dingbell-reply-quality-200-v1', 'DINGBELL_TEST_ANSWER_TOKEN', '/__test/answer', 'synthetic answer seed missing', 'reply-test-runtime-fixture', 'REPLY_TEST_TRANSPORT_BOUND', 'DINGBELL_REPLY_TEST_GATE', 'DINGBELL_REPLY_TEST_TOKEN', 'DINGBELL_TEST_KNOWLEDGE_TOKEN', '/__test/knowledge', 'TestKnowledgeReviewWorkflow', 'TestKnowledgeIndexWorkflow', '/__fixture/', 'test_index_gate', 'DINGBELL_TEST_PREVIEW_TOKEN', '/__test/translation', 'synthetic preview not prepared', 'preview-fixture', 'synthetic-never-real', 'DINGBELL_PREVIEW_GATE', 'DINGBELL_PREVIEW_TOKEN', 'PREVIEW_NOT_IMPLEMENTED', 'TestConversationController', 'test:faults', 'synthetic projection failure', 'DINGBELL_TEST_STORE_CHECKER', 'Unexpected synthetic connector destination', 'dingbell-test-mailbox', 'DINGBELL_TEST_MAILBOX', 'dingbell-fixture', 'dingbell-flue-probe', 'dingbell-identity-probe', 'dingbell-application-identity-test', 'dingbell-platform-probe', 'dingbell-flue-schema8-probe', 'dingbell-external-probe', 'fixture-ok', 'probeInterrupt', 'probeDestroy', 'probeObserverFailure', 'ProbeGate', 'BoundedProbe', 'HistoricalProbe', 'PlatformProbeState', 'NvidiaSyntheticProbe', 'FlueExternalProbeAgent', 'NvidiaEvaluation', 'lookup_test_order', 'nvidia-probe-fixture', 'DINGBELL_KNOWLEDGE_EVAL', 'synthetic-semantic-company', 'dingbell-semantic-ru-zh-v1'];
 
 probeMarkers.push('DINGBELL_TEST_AI_DRAFT_TOKEN', '/__test/ai-draft', 'synthetic AI draft setup failed');
 
@@ -88,13 +88,14 @@ test('the production Worker deploys conversation control alongside the existing 
 
 test('the production Worker adds a separate translation Agent without replacing existing durable classes', async () => {
   const config = JSON.parse(await readFile(join(output, 'wrangler.json'), 'utf8'));
-  assert.ok(config.durable_objects?.bindings?.some((binding: {name:string;class_name:string}) => binding.name === 'FLUE_REPLY_PREVIEW_AGENT' && binding.class_name === 'FlueReplyPreviewAgent'));
+  assert.ok(config.durable_objects?.bindings?.some((binding: {name:string;class_name:string}) => binding.name === 'PI_AGENT' && binding.class_name === 'PiAgentObject'));
   assert.deepEqual(config.migrations, [
     {tag:'v1',new_sqlite_classes:['StoreCoordinator']},
     {tag:'v2',new_sqlite_classes:['ConversationController']},
     {tag:'v3',new_sqlite_classes:['FlueReplyPreviewAgent']},
     {tag:'v4',new_sqlite_classes:['FlueReplyTestAgent']},
     {tag:'v5',new_sqlite_classes:['FlueSupportAgent']},
+    {tag:'v6',new_sqlite_classes:['PiAgentObject']},
   ]);
   assert.ok(config.assets.run_worker_first.includes('/agents') && config.assets.run_worker_first.includes('/agents/*'));
   assert.match(await readFile(resolve(output, config.main), 'utf8'), /FlueReplyPreviewAgent/);
@@ -102,14 +103,14 @@ test('the production Worker adds a separate translation Agent without replacing 
 
 test('the answer test Agent is separately bound and disabled unless explicitly configured',async()=>{
   const config=JSON.parse(await readFile(join(output,'wrangler.json'),'utf8'));
-  assert.ok(config.durable_objects?.bindings?.some((binding:{name:string;class_name:string})=>binding.name==='FLUE_REPLY_TEST_AGENT'&&binding.class_name==='FlueReplyTestAgent'));
+  assert.ok(config.durable_objects?.bindings?.some((binding:{name:string;class_name:string})=>binding.name==='PI_AGENT'&&binding.class_name==='PiAgentObject'));
   assert.notEqual(config.vars?.REPLY_TEST_ENABLED,'true');
   assert.match(await readFile(resolve(output,config.main),'utf8'),/FlueReplyTestAgent/);
 });
 
 test('production Support has a separate native binding and remains disabled by default',async()=>{
   const config=JSON.parse(await readFile(join(output,'wrangler.json'),'utf8'));
-  assert.ok(config.durable_objects?.bindings?.some((b:{name:string;class_name:string})=>b.name==='FLUE_SUPPORT_AGENT'&&b.class_name==='FlueSupportAgent'));
+  assert.ok(config.durable_objects?.bindings?.some((b:{name:string;class_name:string})=>b.name==='PI_AGENT'&&b.class_name==='PiAgentObject'));
   assert.notEqual(config.vars?.AI_RECEPTION_ENABLED,'true');
   assert.deepEqual(config.r2_buckets??[],[]);
   const worker=await readFile(resolve(output,config.main),'utf8');assert.match(worker,/FlueSupportAgent/);assert.match(worker,/handoff-brief/);assert.match(worker,/handoff-reviews/);assert.match(worker,/handoff-items/);assert.match(worker,/conversation\/activity|\/activity/);assert.match(worker,/conversation-activities/);assert.match(worker,/conversation-timeline|\/timeline/);assert.match(worker,/exports\/csv/);assert.match(worker,/analytics\/overview/);assert.match(worker,/data-governance/);assert.match(worker,/companies\/:companyId\/degradation|\/degradation/);

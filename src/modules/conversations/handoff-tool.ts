@@ -1,4 +1,4 @@
-import {defineTool} from '@flue/runtime/tool';
+import {defineTool} from '../../platform/core/tool.ts';
 import * as v from 'valibot';
 import {aiRunSchema,aiHandoffToolInputSchema,controlledAiHandoffSchema,aiReceiptSchema,type AiRun,type ControlledAiHandoff} from './ai-state.ts';
 import type {ControlScope} from './control-types.ts';
@@ -21,7 +21,7 @@ export function createHandoffTool(value:AiRun,controller:HandoffController){
     const receipt=parsed.output.receipt;
     return receipt.action==='request_handoff'&&receipt.origin==='agent'&&JSON.stringify(receipt.run)===JSON.stringify(run)&&JSON.stringify(receipt.input)===JSON.stringify(stored)?'committed' as const:'unconfirmed' as const;
    });
-   return {output:{status,canSend:false,sent:false},terminate:true};
+   return {output:{status,canSend:false as const,sent:false as const},terminate:true};
   },
  });
 }

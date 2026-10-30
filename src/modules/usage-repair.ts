@@ -79,10 +79,10 @@ async function reconcileReplyTest(db:D1Database,claim:ReplyTestClaim,runtime:Rep
 type Dependencies={translationRuntime?:TranslationRuntime;replyTestRuntime?:ReplyTestRuntime};
 /** Persistent, actor-independent cost repair. It never dispatches or retries a provider request. */
 export async function repairFinancialUsage(env:UsageRepairBindings,deps:Dependencies={}){
- if(!env.DB||(!env.FLUE_REPLY_PREVIEW_AGENT&&!env.FLUE_REPLY_TEST_AGENT))return;
+ if(!env.DB||(!env.FLUE_REPLY_PREVIEW_AGENT&&!env.FLUE_REPLY_TEST_AGENT&&!env.AGENT_RUNTIME))return;
  const claims=await claimUsageRepairs(env.DB,Date.now());
- const translation=env.FLUE_REPLY_PREVIEW_AGENT?(deps.translationRuntime??(await import('./translations/runtime.ts')).createTranslationRuntime(env)):null;
- const replyTest=env.FLUE_REPLY_TEST_AGENT?(deps.replyTestRuntime??(await import('./reply-tests/runtime.ts')).createReplyTestRuntime(env)):null;
+ const translation=(env.FLUE_REPLY_PREVIEW_AGENT||env.AGENT_RUNTIME)?(deps.translationRuntime??(await import('./translations/runtime.ts')).createTranslationRuntime(env)):null;
+ const replyTest=(env.FLUE_REPLY_TEST_AGENT||env.AGENT_RUNTIME)?(deps.replyTestRuntime??(await import('./reply-tests/runtime.ts')).createReplyTestRuntime(env)):null;
  for(let offset=0;offset<claims.length;offset+=5)await Promise.allSettled(claims.slice(offset,offset+5).map(async claim=>{
   let timer:ReturnType<typeof setTimeout>|undefined;
   try{await Promise.race([claim.kind==='translation'?(translation?reconcileTranslation(env.DB!,claim,translation):Promise.resolve()):(replyTest?reconcileReplyTest(env.DB!,claim,replyTest):Promise.resolve()),

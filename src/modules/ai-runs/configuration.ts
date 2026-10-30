@@ -11,7 +11,7 @@ export function parseSupportConfiguration(value:unknown){
 }
 /** Deployment metadata only: inspecting configuration grants no execution or spending permission. */
 export function supportConfigurationView(env:SupportBindings):AiBudgetWorkspace['configuration']{
- const base={enabled:env.AI_RECEPTION_ENABLED==='true',modelConfigured:!!env.NVAPI_KEY?.trim()&&!!env.FLUE_SUPPORT_AGENT&&!!env.CONVERSATION_CONTROLLER};
+ const base={enabled:env.AI_RECEPTION_ENABLED==='true',modelConfigured:!!env.NVAPI_KEY?.trim()&&!(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)&&!!env.CONVERSATION_CONTROLLER};
  try{
   const raw=env.AI_RECEPTION_CONFIG_JSON;if(!raw||raw.length>32768)throw new Error('SUPPORT_CONFIG_MISSING');
   const cost=parseSupportConfiguration(JSON.parse(raw)),enabled=base.enabled&&(cost.config.model.promptVersion!=='support-reply-v1'||env.AI_OUTBOUND_ENABLED==='true'&&env.OUTBOUND_ENABLED==='true');

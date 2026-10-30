@@ -1,0 +1,14 @@
+node_modules/
+.vercel/
+.wrangler/
+dist/
+.env*
+.dev*
+cloudflare*.ts
+cloud-check-run.ts
+process-runner.ts
+node.test.ts
+vercel-check-run.ts
+wrangler.jsonc
+registry-metadata.json
+evidence.json

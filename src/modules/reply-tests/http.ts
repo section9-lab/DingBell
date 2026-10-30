@@ -56,7 +56,7 @@ export function registerReplyTestRoutes(app:Hono<ApplicationEnv>,deps:ReplyTestH
           if(query&&JSON.stringify(original(query))!==JSON.stringify(input))return conflict(c);
           if(!query){
             if(c.env.REPLY_TEST_ENABLED!=='true')return apiError(c,'REPLY_TEST_DISABLED','Answer testing is disabled.',403);
-            if(!c.env.KNOWLEDGE_AI||!c.env.KNOWLEDGE_INDEX||!c.env.FLUE_REPLY_TEST_AGENT||!c.env.NVAPI_KEY?.trim())return apiError(c,'REPLY_TEST_UNAVAILABLE','The answer test runtime is not configured.',503);
+            if(!c.env.KNOWLEDGE_AI||!c.env.KNOWLEDGE_INDEX||(!c.env.FLUE_REPLY_TEST_AGENT&&!c.env.AGENT_RUNTIME)||!c.env.NVAPI_KEY?.trim())return apiError(c,'REPLY_TEST_UNAVAILABLE','The answer test runtime is not configured.',503);
             let answerConfig:unknown,queryConfig:unknown;
             try{answerConfig=JSON.parse(c.env.REPLY_TEST_CONFIG_JSON??'');queryConfig=JSON.parse(c.env.REPLY_TEST_QUERY_CONFIG_JSON??'');}catch{return apiError(c,'PRICING_UNAVAILABLE','Answer and retrieval prices must be configured.',503);}
             const budget=await c.env.DB!.prepare("SELECT id FROM reply_test_budget WHERE organization_id=? AND enabled=1 AND starts_at<=unixepoch()*1000 AND ends_at>unixepoch()*1000 ORDER BY starts_at DESC LIMIT 1").bind(actor.orgId).first<{id:string}>();

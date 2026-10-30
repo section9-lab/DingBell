@@ -1,0 +1,55 @@
+{
+  "startedAt": "2026-10-29T10:32:36.108Z",
+  "name": "dingbell-sqlite-mvtempsb-d812bd",
+  "projectName": "dingbell-native-check-mvtei92x-d36ebd",
+  "sdk": "3.9.1",
+  "scope": "native-drive-sqlite-only-not-the-application",
+  "runtime": {
+    "node": "v24.22.1",
+    "platform": "linux"
+  },
+  "processInterruption": {
+    "uncommittedTransactionRolledBack": true,
+    "originalReceiptPreserved": true
+  },
+  "singleWriter": true,
+  "replacementSandbox": {
+    "originalReceiptPreserved": true,
+    "budgetPreserved": true,
+    "integrityCheckPassed": true
+  },
+  "status": "passed",
+  "cleanup": {
+    "dingbell-sqlite-mvtempsb-d812bd-first": true,
+    "dingbell-sqlite-mvtempsb-d812bd-replacement": true,
+    "drive": true
+  },
+  "cleanupErrors": {},
+  "finishedAt": "2026-10-29T10:32:53.739Z",
+  "priorAttempts": [
+    {
+      "name": "dingbell-sqlite-mvtejt0j-63a5dc",
+      "result": "rejected_before_creation",
+      "reason": "Cloud API requires a Drive size of at least 1 GiB; 64 MiB is rejected."
+    },
+    {
+      "name": "dingbell-sqlite-mvtekhhc-d72529",
+      "checks": "passed",
+      "initialDriveCleanup": "failed",
+      "laterDriveCleanup": "confirmed_removed",
+      "change": "Wait for detached Drive metadata before deletion; final rerun cleaned all resources."
+    }
+  ],
+  "piExecution": "not_run_on_vercel",
+  "fullApplication": "not_implemented",
+  "sourceSha256": {
+    "package.json": "b0ab953db88acdbaf324e828e70f65ccd2d651028b543abbd3712d47b2d29661",
+    "package-lock.json": "a7243c8e2e4b8e26cea2162f10c66af822c7b336788c6613cb76a6246c66a715",
+    "run.ts": "8d89737c0a9bd66998e3ee5207cd6fd0e3871d1d235c3674c40fae0d3610e0d9"
+  },
+  "finalResourceListing": {
+    "drives": 0,
+    "sandboxes": 0
+  },
+  "temporaryProjectRemoved": true
+}

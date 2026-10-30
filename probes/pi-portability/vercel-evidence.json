@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "startedAt": "2026-10-29T11:19:22.360Z",
+  "finishedAt": "2026-10-29T11:22:07.647Z",
+  "scope": "isolated_synthetic_agent_execution_only",
+  "runtime": {
+    "localNode": "v24.22.1",
+    "vercelFunctionNode": "v24.21.0",
+    "vercelCLI": "65.7.0"
+  },
+  "versions": {
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/chord": "1.4.0",
+    "agents": "0.30.0",
+    "durable-harness": "0.0.1",
+    "@workflow/world": "5.0.5",
+    "@workflow/world-local": "5.1.2",
+    "@workflow/world-vercel": "5.2.3",
+    "wrangler": "4.155.0",
+    "typescript": "7.0.2"
+  },
+  "adapter": {
+    "entry": "durable-harness/pi-durable",
+    "storage": "Vercel World",
+    "recovery": "native Vercel queue/v2beta",
+    "sandboxRequired": false,
+    "driveRequired": false,
+    "externalDatabaseRequired": false,
+    "realModelProviderUsed": false
+  },
+  "interruption": {
+    "status": 504,
+    "elapsedMs": 10348,
+    "platformTimeout": true
+  },
+  "passiveObservation": {
+    "afterTimeout": {
+      "eventCount": 20,
+      "commits": 17,
+      "unfinished": true
+    },
+    "afterQueue": {
+      "eventCount": 29,
+      "commits": 26,
+      "unfinished": false
+    },
+    "readerRefreshed": true,
+    "harnessOpenedBeforeObservedCompletion": false
+  },
+  "checks": {
+    "observedInterrupted": true,
+    "passiveReaderOnly": true,
+    "completedToolCalls": 1,
+    "safeToolInvocations": 2,
+    "sameToolTaskId": true,
+    "distinctHarnessOpeners": true,
+    "syntheticModelCalls": 3,
+    "userEntries": 1,
+    "sameSubmissionReceipt": true,
+    "unauthenticatedSessionAndCrashHTTP": 401,
+    "originalTerminalText": "fixture-ok",
+    "additionalToolCallsAfterRedeploy": 0
+  },
+  "redeployment": {
+    "originalDeployment": "dpl_9fypRNRLHBjpwjZGQePEA8VSFZt5",
+    "newDeployment": "dpl_FtqrXwp3PKxnrhxEbsU4rjeUeXJy",
+    "originalReceiptPreserved": true,
+    "additionalModelCalls": 0
+  },
+  "phases": [
+    {
+      "phase": "create-project",
+      "code": 0
+    },
+    {
+      "phase": "link-project",
+      "code": 0
+    },
+    {
+      "phase": "deploy-inputs",
+      "code": 0
+    },
+    {
+      "phase": "configure-secret",
+      "code": 0
+    },
+    {
+      "phase": "deploy",
+      "code": 0
+    },
+    {
+      "phase": "redeploy",
+      "code": 0
+    },
+    {
+      "phase": "delete-project",
+      "code": 0
+    }
+  ],
+  "cleanup": {
+    "runCancelled": true,
+    "projectRemoved": true
+  },
+  "build": {
+    "bothDeploymentsReady": true,
+    "localStrictTypecheck": "passed",
+    "cloudDiagnostics": [
+      "TS2688: missing @cloudflare/workers-types declarations",
+      "TS2688: missing node declarations"
+    ],
+    "productionTemplateBuildGate": "requires_clean_diagnostics"
+  },
+  "nativeConflictingPayload": "accepted_as_original_requires_business_fingerprint_guard",
+  "priorAttempts": [
+    {
+      "status": "failed",
+      "reason": "API functions omitted by initial upload allowlist",
+      "projectRemoved": true
+    },
+    {
+      "status": "failed",
+      "reason": "Unique deployment URL retained Vercel Authentication; runner switched to production alias",
+      "projectRemoved": true
+    },
+    {
+      "status": "failed",
+      "reason": "Passive reader did not refresh and returned an empty snapshot",
+      "projectRemoved": true,
+      "runCancelled": true
+    },
+    {
+      "status": "failed",
+      "reason": "Timeout and queue recovery passed; redeployment status was uncertain after a network error",
+      "initialCleanup": {
+        "projectRemoved": false,
+        "runCancelled": false
+      },
+      "laterExplicitProjectDeletion": "passed"
+    }
+  ],
+  "sourceSha256AtCloudRun": {
+    "package.json": "2f1885373a8691a4f2236f02a41d46d32b1dcd7be887a298f4fa9369b88b6f10",
+    "package-lock.json": "cad9d1a32ba50f89eb5c2ec677f56dd30ea96581642fff281d0847c01afa0534",
+    "fixture.ts": "2a4774f39f3e2b22276fff8a78aab9626eeaea8a02456396cc411765bfd33162",
+    "vercel-adapter.ts": "db1d93f4a232933e521da6d4c9db566fc2849ca787295bc2927522f708390338",
+    "api/session.ts": "08d4a0b04c44aba418646f0a7a6da55cfe083e1f2ade87399b74ac38bf9d2349",
+    "api/crash.ts": "c781f183072784d855b5590eee7dc946bf0320b3c84de3e5227d3466560fa6e3",
+    "api/flow.ts": "c74f3b8ea4cfcab03d7dac1883f2642c3903a8161d8f70749cc9d5c8061dbc5a",
+    "vercel.json": "a9361d142584dbe1d67436eb3a0dab6f18a344157699c3f70cdcbef6cef5fc47",
+    ".vercelignore": "651f5f081dd7669a6fa5a66e09216fdcf18c94f99cbbe0ffffc31f223a9836ed",
+    "vercel-check-run.ts": "b5626361298ef01cf13d40ffab19208deab9b87d37cdcd51ec7b68cbfaa76abc",
+    "process-runner.ts": "e8772c7ae576ba71ab862ebde9353493598ed9b08ffd9cdcc55da36a9bb14597",
+    "tsconfig.json": "232f795bdde0467c24307f14c25f6e0ed0b2dc756570fe2f180bc259aea4c763"
+  },
+  "currentSourceSha256": {
+    "package.json": "2f1885373a8691a4f2236f02a41d46d32b1dcd7be887a298f4fa9369b88b6f10",
+    "package-lock.json": "cad9d1a32ba50f89eb5c2ec677f56dd30ea96581642fff281d0847c01afa0534",
+    "fixture.ts": "2a4774f39f3e2b22276fff8a78aab9626eeaea8a02456396cc411765bfd33162",
+    "vercel-adapter.ts": "db1d93f4a232933e521da6d4c9db566fc2849ca787295bc2927522f708390338",
+    "api/session.ts": "08d4a0b04c44aba418646f0a7a6da55cfe083e1f2ade87399b74ac38bf9d2349",
+    "api/crash.ts": "c781f183072784d855b5590eee7dc946bf0320b3c84de3e5227d3466560fa6e3",
+    "api/flow.ts": "c74f3b8ea4cfcab03d7dac1883f2642c3903a8161d8f70749cc9d5c8061dbc5a",
+    "vercel.json": "a9361d142584dbe1d67436eb3a0dab6f18a344157699c3f70cdcbef6cef5fc47",
+    ".vercelignore": "651f5f081dd7669a6fa5a66e09216fdcf18c94f99cbbe0ffffc31f223a9836ed",
+    "vercel-check-run.ts": "de6dec70ea245b86191fe7063da7f7a40a8a0d7e84f4a54b83aa6e2532e7d898",
+    "process-runner.ts": "e8772c7ae576ba71ab862ebde9353493598ed9b08ffd9cdcc55da36a9bb14597",
+    "tsconfig.json": "232f795bdde0467c24307f14c25f6e0ed0b2dc756570fe2f180bc259aea4c763"
+  },
+  "postRunSourceChange": "Only a preflight refusal for an existing .env.local was added to the cloud runner; adapter, API and recovery assertions unchanged.",
+  "rawEvidenceSha256": "60df98916e62c61c3c46cb881a0a801dd8d80c13e0d4839e1500fc2142f42018",
+  "notVerified": [
+    "Full DingBell installation",
+    "Business database and authorization integration",
+    "Production budget and sender contracts",
+    "Flue history migration",
+    "Application cancellation semantics",
+    "Arbitrary queue redelivery and production load",
+    "Real provider behavior and external effects",
+    "Deployment-button wizard"
+  ],
+  "officialGuide": "https://vercel.com/docs/agent-harnesses/pi"
+}

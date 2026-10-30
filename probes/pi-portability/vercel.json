@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --include=dev --ignore-scripts --no-audit --no-fund",
+  "functions": {
+    "api/session.ts": { "maxDuration": 30 },
+    "api/crash.ts": { "maxDuration": 10 },
+    "api/flow.ts": {
+      "maxDuration": 60,
+      "experimentalTriggers": [{
+        "type": "queue/v2beta",
+        "topic": "__harness_wkf_workflow_*",
+        "retryAfterSeconds": 5,
+        "initialDelaySeconds": 0
+      }]
+    }
+  }
+}

@@ -10,7 +10,7 @@ import { changeReplyTestBudget,readReplyTestBudgets } from './budget-admin.ts';
 function configuration(env:ApplicationEnv['Bindings']):ReplyTestBudgetWorkspace['configuration']{
   let answerReservationMicros:number|null=null,queryReservationMicros:number|null=null;
   try{const price=replyTestPricing(JSON.parse(env.REPLY_TEST_CONFIG_JSON??''),JSON.parse(env.REPLY_TEST_QUERY_CONFIG_JSON??''));answerReservationMicros=estimateTranslationReservation(price.answerConfig);queryReservationMicros=price.reservedMicros;}catch{ /* An unknown price is never a free price. */ }
-  return {enabled:env.REPLY_TEST_ENABLED==='true',modelConfigured:!!env.NVAPI_KEY?.trim()&&!!env.FLUE_REPLY_TEST_AGENT,knowledgeConfigured:!!env.KNOWLEDGE_AI&&!!env.KNOWLEDGE_INDEX,
+  return {enabled:env.REPLY_TEST_ENABLED==='true',modelConfigured:!!env.NVAPI_KEY?.trim()&&!!(env.FLUE_REPLY_TEST_AGENT||env.AGENT_RUNTIME),knowledgeConfigured:!!env.KNOWLEDGE_AI&&!!env.KNOWLEDGE_INDEX,
     pricesConfigured:answerReservationMicros!==null&&queryReservationMicros!==null,answerReservationMicros,queryReservationMicros};
 }
 const validId=(s:string)=>!!s&&s.length<=256&&s===s.trim()&&s.isWellFormed()&&!/[\u0000-\u001f\u007f]/.test(s);

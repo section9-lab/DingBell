@@ -50,3 +50,12 @@ If an outbound/model request may have started, rollback does not make it safe to
 - Browser assets contain no server implementation, fixture marker or secret file.
 
 Keep the previous artifact and restore evidence until the approved observation window ends.
+
+
+## Portable runtime transition (2026-10-29)
+
+The Pi deployment adds migration 0053 and Cloudflare Durable Object migration v6. Historical v1–v5 names and state are retained. Before upgrading an existing Flue installation, pause admission and reconcile/drain all legacy held reservations and unclosed executions with its original release. The Cloudflare deploy helper checks these records before remote migration/upload and refuses an unconfirmed drain. Do not reinterpret a Flue receipt as a Pi UID, discard a claimed permit, or refund uncertain external work. Native checkpoints are adapter-specific; business schema compatibility does not make live executions transferable across platforms.
+
+For Node, stop the old process, preserve a complete data-volume backup and keys, then start the new release with the same private directory. Applied SQL checksums are immutable; changed historical migrations fail closed. Never run old and new writers together. Restore the complete prior volume and matching release for rollback rather than downgrading an already migrated file in place.
+
+For Vercel, a new production release replaces the old business Sandbox through the same exclusively mounted Drive. Incarnations have unique names so a delayed cleanup cannot delete a replacement. Only the creator installs/starts an incarnation; other Functions await readiness. Old Functions cannot replace the active production release. World run IDs and business receipts remain original across releases. Full cross-service point-in-time restore is not established by this deployment check.

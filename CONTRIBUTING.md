@@ -1,6 +1,6 @@
 # Contributing to DingBell
 
-DingBell is not yet published under a project license. Until the repository owner selects and adds one, viewing the source does not grant redistribution rights. Do not submit code you are not entitled to contribute.
+DingBell is licensed under [MIT](LICENSE). Contributions are provided under the same license. Only submit code you are entitled to contribute.
 
 ## Development setup
 

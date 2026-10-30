@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 2,
+  "recordedAt": "2026-10-29T09:46:44.478Z",
+  "node": "v24.22.1",
+  "versions": {
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/chord": "1.4.0",
+    "agents": "0.30.0",
+    "durable-harness": "0.0.1",
+    "@workflow/world": "5.0.5",
+    "@workflow/world-local": "5.1.2",
+    "@workflow/world-vercel": "5.2.3",
+    "wrangler": "4.155.0",
+    "typescript": "7.0.2"
+  },
+  "local": {
+    "command": "npm run test:local",
+    "status": "passed",
+    "scenarios": 3,
+    "failed": 0,
+    "worldRecovery": "original_passive_assertion_incomplete_superseded_by_validationUpdates",
+    "scope": "synthetic_execution_only"
+  },
+  "typecheck": {
+    "command": "npm run check:types",
+    "status": "passed"
+  },
+  "build": {
+    "command": "npm run build:cloudflare",
+    "status": "passed",
+    "uploadKiB": 1180.46,
+    "gzipKiB": 226.32
+  },
+  "cloudflare": {
+    "status": "passed",
+    "startedAt": "2026-10-29T09:41:30.578Z",
+    "finishedAt": "2026-10-29T09:43:01.437Z",
+    "checks": [
+      "authentication",
+      "concurrent-idempotency",
+      "alarm-only-interruption-recovery",
+      "completed-tool-not-replayed",
+      "stable-tool-task-id",
+      "terminal-object-reset",
+      "abort-settlement"
+    ],
+    "phases": [
+      {
+        "phase": "initial-deploy",
+        "exitCode": 0,
+        "version": "ef5f8f61-45dd-49e1-9a07-2e2792ce03f3"
+      },
+      {
+        "phase": "redeploy",
+        "exitCode": 0,
+        "version": "91ed1a5b-06dc-4990-80ef-5c78aeb01c61"
+      },
+      {
+        "phase": "cleanup",
+        "exitCode": 0
+      }
+    ],
+    "redeployment": {
+      "originalCompletedReceiptPreserved": true,
+      "originalAbortedReceiptPreserved": true,
+      "additionalModelCalls": 0
+    },
+    "syntheticModelCalls": 3,
+    "workerRemoved": true,
+    "priorAttempts": [
+      {
+        "status": "failed",
+        "reason": "fetch failed",
+        "workerRemoved": true
+      },
+      {
+        "status": "failed",
+        "reason": "unexpected HTTP 404 during unauthenticated readiness check",
+        "workerRemoved": true
+      }
+    ]
+  },
+  "vercelCloud": {
+    "status": "passed",
+    "scope": "synthetic_execution_only",
+    "evidence": "vercel-evidence.json"
+  },
+  "nativeConflictingPayload": "accepted_as_original_requires_business_fingerprint_guard",
+  "productionMigration": "not_implemented",
+  "sourceSha256": {
+    "package.json": "d9673e121432831b89061aa8972483277548c254f7e5829b20c4ea2fa7ecabd9",
+    "package-lock.json": "cad9d1a32ba50f89eb5c2ec677f56dd30ea96581642fff281d0847c01afa0534",
+    "fixture.ts": "2a4774f39f3e2b22276fff8a78aab9626eeaea8a02456396cc411765bfd33162",
+    "process-runner.ts": "de9a85263aeadaf4603868766cf22d65973bdd12c7dfcc48331899716a47aec1",
+    "node.test.ts": "d29f2e96efab8c40153b56859441a945bb8d5907e76628c873361ec09a445f27",
+    "cloudflare.ts": "d34ac72e5999c71d29d1b698d0471753c55775eb7067250b5b47f4f31383f1bc",
+    "cloudflare-check.ts": "eb59e4c6adb0a86c63e5f6d3e8294c469155e8c82f7bce45c922e01ad8d78e73",
+    "cloudflare.test.ts": "504fcbb16739f9d30a8127d6c65ae92df302a5815bfe9ec4a6d9f740acfb245f",
+    "cloud-check-run.ts": "5928887cec4c086b16308bf8c0aff033b2f4b5a23421f5ac03fe98b540956f5c",
+    "wrangler.jsonc": "7ac7ef95adb668b51ddd0e7275b707e40fc3dc596602834049fdd1dc048c6f04",
+    "tsconfig.json": "14814aa5613202b49f03f85d632638b042c5ab7300eac842af23cce2e9e489bf"
+  },
+  "productionManifestSha256": {
+    "package.json": "672d76442c1375ca9901a62bde6bdfd9a2af8c96364053720fef765392198ca6",
+    "package-lock.json": "a6984ee80e1a30a07e1fc2332df8cf1d692289dcf573a433f93d6c587d2ed824"
+  },
+  "dependencyMetadata": {
+    "lockfileRecords": 444,
+    "missingVersionIntegrityOrLicense": 0,
+    "piCopies": {
+      "@earendil-works/pi-durable": 1,
+      "@earendil-works/pi-ai": 1,
+      "@earendil-works/chord": 1
+    }
+  },
+  "updatedAt": "2026-10-29T11:29:32Z",
+  "validationUpdates": {
+    "worldReaderCorrection": "The original reader omitted refresh(); an empty snapshot was insufficient proof of passive completion. Corrected readers refresh and require nonempty persisted events plus the original completed transcript.",
+    "supersedes": "original local World passive-completion evidence only; historical source hashes remain unchanged",
+    "localReruns": [
+      {
+        "command": "npm run test:local",
+        "status": "passed",
+        "scenarios": 3,
+        "failed": 0,
+        "durationMs": 37163.323666,
+        "log": "test-results/pi-portability/vercel-adapter-local-refreshed.log",
+        "scope": "all three scenarios after reader refresh fix"
+      },
+      {
+        "command": "node --test --test-name-pattern='world:' node.test.ts",
+        "status": "passed",
+        "scenarios": 1,
+        "failed": 0,
+        "durationMs": 2551.073958,
+        "log": "test-results/pi-portability/world-reader-contract.log",
+        "scope": "World after adding nonempty-event and original-transcript assertions"
+      }
+    ],
+    "currentSourceSha256": {
+      "package.json": "2f1885373a8691a4f2236f02a41d46d32b1dcd7be887a298f4fa9369b88b6f10",
+      "process-runner.ts": "e8772c7ae576ba71ab862ebde9353493598ed9b08ffd9cdcc55da36a9bb14597",
+      "tsconfig.json": "232f795bdde0467c24307f14c25f6e0ed0b2dc756570fe2f180bc259aea4c763"
+    },
+    "productionManifestHashes": "Historical package.json hash predates deployment scripts/metadata; main runtime dependencies and lockfile unchanged."
+  }
+}

@@ -1,14 +1,25 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "dingbell",
+  "main": "src/platform/cloudflare/worker.ts",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "OUTBOUND_ENABLED": "false",
+    "TRANSLATION_ENABLED": "false",
+    "REPLY_TEST_ENABLED": "false",
+    "AI_RECEPTION_ENABLED": "false",
+    "AI_OUTBOUND_ENABLED": "false",
+    "KNOWLEDGE_INDEXING_ENABLED": "false",
+    "KNOWLEDGE_VECTOR_CLEANUP_ENABLED": "false"
+  },
   "workflows": [
     { "binding": "KNOWLEDGE_WORKFLOW", "name": "dingbell-knowledge-index", "class_name": "KnowledgeIndexWorkflow" },
     { "binding": "KNOWLEDGE_REVIEW_WORKFLOW", "name": "dingbell-knowledge-review", "class_name": "KnowledgeReviewWorkflow" }
   ],
   "durable_objects": {
     "bindings": [
+      { "name": "PI_AGENT", "class_name": "PiAgentObject" },
       { "name": "STORE_COORDINATOR", "class_name": "StoreCoordinator" },
       { "name": "CONVERSATION_CONTROLLER", "class_name": "ConversationController" }
     ]
@@ -18,12 +29,13 @@
     { "tag": "v2", "new_sqlite_classes": ["ConversationController"] },
     { "tag": "v3", "new_sqlite_classes": ["FlueReplyPreviewAgent"] },
     { "tag": "v4", "new_sqlite_classes": ["FlueReplyTestAgent"] },
-    { "tag": "v5", "new_sqlite_classes": ["FlueSupportAgent"] }
+    { "tag": "v5", "new_sqlite_classes": ["FlueSupportAgent"] },
+    { "tag": "v6", "new_sqlite_classes": ["PiAgentObject"] }
   ],
   "triggers": { "crons": ["* * * * *"] },
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/__probe", "/__probe/*"]
+    "run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/__probe", "/__probe/*", "/__internal", "/__internal/*"]
   },
   "d1_databases": [{
     "binding": "DB",

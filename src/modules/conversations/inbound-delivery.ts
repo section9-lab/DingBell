@@ -54,7 +54,7 @@ export async function deliverInboundEvents(env:SupportBindings){
    await Promise.race([(async()=>{
     const result=await getConversationController(env,scope.controllerId).receiveInbound(scope,claim.eventId);
     if(result.outcome!=='accepted'&&result.outcome!=='ignored')return;
-    await finishInboundEvent(env.DB!,claim,result.outcome,Date.now(),env.AI_RECEPTION_ENABLED==='true'&&env.FLUE_SUPPORT_AGENT?true:'active_only');
+    await finishInboundEvent(env.DB!,claim,result.outcome,Date.now(),env.AI_RECEPTION_ENABLED==='true'&&(env.FLUE_SUPPORT_AGENT||env.AGENT_RUNTIME)?true:'active_only');
     // Revocation is already durable. Historical executions also have an independent repair cursor.
     if(result.outcome==='accepted')await reconcileConversationAi(env,scope);
    })(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('INBOUND_DELIVERY_TIMEOUT')),3000);})]);

@@ -1,0 +1,77 @@
+{
+  "startedAt": "2026-10-30T07:00:07.719Z",
+  "name": "dingbell-install-check-mvumhbk7-cd6a1c",
+  "phases": [
+    {
+      "phase": "create-database",
+      "code": 0
+    },
+    {
+      "phase": "deploy-initial",
+      "code": 0,
+      "version": "674b0596-707e-45f0-8a70-436418a74c45"
+    },
+    {
+      "phase": "deploy-configured",
+      "code": 0,
+      "version": "1e23eb02-2b1d-444e-862c-8a8e5ab3488f"
+    },
+    {
+      "phase": "seed-synthetic-identities",
+      "code": 0
+    },
+    {
+      "phase": "redeploy",
+      "code": 0,
+      "version": "048e772e-3e5e-465a-a253-61afacf1df25"
+    },
+    {
+      "phase": "delete-index",
+      "code": 0
+    },
+    {
+      "phase": "delete-review",
+      "code": 0
+    },
+    {
+      "phase": "delete-worker",
+      "code": 0
+    },
+    {
+      "phase": "delete-database",
+      "code": 0
+    }
+  ],
+  "scope": "production-build-with-synthetic-identities-no-email-model-or-sends",
+  "freshInstallation": {
+    "schemaReadable": true,
+    "unclaimed": true,
+    "identityConfigured": true,
+    "mailConfigured": false,
+    "staticAssets": true,
+    "apiRouting": true,
+    "anonymousDenied": true
+  },
+  "business": {
+    "realSignIn": true,
+    "httpOnlySession": true,
+    "companyIsolation": true,
+    "settingsWrite": true
+  },
+  "redeployment": {
+    "migrationsIdempotent": true,
+    "settingsPreserved": true,
+    "sessionPreserved": true
+  },
+  "status": "passed",
+  "cleanup": {
+    "dingbell-install-check-mvumhbk7-cd6a1c-index": true,
+    "dingbell-install-check-mvumhbk7-cd6a1c-review": true,
+    "worker": true,
+    "database": true
+  },
+  "finishedAt": "2026-10-30T07:06:13.447Z",
+  "runtime": "Pi Durable 1.4.0 / Cloudflare PiHarness",
+  "deployWizard": "not_run",
+  "firstOwnerEmail": "not_run"
+}

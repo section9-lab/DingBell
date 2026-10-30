@@ -1,0 +1,112 @@
+{
+  "startedAt": "2026-10-30T06:42:57.392Z",
+  "name": "dingbell-app-check-mvulv8q2-1d30af",
+  "phases": [
+    {
+      "phase": "create-project",
+      "code": 0
+    },
+    {
+      "phase": "link-project",
+      "code": 0
+    },
+    {
+      "phase": "deploy-inputs",
+      "code": 0
+    },
+    {
+      "phase": "configure-dingbell_gateway_secret",
+      "code": 0
+    },
+    {
+      "phase": "configure-better_auth_secret",
+      "code": 0
+    },
+    {
+      "phase": "configure-bootstrap_secret",
+      "code": 0
+    },
+    {
+      "phase": "deploy",
+      "code": 0
+    },
+    {
+      "phase": "redeploy",
+      "code": 0
+    },
+    {
+      "phase": "runtime-logs",
+      "code": 0
+    },
+    {
+      "phase": "remove-project",
+      "code": 0
+    }
+  ],
+  "scope": "production-full-application-native-sandbox-drive-world-synthetic-identities-no-real-email-model-or-sends",
+  "freshInstallation": {
+    "schemaReadable": true,
+    "unclaimed": true,
+    "identityConfigured": true,
+    "staticAssets": true,
+    "anonymousDenied": true,
+    "privateAuthorityDenied": true
+  },
+  "business": {
+    "realSignIn": true,
+    "httpOnlySession": true,
+    "companyIsolation": true,
+    "settingsWrite": true
+  },
+  "maintenanceObservation": {
+    "marker": {
+      "tick": 1793342824147,
+      "integrity": {
+        "integrity_check": "ok"
+      }
+    },
+    "stoppedAt": 1793342772238,
+    "beforeSession": "sbx_IZxTPflqqOqSqVqUxUbzCf6olzF6",
+    "afterSession": "sbx_8vMRoQBcrQlzH9O22tw1azF0tgSS"
+  },
+  "nativeMaintenance": {
+    "passiveObservation": true,
+    "beforeSession": "sbx_IZxTPflqqOqSqVqUxUbzCf6olzF6",
+    "afterSession": "sbx_8vMRoQBcrQlzH9O22tw1azF0tgSS",
+    "queueTickAfterStop": true,
+    "integrity": {
+      "integrity_check": "ok"
+    }
+  },
+  "upgradeReads": [
+    {
+      "status": 503,
+      "code": "SERVICE_UNAVAILABLE"
+    },
+    {
+      "status": 503,
+      "code": "SERVICE_UNAVAILABLE"
+    }
+  ],
+  "upgradeHttp": {
+    "status": 503,
+    "bytes": 137,
+    "contentType": "application/json",
+    "contentEncoding": null
+  },
+  "status": "failed",
+  "error": "Upgrade returned HTTP 503 / BUSINESS_DRIVE_ATTACHMENT_UNCONFIRMED after deleting an active Sandbox.",
+  "cleanup": {
+    "maintenance": false,
+    "sandbox": true,
+    "drive": false,
+    "project": true
+  },
+  "finishedAt": "2026-10-30T06:52:52.771Z",
+  "followUp": {
+    "projectRemoved": true,
+    "driveReadStatus": 404,
+    "sandboxesReadStatus": 404,
+    "fix": "Stop the session and confirm Drive release before deleting the unique Sandbox incarnation; then verify two consecutive upgrades."
+  }
+}

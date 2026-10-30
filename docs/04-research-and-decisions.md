@@ -2,6 +2,8 @@
 
 版本：0.2，评审稿。核对日期：2026-10-08。
 
+2026-10-29 决策更新：用户确认同时保留 Cloudflare、Vercel、自建服务器三个完整部署目标，采用共用业务核心与平台适配层；Pi Durable 作为替换 Flue 的执行内核方向。范围、适配方案及实施顺序以 [ADR-11](#adr-11-共用核心与三个完整部署目标2026-10-29) 为准。下文 Flue 调研保留为历史兼容依据。2026-10-30 三端适配已实现，技术验证、实际版本及保留边界见 ADR-11 的实施状态和[部署证据](../probes/deployment/README.md)。
+
 本文件记录选型依据、适用边界和仍需工程验证的事项。官方文档说明某组件具有某项能力，不代表 DingBell 已经完成集成；完整部署、平台权限和故障恢复须按验收清单验证。
 
 本版补充了 Flue 全站 96 篇可访问文档的逐篇阅读，并将关键差异与固定源码核对。完整范围、失效页面及每篇结论见[Flue 文档核对](05-flue-documentation-audit.md)。
@@ -67,7 +69,7 @@
 
 ### ADR-01 首版 Cloudflare 完整部署
 
-状态：用户已确认。使用 Workers/Static Assets 承载 UI 与 API，Flue 原生 DO 运行 Agent。Vercel 属于后续里程碑。
+状态：历史决策；部署目标和新运行时方向已由 ADR-11 更新。现有实现使用 Workers/Static Assets 承载 UI 与 API，Flue 原生 DO 运行 Agent；这仍是旧运行收尾与迁移的基线。
 
 验证：全新账号部署、已有数据升级、后台任务与 AI 中断恢复。不能以静态页面上线代替完整支持。
 
@@ -79,7 +81,7 @@
 
 ### ADR-03 Flue 与业务状态分离
 
-状态：架构建议。Flue 负责 AI 运行；自有控制对象负责负责人、接管、业务命令和外发。这些业务能力不是 Flue 的持久队列自然提供的。
+状态：现有 Flue 实现的职责边界；后续运行时和平台解耦遵循 ADR-11。Flue 负责 AI 运行；自有控制对象负责负责人、接管、业务命令和外发。这些业务能力不是 Flue 的持久队列自然提供的。
 
 复用约束：Flue 的提交幂等、attempt 恢复、流式读取与公开 extend 不另写替代。独立业务对象的理由是业务控制、审计与数据生命周期；阶段 1 对照原生扩展检查能否减少封装，合并须通过同一组接管与恢复验收。
 
@@ -146,6 +148,81 @@ AI Search 的[检索 API](https://developers.cloudflare.com/ai-search/api/search
 
 验证：状态在生成期间变化不导致漏行/重复；撤销权限使生成或下载失效；超限明确提示。不能把不断变化的分页结果称作固定快照。
 
+### ADR-11 共用核心与三个完整部署目标（2026-10-29）
+
+状态：用户已确认 Cloudflare、Vercel、自建服务器三个部署目标，并同意共用核心与平台适配方向。以下为实施基线；具体版本、依赖组合和部署配置须经过兼容验证，当前仓库仍是 Flue/Cloudflare 实现。本记录不表示三端已经支持。
+
+2026-10-29 最小执行探针已实测：Pi 1.4.0、Agents 0.30.0、durable-harness 0.0.1 组合通过 Node SQLite、本地 World 自动队列恢复、本地 workerd、Cloudflare 真云恢复/重新部署，以及 Vercel 真云 Function 超时/队列恢复/重新部署原回执检查。Vercel 执行层直接使用官方 `durable-harness/pi-durable` 适配器；共用 Pi 模型与工具，不需要 Sandbox 或外部数据库保存 Agent 检查点。完整应用未迁移。原生同键不同载荷返回原提交，须保留业务载荷冲突校验。可复跑源码、观察器修正及非阻断构建诊断见[探针结果](../probes/pi-portability/RESULTS.md)。
+
+追加约束：用户要求 Vercel 只使用内置能力，拒绝另配远程 libSQL 业务库。Vercel Agent 执行优先采用下表的 **Pi Durable + durable-harness + World/原生队列**，其恢复与重新部署已通过独立真云验证。World 的 Agent 检查点不替代公司、权限、预算等业务关系数据。
+
+业务存储另保留 **Sandbox 内的 Node/SQLite + Drives 持久磁盘** 候选，探索复用自建业务后端。Drives 可跨 Sandbox 会话保留文件且只允许单个读写挂载，挂载只能在 Sandbox 中使用；Hobby 每次 Sandbox 会话最长 45 分钟，仍须处理单写入归属、持久唤醒、故障恢复、升级及入口鉴权。仅保存快照或只在用户请求时启动不能满足后台客服任务。Blob 支持 ETag 条件写入，但不据此自行实现关系数据库。最小存储合同已在 Vercel Hobby 真云通过：Node 24.22.1/SDK 3.9.1 的 SQLite WAL 回滚、第二写入实例拒绝、跨 Sandbox 原回执/预算保留及清理均通过。该存储探针独立于 Agent 执行验证；完整业务合同、持久唤醒及安装链路尚未完成，不启用 Vercel 部署按钮，也不引入第三方数据库。
+
+依据：[Drives](https://vercel.com/docs/sandbox/concepts/drives)、[Sandbox 持久性](https://vercel.com/docs/sandbox/concepts/persistent-sandboxes)、[Sandbox 配额](https://vercel.com/docs/sandbox/pricing)、[当前存储产品](https://vercel.com/docs/storage)、[Blob 条件写入](https://vercel.com/docs/vercel-blob#conditional-writes)。部署和探针状态见[部署验证](../probes/deployment/README.md)。
+
+#### 范围与完成定义
+
+三个目标均覆盖工作台、身份与权限、业务 API、持久业务数据、Agent 执行、后台任务、知识检索和受控发送。每个部署使用部署者自己的资源和凭证，可独立运行；自建服务器的核心闭环不依赖 Cloudflare、Vercel 或 DingBell 商业中心的账号。仅部署前端、代理到另一台服务器上的 Agent，不算对应平台的完整支持。
+
+全平台共用 TypeScript 业务规则、API DTO、提示词版本、业务工具和审计合同。继续复用现有 Hono、Drizzle、身份及 UI 组件。平台差异在适配层解决，按部署目标装配依赖和构建入口。
+
+#### Agent 执行方案
+
+| 部署目标 | 目标执行方案 | 持久化与恢复 | 必须验证的边界 |
+| --- | --- | --- | --- |
+| Cloudflare | Pi Durable + Agents SDK 的 PiHarness | DO SQLite；由 Lifecycle 提供持久唤醒与恢复 | 驱逐、alarm、存储错误和重复唤醒；保留已有 DO 迁移历史及旧 Flue 回执 |
+| Vercel | Pi Durable + `durable-harness/pi-durable` | Vercel World 存储与队列；注册 Harness 重开入口 | 函数超时、重新部署、并发提交和队列重复投递；运行状态不能依赖本地 SQLite 文件或请求结束后的内存任务 |
+| 自建服务器 | Node + Pi Durable，首个目标为单进程 | SQLite 文件放持久卷；进程管理器重启后重开存储并恢复任务 | 进程中断、重启、定时任务恢复、卷备份和唯一写入进程；多节点另做协调及后端验证 |
+
+官方依据：[Cloudflare PiHarness](https://developers.cloudflare.com/agents/harnesses/pi/)、[Vercel Pi Durable 接入](https://vercel.com/docs/agent-harnesses/pi)、[Pi Durable 存储与恢复](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md)。这些能力是适配基础，不能代替 DingBell 的运行验证。
+
+Pi Durable 管理模型与工具步骤；PiHarness 和 durable-harness 分别承担目标平台的存储及恢复接入。`durable-harness` 只作为需要它的平台适配依赖；核心不要求所有安装者配置 World、AI Gateway 或 Sandbox。模型供应商通过 Pi AI 的配置接入，自建部署使用自己的供应商或模型服务。客服工具继续限制为明确的业务操作。
+
+Pi Durable 和相关适配 API 仍在快速变化。实施前锁定经验证的 Pi、Agents SDK、durable-harness 和 World 版本，并验证共用工具定义能够在各目标运行；不能因 peer dependency 范围匹配便认定行为兼容。现有 `pi-ai@0.87.1`、`agents@0.20.1` 和 Flue 依赖在兼容验证前保持原样。新增依赖时记录具体用途、版本、许可证和目标产物，检查重复依赖及未使用适配代码是否进入构建。
+
+#### 核心与平台边界
+
+以现有 `SupportRuntime` 为执行接口提取起点，统一提交、回执恢复、状态读取、取消意图与终态核对；复用已有翻译和问答测试的业务合同。核心及业务工具不直接导入 `cloudflare:workers`、D1/DO/Workflow 类型、Vercel SDK 或 World 存储类型。Pi 的宿主存储在适配层注入，业务对象通过带公司/店铺范围的接口访问。
+
+| 边界 | 共用合同 | 适配要求 |
+| --- | --- | --- |
+| 业务数据 | 公司隔离、预算预留/结算、唯一键、版本冲突和审计 | 提取现有 D1 SQL 与事务假设；继续使用 Drizzle，关系库后端按合同验证，不能把 ORM 等同于数据库零成本互换 |
+| 会话与店铺协调 | 命令顺序、接管版本、执行归属、共享限流 | Cloudflare 可保留 DO；其他环境通过事务或带失效版本的租约实现相同约束 |
+| 后台任务 | 持久任务 ID、到期时间、重试上限、结果核对 | 平台触发器负责唤醒，任务状态可恢复；进程内定时器不能作为唯一事实 |
+| 知识与检索 | 不可变修订、发布事实、检索范围、引用复核 | 向量及全文索引可按已发布源重建；业务层不直接依赖 Vectorize 类型或返回格式 |
+| 文件 | 文件身份、公司范围、授权、大小/摘要校验 | 适配对象存储或自建文件存储；保留现有同步导出与可选文件能力的状态边界 |
+| HTTP 与观察 | 受控 DTO、鉴权、幂等提交和可恢复状态读取 | 各宿主复用 Hono；内部提示词、工具参数和原始执行日志不直接作为客户端协议 |
+
+业务数据库与 Agent 检查点分开建模。自建 Agent 使用 SQLite，不代表已经移植 D1 业务库；Vercel World 保存运行状态，也不替代业务数据库、向量索引或对象存储。按实际能力选定每个平台的一套后端实现，避免同时维护功能重复的存储与检索方案。
+
+#### 正确性与迁移
+
+现有公司/店铺权限、预算账本、接管版本、冻结输入与知识、单次发送许可和 unknown 状态合同继续作为约束。框架恢复或队列重投不能新增供应商调用许可、释放不明费用或重新发送结果未知的消息。模型重试和工具重放必须服从已预留预算与业务幂等；取消不表示已发生的外部操作被撤回。
+
+平台回执由适配器映射并保留运行时、版本和执行归属证据。不能用新 operation ID 冒充历史 Flue UID，也不能在缺少同等终态/关闭证据时解除预算或发送限制。
+
+首个跨平台迁移合同采用有维护窗口的导出/导入：停止新准入，收尾可完成的任务，冻结并记录未完成和未知结果，再导出业务数据、幂等键、费用/发送账本、知识源、文件清单及运行版本。密钥通过独立安全渠道迁移；索引按原发布事实重建。目标验证完成并取得执行归属后再恢复入口，避免源端与目标端同时处理同一任务。
+
+不同宿主的原生检查点不假定能直接互拷。尚未具备可验证转换器的任务保留原运行证据并进入明确的待核对状态，不以新任务重放替代迁移。保留源端恢复材料；导入失败不触发对外发送或未知费用释放。
+
+#### 实施顺序与验收
+
+1. 抽离核心接口和业务工具，保留现有 Cloudflare/Flue 路径及回归证据；先验证版本兼容和预算/发送合同，再切换新运行。
+2. 跑通 Node/SQLite 单进程 Agent 与自建部署所需的业务存储、任务、知识及文件适配，用完整客服闭环证明核心不依赖云平台。
+3. 接入 Cloudflare PiHarness，验证 DO 驱逐与旧运行收尾；现有 Flue 实例的数据和回执按迁移合同处理。
+4. 接入 Vercel Pi Durable/World，验证函数中断、队列恢复及整套业务后端；不以工作台能够打开作为完成证据。
+5. 三端执行同一组业务合同测试，并各自完成全新部署、升级、故障恢复和停机迁移演练，逐项登记平台与版本证据后再标记支持。
+
+共同验收至少覆盖：租户隔离、重复消息/提交、并发命令、人工接管与迟到输出、预算和用量核对、发送成功/失败/unknown、知识撤回与引用、后台任务重启恢复、备份导入及旧版本升级。类型、Lint（按项目实际配置）、构建、核心交互、响应式、基础无障碍和依赖检查沿用项目交付要求。最小执行探针证据不替代这组完整业务验收；Vercel 真云及三端应用迁移仍待完成。
+
+#### 2026-10-30 实施状态与保留边界
+
+三端适配现已实现：独立 Pi AI / Pi Durable / Chord 1.4.0 运行图，Cloudflare Agents 0.30.0 PiHarness，Vercel durable-harness 0.0.1 / World 原生队列，Node 24 SQLite。业务 SQL、身份、协调器、预算、原始回执、受控工具与单次尝试发送器复用同一业务规则；Vercel 数据库位于自有 Sandbox Drive，不使用第三方数据库。Node HTTP 接入复用已安装的官方 @hono/node-server 2.1.4；没有引入第二套 Web 框架。Flue 仅保留开发回归和历史材料，便携产物有依赖图门禁。
+
+Cloudflare 和 Vercel 的完整应用技术基线已有真云部署、鉴权、隔离、设置持久化与升级证据；Vercel 另外被动观察了停止 Sandbox 后的原生队列重新挂载和维护。具体证据及局限见[部署验证](../probes/deployment/README.md)。安装向导和真实 owner 邮件仍待授权配置，按钮保持暂缓。最初“全平台知识检索”的目标尚未全部完成：Node/Vercel 默认没有 Workers AI/Vectorize 等价适配，不以关闭能力冒充功能一致。跨平台完整停机迁移与跨服务灾备也不由本次基础验证推定通过。
+
+项目许可证按用户明确选择落实为 MIT；各目标锁文件及第三方条款独立检查。旧版本升级要求先暂停并收尾 Flue 运行，保留原检查点/回执，原生检查点不跨宿主直接转换。
+
 ## 5. Ozon 能力验证表
 
 官方入口为 [Ozon Seller API](https://docs.ozon.ru/api/seller/)。本次读取该入口出现重定向循环，未获得可核对的完整正文。社区 SDK/镜像只用来发现需要核实的问题，不作为方法版本、套餐或时间窗口的施工依据。
@@ -201,7 +278,7 @@ AI Search 的[检索 API](https://developers.cloudflare.com/ai-search/api/search
 | json2csv | MIT | [LICENSE](https://github.com/juanjoDiaz/json2csv/blob/main/LICENSE.md) |
 | csv-parse | MIT | [官方包清单](https://github.com/adaltas/node-csv/blob/master/packages/csv-parse/package.json)；锁定 7.0.3，实际安装包 LICENSE 已保留 |
 
-DingBell 自身许可证仍由用户决定，本稿建议 Apache-2.0。云平台、模型和邮件服务属于使用者自行配置的外部服务，不因 SDK 开源而变成开源或免费基础设施。
+DingBell 自身许可证已按用户明确选择落实为 MIT，见 [LICENSE](../LICENSE)；2026-10-08 原稿建议 Apache-2.0 的决策已被替代。云平台、模型和邮件服务属于使用者自行配置的外部服务，不因 SDK 开源而变成开源或免费基础设施。
 
 当前设计说明记录 Obra shadcn/ui Community Edition 来源及 CC BY 4.0 归属要求。发布 UI 素材前核对[原始社区文件](https://www.figma.com/community/file/1514746685758799870)及下载版本，保留适用归属说明；不把第三方 Figma kit 与 shadcn/ui 代码许可证混为一谈。字体、Lucide 图标和新增组件同时进入素材清单。
 

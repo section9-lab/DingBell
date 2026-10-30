@@ -5,7 +5,9 @@ import type { ReplyTestRun } from './storage.ts';
 import type { ReplyTestInspection } from './execution.ts';
 import { replyTestInstance } from './policy.ts';
 export class ReplyTestLedger {
-  constructor(readonly sql:PreviewSql){
+  readonly sql:PreviewSql;
+  constructor(sql:PreviewSql){
+    this.sql=sql;
     sql.exec(`CREATE TABLE IF NOT EXISTS dingbell_reply_test (
       id INTEGER PRIMARY KEY CHECK(id=1),schema_version INTEGER NOT NULL CHECK(schema_version=1),binding TEXT NOT NULL,
       generation_count INTEGER NOT NULL DEFAULT 0 CHECK(generation_count IN (0,1)),http_count INTEGER NOT NULL DEFAULT 0 CHECK(http_count IN (0,1)),

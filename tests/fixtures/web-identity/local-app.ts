@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const fixture = 'tests/fixtures/web-identity';
 
 async function stop(child: ChildProcess) {
-  if (child.pid === undefined) return;
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   const kill = (signal: NodeJS.Signals) => {
     try { process.kill(-child.pid!, signal); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
@@ -26,7 +26,7 @@ async function stop(child: ChildProcess) {
   const exited = child.exitCode === null && child.signalCode === null ? once(child, 'exit') : Promise.resolve();
   kill('SIGTERM');
   const timer = setTimeout(() => kill('SIGKILL'), 5_000);
-  try { await exited; } finally { clearTimeout(timer); kill('SIGKILL'); }
+  try { await exited; } finally { clearTimeout(timer); }
 }
 
 export async function startLocalApplication(configured = true, options: { mail?: boolean; empty?: boolean; team?: 'roles' | 'two-owners'; stores?: 'configured' | 'unconfigured'; sync?: boolean; control?: boolean; replies?: boolean; preview?: boolean; knowledge?: boolean; answerTest?:boolean; aiConfiguration?:string; aiReception?:boolean; aiDraft?:boolean } = {}) {

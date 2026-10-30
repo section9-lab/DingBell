@@ -1,4 +1,4 @@
-import {defineTool} from '@flue/runtime/tool';
+import {defineTool} from '../../platform/core/tool.ts';
 import * as v from 'valibot';
 import {aiRunSchema,type AiRun} from './ai-state.ts';
 import type {ControlScope} from './control-types.ts';
