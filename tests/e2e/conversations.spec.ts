@@ -6,10 +6,10 @@ import { fragmentedMessageParts, messageImageURL, unsafeMessageText } from '../f
 
 type Application = Awaited<ReturnType<typeof startLocalApplication>>;
 const test = base.extend<{ application: Application }>({
-  application: async ({}, use) => {
+  application: [async ({}, use) => {
     const application = await startLocalApplication(true, { mail: true, team: 'roles', stores: 'configured', sync: true, control: true });
     try { await use(application); } finally { await application.close(); }
-  },
+  }, { timeout: 90_000 }],
 });
 
 async function login(page: Page, application: Application, actor = 'owner') {
@@ -396,17 +396,21 @@ for (const firstCheck of ['list', 'identity'] as const) test(`queue counts and m
     if (firstCheck === 'identity') {
       const identityGate = new Promise<void>(resolve => { releaseIdentity = resolve; });
       await member.route('**/api/workspace-bootstrap', async route => { await identityGate; await route.continue(); });
+      const revalidated = member.waitForResponse(response => new URL(response.url()).pathname === '/api/workspace-bootstrap');
       await member.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});window.dispatchEvent(new Event('visibilitychange'));Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});window.dispatchEvent(new Event('visibilitychange'));");
       await expect(member.getByRole('heading', { name: '消息中心', exact: true })).toHaveCount(0);
       releaseIdentity();
-      await queueCounts(member, 52, 0, 51);
-      await expect(list.getByText('第 1 页', { exact: true })).toBeVisible();
+      await revalidated;
     } else {
       await member.clock.fastForward(10_000);
-      await expect(member.getByRole('button', { name: '返回第一页会话', exact: true })).toBeVisible({ timeout: 15_000 });
-      expect(observation.some(item => item.cursor && item.status === 400)).toBe(true);
-      await member.getByRole('button', { name: '返回第一页会话', exact: true }).click();
     }
+    // Foreground identity checks hide the workspace with Activity and preserve its
+    // page stack. Both request orders must reject the old member's cursor before
+    // an explicit return to the first page can expose the new member's counts.
+    await expect(member.getByRole('button', { name: '返回第一页会话', exact: true })).toBeVisible({ timeout: 15_000 });
+    expect(observation.some(item => item.cursor && item.status === 400)).toBe(true);
+    await expect(member.getByRole('button', { name: '全部会话', exact: true })).toHaveText('全部—');
+    await member.getByRole('button', { name: '返回第一页会话', exact: true }).click();
     await queueCounts(member, 52, 0, 51);
     await expect(list.getByText('第 1 页', { exact: true })).toBeVisible();
     await expect(member.getByRole('button', { name: '返回第一页会话', exact: true })).toHaveCount(0);

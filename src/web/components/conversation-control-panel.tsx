@@ -125,14 +125,14 @@ export function ConversationControlPanel({ userId, companyId, conversationId, co
     && candidates.some(target => target.memberId === transfer.targetMemberId);
   const transferDisabled = pending || locked || control.isError || targets.isFetching || targets.isError || !transferValid;
 
-  return <><div ref={panel} tabIndex={-1} aria-label="会话处理" className="shrink-0 border-b px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+  return <><div ref={panel} tabIndex={-1} aria-label="会话处理" className="shrink-0 border-b bg-background px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
     {control.isPending ? <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Spinner aria-hidden="true" />正在读取处理状态…</p> : <>
-      {view && state && <div className="flex flex-wrap items-center justify-between gap-3">
+      {view && state && <div className="flex flex-wrap items-center justify-between gap-2">
         <div aria-label="当前处理状态" className="flex min-w-0 max-w-full flex-1 flex-wrap items-center gap-2 text-xs">
           <Badge variant={state.lifecycle === 'resolved' ? 'secondary' : 'outline'}>{state.lifecycle === 'resolved' ? '已解决' : state.workStatus && workLabels[state.workStatus]}</Badge>
-          {state.lifecycle === 'open' && <span>{state.reception === 'human' ? '人工处理' : state.reception === 'ai' ? 'AI 接待' : '尚未接管'}</span>}
+          {state.lifecycle === 'open' && <span className="text-muted-foreground">{state.reception === 'human' ? '人工处理' : state.reception === 'ai' ? 'AI 接待' : '尚未接管'}</span>}
           {view.assignee && view.assignee.status !== 'removed' ? <Popover><PopoverTrigger render={<Button variant="ghost" size="xs" className="min-w-0 max-w-48 shrink" />}><span className="truncate">{assigneeLabel}</span><ChevronDown data-icon="inline-end" /></PopoverTrigger><PopoverContent className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] overflow-y-auto"><PopoverTitle>负责人信息</PopoverTitle><p className="break-all">{assigneeLabel}</p></PopoverContent></Popover> : <span className="text-muted-foreground">{assigneeLabel}</span>}
-          {view.assignee && view.assignee.memberId === view.viewerMemberId && <Badge variant="secondary">我负责</Badge>}
+          {view.assignee && view.assignee.memberId === view.viewerMemberId && <Badge variant="secondary" className="hidden sm:inline-flex">我负责</Badge>}
           {view.assignee?.status === 'ineligible' && <Badge variant="outline">当前无法接手</Badge>}
         </div>
         {state.lifecycle === 'open' ? <div className="flex flex-wrap gap-2">
@@ -142,8 +142,8 @@ export function ConversationControlPanel({ userId, companyId, conversationId, co
           <Button ref={resolveButton} size="sm" variant="outline" disabled={disabled} onClick={() => setConfirmation(command('resolve'))}>标记已解决</Button>
         </div> : <Button size="sm" variant="outline" disabled={disabled} onClick={() => void submit(command('reopen'))}>重新打开</Button>}
       </div>}
-      {view && <div className="mt-2 flex flex-wrap items-center gap-2"><Button ref={notesButton} size="sm" variant="ghost" disabled={pending || control.isFetching} onClick={() => setNotesOpen(true)}>内部备注</Button><Button ref={activityButton} size="sm" variant="ghost" disabled={pending||control.isFetching} onClick={()=>setActivityOpen(true)}>操作日志</Button><Button ref={timelineButton} size="sm" variant="ghost" disabled={pending||control.isFetching} onClick={()=>setTimelineOpen(true)}>业务时间线</Button>
-      {state?.lifecycle === 'open' && <div aria-label="工作状态操作" className="flex flex-wrap items-center gap-2">
+      {view && <div className="mt-2 flex flex-wrap items-center gap-1 rounded-md bg-muted/40 p-1 [&_button]:h-6 [&_button]:text-xs"><Button ref={notesButton} size="sm" variant="ghost" disabled={pending || control.isFetching} onClick={() => setNotesOpen(true)}>内部备注</Button><Button ref={activityButton} size="sm" variant="ghost" disabled={pending||control.isFetching} onClick={()=>setActivityOpen(true)}>操作日志</Button><Button ref={timelineButton} size="sm" variant="ghost" disabled={pending||control.isFetching} onClick={()=>setTimelineOpen(true)}>业务时间线</Button>
+      {state?.lifecycle === 'open' && <div aria-label="工作状态操作" className="flex flex-wrap items-center gap-1 sm:border-l sm:pl-1">
         <span className="text-xs text-muted-foreground">更新进度</span>
         {(Object.keys(workLabels) as (keyof typeof workLabels)[]).filter(status => status !== state.workStatus).map(workStatus =>
           <Button key={workStatus} size="sm" variant="ghost" disabled={disabled} onClick={() => void submit({ commandId: crypto.randomUUID(), expectedVersion: state.version, action: 'set_work_status', workStatus })}>

@@ -3,10 +3,10 @@ import { writeFile } from 'node:fs/promises';
 import { startLocalApplication } from '../fixtures/web-identity/local-app.ts';
 
 type Application = Awaited<ReturnType<typeof startLocalApplication>>;
-const test = base.extend<{ application: Application }>({ application: async ({}, use) => {
+const test = base.extend<{ application: Application }>({ application: [async ({}, use) => {
   const application = await startLocalApplication(true, { mail: true, team: 'roles', stores: 'configured', sync: true, control: true, replies: true });
   try { await use(application); } finally { await application.close(); }
-} });
+}, { timeout: 90_000 }] });
 
 async function setup(page: Page, app: Application, longName = false) {
   if (longName) await app.renameFixtureMember('客服负责人'.repeat(20), 'owner');
@@ -50,6 +50,8 @@ test('long names and a full draft keep history, reply actions and keyboard dialo
     await page.setViewportSize(viewport);
     const region = page.getByRole('region', { name: '消息记录', exact: true });
     const preview = page.getByRole('button', { name: '预览回复', exact: true });
+    // Wait for the split layout's ResizeObserver before taking geometry snapshots.
+    await expect.poll(async () => (await region.boundingBox())!.height).toBeGreaterThanOrEqual(120);
     const boxes = { viewport, history: await region.boundingBox(), draft: await draft.boundingBox(), preview: await preview.boundingBox() };
     await writeFile(test.info().outputPath(`layout-${viewport.width}.json`), JSON.stringify(boxes, null, 2));
     await page.screenshot({ path: test.info().outputPath(`layout-${viewport.width}.png`) });
@@ -161,3 +163,37 @@ for (const [buttonName, dialogName] of [['标记已解决', '标记会话已解�
     } finally { release(); await page.unrouteAll({ behavior: 'wait' }); }
   });
 }
+
+test('keyboard resizing and mobile navigation preserve the same reply draft', async ({ page, application }) => {
+  await page.setViewportSize({ width: 1366, height: 900 });
+  const { url } = await setup(page, application);
+  const draft = page.getByRole('textbox', { name: '回复原文', exact: true });
+  await draft.fill('请确认规格，再回复消费者。');
+  const separator = page.getByRole('separator', { name: '调整会话列表宽度', exact: true });
+  const list = page.getByRole('complementary', { name: '会话列表', exact: true });
+  const before = (await list.boundingBox())!.width;
+  await separator.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await list.boundingBox())!.width).toBeGreaterThan(before);
+  await expect(draft).toHaveValue('请确认规格，再回复消费者。');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(separator).toBeHidden();
+  await expect.poll(async () => (await page.getByRole('region', { name: '消息记录', exact: true }).boundingBox())!.width).toBeGreaterThan(342);
+  await expect(draft).toHaveValue('请确认规格，再回复消费者。');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  expect((await page.getByRole('heading', { name: '消息中心', exact: true }).boundingBox())!.height).toBeLessThan(40);
+  await page.getByRole('button', { name: '返回会话列表', exact: true }).click();
+  await expect(list).toBeVisible();
+  await page.goto(url);
+  await expect(draft).toHaveValue('请确认规格，再回复消费者。');
+
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await expect(separator).toBeVisible();
+  await expect(draft).toHaveValue('请确认规格，再回复消费者。');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('link', { name: '开始使用', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '公司工作区', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: '进入消息中心', exact: true })).toBeVisible();
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+});

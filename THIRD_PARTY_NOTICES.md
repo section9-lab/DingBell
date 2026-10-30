@@ -1,6 +1,6 @@
 # Third-party notices
 
-Generated/reviewed against `package-lock.json` on 2026-10-11. This file records direct packages and design assets; `npm run licenses:check` validates every locked installed package has declared license metadata and emits the machine-readable inventory under `dist/compliance/`. Package license files remain authoritative.
+Generated/reviewed against `package-lock.json` on 2026-10-30. This file records direct packages and design assets; `npm run licenses:check` validates every locked installed package has declared license metadata and emits the machine-readable inventory under `dist/compliance/`. Package license files remain authoritative.
 
 DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29. Dependencies retain their respective licenses. Platform adapter inventories include the independent lockfiles in `packages/agent-runtime`, `deploy/cloudflare` and `deploy/vercel`.
 
@@ -27,9 +27,11 @@ DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29
 | eventsource-parser | 3.1.1 | MIT |
 | hono | 4.13.13 | MIT |
 | lucide-react | 1.54.0 | ISC |
+| motion | 14.8.0 | MIT |
 | react / react-dom | 19.3.0 | MIT |
 | react-hook-form | 7.89.0 | MIT |
 | react-router | 8.4.0 | MIT |
+| react-resizable-panels | 4.15.2 | MIT |
 | valibot | 1.5.0 | MIT |
 
 ## Direct development packages

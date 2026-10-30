@@ -6,6 +6,8 @@ import {
   Building2,
   Check,
   ChevronsUpDown,
+  ChevronRight,
+  Clock3,
   CircleHelp,
   History,
   Inbox,
@@ -18,7 +20,6 @@ import {
   Store,
   Users,
 } from 'lucide-react';
-import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import {
   Empty,
@@ -63,6 +64,8 @@ import {
 import { useCompanySettings } from '../components/company-settings-provider';
 import { WorkspaceExitProvider, useWorkspaceExit } from '../components/workspace-exit';
 import type { Company, Identity } from '../lib/api';
+import { WorkspaceHome } from '../components/workspace-home';
+import { NavigationSelection } from '../components/motion';
 
 type Props = {
   identity: Identity;
@@ -165,25 +168,25 @@ const groups = [
   {
     title: '工作台',
     items: [
-      { name: '消息中心', icon: Inbox },
-      { name: '商品资料', icon: PackageSearch },
-      { name: 'FBS 订单', icon: ShoppingBag },
-      { name: '会话日志', icon: History },
+      { name: '消息中心', icon: Inbox, section: 'messages', to: '/workspace/messages' },
+      { name: '商品资料', icon: PackageSearch, section: 'products', to: '/workspace/products' },
+      { name: 'FBS 订单', icon: ShoppingBag, section: 'orders', to: '/workspace/orders' },
+      { name: '会话日志', icon: History, section: 'activity', to: '/workspace/activity' },
     ],
   },
   {
     title: '客服配置',
     items: [
-      { name: '知识库', icon: BookOpen },
-      { name: '回复策略', icon: SlidersHorizontal },
+      { name: '知识库', icon: BookOpen, section: 'knowledge', to: '/workspace/knowledge' },
+      { name: '回复策略', icon: SlidersHorizontal, section: 'policies', to: '/workspace/reply-policies' },
     ],
   },
   {
     title: '组织管理',
     items: [
-      { name: '店铺管理', icon: Store },
-      { name: '团队成员', icon: Users },
-      { name: '公司设置', icon: Settings },
+      { name: '店铺管理', icon: Store, section: 'stores', to: '/workspace/stores' },
+      { name: '团队成员', icon: Users, section: 'team', to: '/workspace/team' },
+      { name: '公司设置', icon: Settings, section: 'settings', to: '/workspace/settings' },
     ],
   },
 ];
@@ -204,7 +207,7 @@ function WorkspaceContent({
   const { query, timeZone } = useCompanySettings();
   const { confirmExit } = useWorkspaceExit();
   return (
-    <SidebarProvider style={{ '--sidebar-width': '14rem' } as CSSProperties}>
+    <SidebarProvider style={{ '--sidebar-width': 'var(--workspace-sidebar-width)' } as CSSProperties}>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-background focus:p-3"
@@ -212,14 +215,14 @@ function WorkspaceContent({
         跳到主要内容
       </a>
       <Sidebar collapsible="icon">
-        <SidebarHeader className="gap-7 px-4 pt-6 pb-3 group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
+        <SidebarHeader className="gap-5 px-3 pt-5 pb-2 group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
           <Brand />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <Button
                   variant="outline"
-                  className="h-auto w-full justify-start gap-2.5 px-3 py-3 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-2"
+                  className="h-auto w-full justify-start gap-2.5 bg-background px-3 py-2.5 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-2"
                   aria-label="切换公司"
                   title="切换公司"
                 />
@@ -255,11 +258,12 @@ function WorkspaceContent({
             </DropdownMenuContent>
           </DropdownMenu>
         </SidebarHeader>
-        <SidebarContent>
+        <SidebarContent className="gap-2 px-1">
           <SidebarGroup>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton tooltip="开始使用" isActive={section === 'home'} aria-current={section === 'home' ? 'page' : undefined} render={<NavigationLink to="/workspace" />}>
+                <SidebarMenuButton className="relative isolate h-9 data-active:bg-transparent" tooltip="开始使用" isActive={section === 'home'} aria-current={section === 'home' ? 'page' : undefined} render={<NavigationLink to="/workspace" />}>
+                  <NavigationSelection active={section === 'home'} />
                   <LayoutDashboard />
                   <span>开始使用</span>
                 </SidebarMenuButton>
@@ -268,22 +272,17 @@ function WorkspaceContent({
           </SidebarGroup>
           {groups.map((group) => (
             <SidebarGroup key={group.title}>
-              <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
+              <SidebarGroupLabel className="mb-1 text-xs font-medium">{group.title}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {group.items.map(({ name, icon: Icon }) => (
+                  {group.items.map(({ name, icon: Icon, section: target, to }) => (
                     <SidebarMenuItem key={name}>
-                      <SidebarMenuButton
-                        tooltip={name}
-                        disabled={!['团队成员', '店铺管理', '消息中心', '商品资料', 'FBS 订单', '会话日志', '公司设置', '回复策略', '知识库'].includes(name)}
-                        isActive={(name === '团队成员' && section === 'team') || (name === '店铺管理' && section === 'stores') || (name === '消息中心' && section === 'messages') || (name === '商品资料' && section === 'products') || (name === 'FBS 订单' && section === 'orders') || (name === '会话日志' && section === 'activity') || (name === '公司设置' && section === 'settings') || (name === '回复策略' && section === 'policies') || (name === '知识库' && section === 'knowledge')}
-                        aria-current={(name === '团队成员' && section === 'team') || (name === '店铺管理' && section === 'stores') || (name === '消息中心' && section === 'messages') || (name === '商品资料' && section === 'products') || (name === 'FBS 订单' && section === 'orders') || (name === '会话日志' && section === 'activity') || (name === '公司设置' && section === 'settings') || (name === '回复策略' && section === 'policies') || (name === '知识库' && section === 'knowledge') ? 'page' : undefined}
-                        aria-label={['团队成员', '店铺管理', '消息中心', '商品资料', 'FBS 订单', '会话日志', '公司设置', '回复策略', '知识库'].includes(name) ? name : `${name}，尚未开放`}
-                        {...(name === '知识库' ? { render: <NavigationLink to="/workspace/knowledge" /> } : name === '团队成员' ? { render: <NavigationLink to="/workspace/team" /> } : name === '店铺管理' ? { render: <NavigationLink to="/workspace/stores" /> } : name === '消息中心' ? { render: <NavigationLink to="/workspace/messages" /> } : name === '商品资料' ? { render: <NavigationLink to="/workspace/products" /> } : name === 'FBS 订单' ? { render: <NavigationLink to="/workspace/orders" /> } : name === '会话日志' ? { render: <NavigationLink to="/workspace/activity" /> } : name === '回复策略' ? { render: <NavigationLink to="/workspace/reply-policies" /> } : name === '公司设置' ? { render: <NavigationLink to="/workspace/settings" /> } : {})}
-                      >
+                      <SidebarMenuButton className="relative isolate h-9 data-active:bg-transparent" tooltip={name}
+                        isActive={section === target} aria-current={section === target ? 'page' : undefined}
+                        aria-label={name} render={<NavigationLink to={to} />}>
+                        <NavigationSelection active={section === target} />
                         <Icon />
                         <span>{name}</span>
-                        {!['团队成员', '店铺管理', '消息中心', '商品资料', 'FBS 订单', '会话日志', '公司设置', '回复策略', '知识库'].includes(name) && <span className="ml-auto text-[10px]">未开放</span>}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
@@ -292,10 +291,10 @@ function WorkspaceContent({
             </SidebarGroup>
           ))}
         </SidebarContent>
-        <SidebarFooter className="gap-4 p-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
+        <SidebarFooter className="gap-3 p-3 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
             <CircleHelp className="size-4" />
-            需要帮助？请联系部署管理员
+            联系部署管理员获取帮助
           </div>
           <Separator className="group-data-[collapsible=icon]:hidden" />
           <DropdownMenu>
@@ -309,7 +308,7 @@ function WorkspaceContent({
                 />
               }
             >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground" aria-hidden="true">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground" aria-hidden="true">
                 {accountInitials(identity.session?.user.name, identity.session?.user.email)}
               </span>
               <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 group-data-[collapsible=icon]:hidden">
@@ -335,101 +334,27 @@ function WorkspaceContent({
         <SidebarRail aria-label="展开或收起侧边栏" title="展开或收起侧边栏" />
       </Sidebar>
       <SidebarInset className="min-w-0">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
-          <SidebarTrigger aria-label="打开或收起导航" />
-          <span className="truncate text-sm text-muted-foreground">
-            {company.name}
-          </span>
-          <span className="text-muted-foreground" aria-hidden="true">
-            /
-          </span>
-          <span className="text-sm">{section === 'knowledge' ? '知识库' : section === 'policies' ? '回复策略' : section === 'settings' ? '公司设置' : section === 'team' ? '团队成员' : section === 'stores' ? '店铺管理' : section === 'messages' ? '消息中心' : section === 'products' ? '商品资料' : section === 'orders' ? 'FBS 订单' : section === 'activity' ? '会话日志' : '开始使用'}</span>
-          <NavigationLink to="/workspace/settings" className="ml-auto max-w-[50%] truncate text-xs text-muted-foreground" title={query.isError ? `时区读取失败，暂按 ${timeZone} 显示，请进入公司设置重试。` : `公司时区：${timeZone}`} >{query.isError ? `时区读取失败 · ${timeZone}` : query.isPending ? '时区读取中 · UTC' : timeZone}</NavigationLink>
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4 md:px-5">
+          <SidebarTrigger aria-label="打开或收起导航" className="text-muted-foreground" />
+          <Separator orientation="vertical" className="h-4" />
+          <nav aria-label="当前位置" className="flex min-w-0 items-center gap-2 text-sm">
+            <span className="hidden max-w-40 truncate text-muted-foreground sm:block" title={company.name}>{company.name}</span>
+            <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground/60 sm:block" aria-hidden="true" />
+            <span className="truncate font-medium">{section === 'home' ? '开始使用' : groups.flatMap(group => group.items).find(item => item.section === section)?.name}</span>
+          </nav>
+          <NavigationLink to="/workspace/settings" className="ml-auto flex min-w-0 max-w-1/2 shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            title={query.isError ? `时区读取失败，暂按 ${timeZone} 显示，请进入公司设置重试。` : `公司时区：${timeZone}`}>
+            <Clock3 className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{query.isError ? `时区读取失败 · ${timeZone}` : query.isPending ? '时区读取中 · UTC' : timeZone}</span>
+          </NavigationLink>
         </header>
         <div
           id="main-content"
-          className={section === 'messages' ? 'flex h-[calc(100svh-3.5rem)] min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-3 md:p-6' : 'mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-8 lg:px-10 lg:py-12'}
+          tabIndex={-1}
+          className={section === 'messages' ? 'flex h-[calc(100svh-3.5rem)] min-h-0 min-w-0 flex-col gap-3 overflow-hidden p-3 md:p-5' : 'mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 py-7 sm:px-8 lg:py-10'}
         >
           {notice != null && <ErrorNotice error={notice} />}
-          {children ?? <>
-          <div className="flex flex-col gap-3">
-            <Badge variant="outline" className="w-fit">
-              账号与公司基础
-            </Badge>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              公司工作区
-            </h1>
-            <p className="text-sm leading-6 text-muted-foreground">
-              你已进入{' '}
-              <span className="font-medium text-foreground">
-                {company.name}
-              </span>
-              。你的角色是{roleLabel(company.role)}。
-            </p>
-          </div>
-          <section
-            aria-labelledby="workspace-status"
-            className="rounded-xl border bg-muted/30 px-6 py-7"
-          >
-            <div className="flex flex-col gap-2">
-              <h2 id="workspace-status" className="font-medium">
-                继续准备客服知识
-              </h2>
-              <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                消息中心、知识库和回复策略已提供管理入口。知识需完成索引和检索测试后再发布，AI 自动接待尚未开放。
-              </p>
-            </div>
-          </section>
-          <section aria-labelledby="next-steps">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 id="next-steps" className="text-sm font-medium">
-                接下来，逐步准备你的客服工作区
-              </h2>
-            </div>
-            <ol className="divide-y">
-              {[
-                {
-                  title: '连接店铺',
-                  description:
-                    '确认平台的消息、商品与订单权限，让服务有据可查。',
-                  icon: Store,
-                },
-                {
-                  title: '准备客服知识',
-                  description:
-                    '整理商品说明、店铺政策和常见问题，作为 AI 回答的依据。',
-                  icon: BookOpen,
-                },
-                {
-                  title: '测试并启用回复策略',
-                  description: '确认回答内容和转人工条件后，再选择接待范围。',
-                  icon: SlidersHorizontal,
-                },
-              ].map(({ title, description, icon: Icon }, index) => (
-                <li key={title} className="flex items-start gap-4 py-6">
-                  <span className="pt-0.5 text-xs text-muted-foreground tabular-nums">
-                    0{index + 1}
-                  </span>
-                  <Icon
-                    className="mt-0.5 hidden size-4 text-muted-foreground sm:block"
-                    aria-hidden="true"
-                  />
-                  <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                    <h3 className="text-sm font-medium">{title}</h3>
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      {description}
-                    </p>
-                  </div>
-                  {title === '连接店铺' ? <Button size="sm" variant="outline" render={<NavigationLink to="/workspace/stores" />}>管理店铺</Button> : title === '准备客服知识' ? <Button size="sm" variant="outline" render={<NavigationLink to="/workspace/knowledge" />}>管理知识</Button> : <Badge variant="secondary" className="shrink-0">待开放</Badge>}
-                </li>
-              ))}
-            </ol>
-          </section>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-5 text-xs text-muted-foreground">
-            <p>当前公司：{company.name}</p>
-            <p className="break-all">账号：{identity.session?.user.email}</p>
-          </div>
-          </>}
+          {children ?? <WorkspaceHome company={company} />}
         </div>
       </SidebarInset>
     </SidebarProvider>

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { RefreshCw, Search, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { RefreshCw, Search, ChevronLeft, ChevronRight, Download, History, MessageCircle } from 'lucide-react';
 import { ApiError, type Company } from '../lib/api';
 import { readStores } from '../lib/stores-api';
 import { readConversations, readConversation } from '../lib/conversations-api';
@@ -28,6 +28,8 @@ import { useConversationMessages } from '../hooks/use-conversation-messages';
 import {CompanyConversationActivityDialog} from '../components/company-conversation-activity-dialog';
 import {downloadConversationCsv,exportConversationCsv} from '../lib/conversation-export-api';
 
+import { ConversationWorkspace } from '../components/conversation-workspace';
+import { NavigationSelection } from '../components/motion';
 import { useCompanySettings } from '../components/company-settings-provider';
 
 const queues = [{ value: 'all', label: '全部', aria: '全部会话' }, { value: 'mine', label: '我负责', aria: '我负责' }, { value: 'unassigned', label: '未分配', aria: '未分配' }] as const;
@@ -38,7 +40,8 @@ function Reading({ text }: { text: string }) {
 }
 
 export function MessagesPage({ company, userId, refresh }: { company: Company; userId: string; refresh: (notice?: unknown) => Promise<void> }) {
-  const { date: messageDate } = useCompanySettings();
+  const { date: messageDate, timeZone } = useCompanySettings();
+  const listDate = useMemo(() => new Intl.DateTimeFormat('zh-CN', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), [timeZone]);
   const [params, setParams] = useSearchParams();
   const selected = params.get('conversation') ?? '';
   const storeId = params.get('store') ?? '';
@@ -128,18 +131,18 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
 
   return <>
     <div className="flex shrink-0 items-center justify-between gap-3">
-      <div className="min-w-0"><h1 className="text-xl font-semibold tracking-tight sm:text-2xl">消息中心</h1><p className="mt-1 hidden text-sm text-muted-foreground sm:block">查看消费者会话，认领并跟进处理进度。</p></div>
-      <div className="flex flex-wrap items-center justify-end gap-2">{['owner','admin'].includes(company.role)&&<Popover><PopoverTrigger render={<Button variant="outline" disabled={exporting}/> }><Download data-icon="inline-start"/>{exporting?'正在导出…':'导出 CSV'}</PopoverTrigger><PopoverContent className="grid w-72 gap-3"><PopoverTitle>冻结范围导出</PopoverTitle><p className="text-xs text-muted-foreground">会话汇总</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','conversations')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','conversations')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','conversations')}>当前会话</Button>}</div><p className="text-xs text-muted-foreground">消息明细</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','messages')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','messages')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','messages')}>当前会话</Button>}</div></PopoverContent></Popover>}<Button ref={companyActivityButton} variant="outline" onClick={()=>setCompanyActivityOpen(true)}>公司日志</Button><Button variant="outline" disabled={refreshing} onClick={reload}><RefreshCw data-icon="inline-start" />刷新消息</Button></div>
+      <div className="min-w-0 shrink-0"><h1 className="whitespace-nowrap text-xl font-semibold tracking-tight sm:text-2xl">消息中心</h1><p className="mt-1 hidden text-sm text-muted-foreground sm:block">查看消费者会话，认领并跟进处理进度。</p></div>
+      <div className="flex items-center justify-end gap-1.5">{['owner','admin'].includes(company.role)&&<Popover><PopoverTrigger render={<Button variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" disabled={exporting} aria-label={exporting ? '正在导出…' : '导出 CSV'}/> }><Download data-icon="inline-start"/><span className="hidden sm:inline">{exporting?'正在导出…':'导出 CSV'}</span></PopoverTrigger><PopoverContent className="grid w-72 gap-3"><PopoverTitle>冻结范围导出</PopoverTitle><p className="text-xs text-muted-foreground">会话汇总</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','conversations')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','conversations')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','conversations')}>当前会话</Button>}</div><p className="text-xs text-muted-foreground">消息明细</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','messages')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','messages')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','messages')}>当前会话</Button>}</div></PopoverContent></Popover>}<Button ref={companyActivityButton} variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="公司日志" onClick={()=>setCompanyActivityOpen(true)}><History /><span className="hidden sm:inline">公司日志</span></Button><Button variant="outline" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="刷新消息" disabled={refreshing} onClick={reload}>{refreshing ? <Spinner aria-hidden="true" /> : <RefreshCw data-icon="inline-start" />}<span className="hidden sm:inline">刷新消息</span></Button></div>
     </div>
-    <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border">
-      <aside aria-label="会话列表" className={cn('w-full shrink-0 flex-col border-r md:flex md:w-72', selected ? 'hidden' : 'flex')}>
-        <form className="shrink-0 p-4" onSubmit={event => { event.preventDefault(); changeFilter({ field: draftField, search: draft.trim() }); }}>
-          <FieldGroup className="gap-3">
-            <Field><FieldLabel className="sr-only">会话队列</FieldLabel><ToggleGroup aria-label="会话队列" variant="outline" size="sm" spacing={0} className="w-full" value={[queue]} onValueChange={values => {
+    <ConversationWorkspace selected={!!selected} list={
+      <aside aria-label="会话列表" className={cn('h-full w-full min-w-0 flex-col bg-sidebar/40 lg:flex', selected ? 'hidden' : 'flex')}>
+        <form className="shrink-0 border-b bg-background p-3" onSubmit={event => { event.preventDefault(); changeFilter({ field: draftField, search: draft.trim() }); }}>
+          <FieldGroup className="grid grid-cols-2 gap-2">
+            <Field className="col-span-2"><FieldLabel className="sr-only">会话队列</FieldLabel><ToggleGroup aria-label="会话队列" variant="outline" size="sm" spacing={0} className="w-full" value={[queue]} onValueChange={values => {
               const next = queues.find(item => item.value === values[0]);
               if (next) changeFilter({ queue: next.value });
             }}>
-              {queues.map(item => <ToggleGroupItem key={item.value} value={item.value} aria-label={item.aria} className="h-auto min-w-0 flex-1 flex-col py-2"><span>{item.label}</span><span className="max-w-full truncate text-xs text-muted-foreground" title={String(conversationPage?.counts[item.value] ?? '')}>{conversationPage?.counts[item.value] ?? '—'}</span></ToggleGroupItem>)}
+              {queues.map(item => <ToggleGroupItem key={item.value} value={item.value} aria-label={item.aria} className="min-w-0 flex-1 gap-1.5 text-xs"><span>{item.label}</span><span className="max-w-full truncate text-xs text-muted-foreground tabular-nums" title={String(conversationPage?.counts[item.value] ?? '')}>{conversationPage?.counts[item.value] ?? '—'}</span></ToggleGroupItem>)}
             </ToggleGroup></Field>
             <Field><FieldLabel htmlFor="message-state" className="sr-only">筛选处理状态</FieldLabel><NativeSelect id="message-state" className="w-full" value={state} onChange={event => {
               const next = states.find(item => item.value === event.target.value);
@@ -151,30 +154,32 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
               {availableStores.map(store => <NativeSelectOption key={store.id} value={store.id}>{store.name}</NativeSelectOption>)}
             </NativeSelect></Field>
             {stores.hasNextPage && <Button type="button" variant="ghost" size="sm" disabled={stores.isFetchingNextPage} onClick={() => void stores.fetchNextPage()}>加载更多店铺</Button>}
-            <Field><FieldLabel htmlFor="message-search-field" className="sr-only">查找方式</FieldLabel><NativeSelect id="message-search-field" className="w-full" value={draftField} onChange={event => setDraftField(event.target.value as 'thread' | 'order')}><NativeSelectOption value="thread">平台会话 ID</NativeSelectOption><NativeSelectOption value="order">订单号</NativeSelectOption></NativeSelect></Field>
-            <Field><FieldLabel htmlFor="message-search" className="sr-only">精确标识</FieldLabel><div className="flex gap-2"><Input id="message-search" autoComplete="off" placeholder="输入完整标识" maxLength={256} value={draft} onChange={event => setDraft(event.target.value)} /><Button type="submit" variant="outline" size="icon" aria-label="查找"><Search /></Button></div></Field>
+            <Field className="col-span-2"><FieldLabel htmlFor="message-search-field" className="sr-only">查找方式</FieldLabel><NativeSelect id="message-search-field" className="w-full" value={draftField} onChange={event => setDraftField(event.target.value as 'thread' | 'order')}><NativeSelectOption value="thread">平台会话 ID</NativeSelectOption><NativeSelectOption value="order">订单号</NativeSelectOption></NativeSelect></Field>
+            <Field className="col-span-2"><FieldLabel htmlFor="message-search" className="sr-only">精确标识</FieldLabel><div className="flex gap-2"><Input id="message-search" autoComplete="off" placeholder="输入完整标识" maxLength={256} value={draft} onChange={event => setDraft(event.target.value)} /><Button type="submit" variant="outline" size="icon" aria-label="查找"><Search /></Button></div></Field>
           </FieldGroup>
           {search && <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => changeFilter({ search: '' })}>清除搜索</Button>}
-          <p className="mt-3 text-xs text-muted-foreground">计数按当前店铺、搜索和状态统计 · 仅精确匹配</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">当前筛选统计 · 标识仅精确匹配</p>
         </form>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2" tabIndex={0} aria-label="会话条目">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto gap-1 p-2" tabIndex={0} aria-label="会话条目">
           {conversations.isPending ? <Reading text="正在读取会话…" /> : conversations.isError ? <div className="p-2"><ErrorNotice error={conversations.error} />{conversations.error instanceof ApiError && conversations.error.code === 'INVALID_REQUEST' && <Button variant="outline" className="mt-3" onClick={reload}>返回第一页会话</Button>}</div> : !conversations.data?.conversations.length ? <MessageEmpty title={storeId || search || queue !== 'all' || state !== 'all' ? '没有匹配的会话' : '暂无已导入会话'} description={storeId || search || queue !== 'all' || state !== 'all' ? '检查标识，或更换队列、状态与店铺筛选。' : '在店铺管理启用会话同步后，已导入的记录会显示在这里。'} /> : conversations.data.conversations.map(item => {
             const latestSender = item.latestMessage?.direction === 'outbound' ? '商家' : item.latestMessage?.direction === 'inbound' ? '买家' : '消息';
             const preview = item.latestMessage ? item.latestMessage.isImage ? '图片消息' : item.latestMessage.content.join(' ') + (item.latestMessage.previewTruncated ? '…' : '') : null;
             const assignment = item.workflow.assignedMemberId === null ? '未分配' : item.workflow.assigneeName === null ? '负责人已移除' : `负责人：${item.workflow.assigneeName.trim() || '未填写姓名'}`;
-            return <Button key={item.id} id={`conversation-${item.id}`} variant={selected === item.id ? 'secondary' : 'ghost'} aria-current={selected === item.id ? 'true' : undefined} aria-label={`打开会话 ${item.platformThreadId}`} className="h-auto w-full shrink-0 justify-start px-3 py-3 text-left" onClick={() => choose(item.id)}>
+            return <Button key={item.id} id={`conversation-${item.id}`} variant={selected === item.id ? 'secondary' : 'ghost'} aria-current={selected === item.id ? 'true' : undefined} aria-label={`打开会话 ${item.platformThreadId}`} className="relative isolate h-auto w-full shrink-0 justify-start gap-2.5 rounded-lg px-3 py-3 text-left" onClick={() => choose(item.id)}>
+              <NavigationSelection active={selected === item.id} />
+              <span className="flex size-8 shrink-0 self-start items-center justify-center rounded-lg border bg-background text-muted-foreground" aria-hidden="true"><MessageCircle className="size-4" /></span>
               <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{item.store.name}</span><span className="shrink-0 text-xs font-normal text-muted-foreground">{messageDate(item.lastMessageAt)}</span></span>
-                <span className="line-clamp-2 whitespace-normal break-words text-sm font-normal [overflow-wrap:anywhere]">{preview===null?<span className="text-muted-foreground">消息尚未导入</span>:<><span className="text-muted-foreground">{latestSender}：</span>{preview}</>}</span>
+                <span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{item.store.name}</span><time className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums" dateTime={item.lastMessageAt ?? undefined} title={messageDate(item.lastMessageAt)}>{item.lastMessageAt ? listDate.format(new Date(item.lastMessageAt)) : '—'}</time></span>
+                <span className="line-clamp-2 whitespace-normal break-words text-xs leading-5 font-normal text-muted-foreground [overflow-wrap:anywhere]">{preview===null?<span className="text-muted-foreground">消息尚未导入</span>:<><span className="text-muted-foreground">{latestSender}：</span>{preview}</>}</span>
                 <span className="flex flex-wrap items-center gap-1"><Badge variant="outline">{states.find(value => value.value === (item.workflow.lifecycle === 'resolved' ? 'resolved' : item.workflow.workStatus))?.label}</Badge>{item.workflow.assignedMemberId === conversationPage?.viewerMemberId ? <Badge variant="secondary">我负责</Badge> : item.workflow.assignedMemberId === null ? <span className="text-xs text-muted-foreground">未分配</span> : null}</span>
                 <span className="sr-only">{assignment}</span>
               </div>
             </Button>;
           })}
         </div>
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t p-3"><Button variant="ghost" size="icon-sm" aria-label="上一页会话" disabled={!listPages.length || conversations.isFetching} onClick={() => setListPages(pages => pages.slice(0, -1))}><ChevronLeft /></Button><span className="text-xs text-muted-foreground">第 {listPages.length + 1} 页</span><Button variant="ghost" size="icon-sm" aria-label="下一页会话" disabled={!conversations.data?.nextCursor || conversations.isFetching} onClick={() => setListPages(pages => [...pages, conversations.data!.nextCursor!])}><ChevronRight /></Button></div>
-      </aside>
-      <section aria-label="会话内容" className={cn('min-h-0 min-w-0 flex-1 flex-col md:flex', selected ? 'flex' : 'hidden')}>
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t bg-background px-3 py-2"><Button variant="ghost" size="icon-sm" aria-label="上一页会话" disabled={!listPages.length || conversations.isFetching} onClick={() => setListPages(pages => pages.slice(0, -1))}><ChevronLeft /></Button><span className="text-xs text-muted-foreground">第 {listPages.length + 1} 页</span><Button variant="ghost" size="icon-sm" aria-label="下一页会话" disabled={!conversations.data?.nextCursor || conversations.isFetching} onClick={() => setListPages(pages => [...pages, conversations.data!.nextCursor!])}><ChevronRight /></Button></div>
+      </aside>} >
+      <section aria-label="会话内容" className={cn('min-h-0 min-w-0 flex-1 flex-col lg:flex', selected ? 'flex' : 'hidden')}>
         {!selected ? <MessageEmpty title="选择一个会话" description="从左侧选择会话，查看平台原文和同步范围。" /> : conversationError ? <div className="p-4"><ErrorNotice error={conversationError} /><Button variant="outline" className="mt-3" onClick={() => choose('')}>返回会话列表</Button></div> : <>
           {conversation && <ConversationHeader key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} back={() => choose('')} />}
           {!conversation && loading && <Reading text="正在读取会话…" />}
@@ -195,7 +200,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
         </>}
       </section>
       {conversation && !conversationError && <ConversationAside key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} />}
-    </div>
+    </ConversationWorkspace>
     {exportResult&&<Alert><AlertDescription>{exportResult.error?<ErrorNotice error={exportResult.error}/>:exportResult.text}</AlertDescription></Alert>}
     {(stores.isError || conversations.isError) && <Alert><AlertDescription>读取未完成，已隐藏不可确认的数据。请检查网络并刷新消息。</AlertDescription></Alert>}
     {!availableStores.length && !stores.isPending && !stores.isError && <p className="shrink-0 text-xs text-muted-foreground">尚无可访问店铺。<Link to="/workspace/stores" className="underline underline-offset-4">前往店铺管理</Link></p>}

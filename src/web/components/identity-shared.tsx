@@ -81,7 +81,7 @@ export function ErrorNotice({ error }: { error: unknown }) {
 export function WorkspaceLoadingPage({ message = '正在恢复工作区…' }: { message?: string }) {
   return (
     <div className="flex min-h-svh bg-background">
-      <aside className="hidden w-56 shrink-0 flex-col border-r bg-sidebar p-4 md:flex">
+      <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar p-4 md:flex">
         <Brand />
         <div className="mt-10 flex flex-col gap-3" aria-hidden="true">
           <Skeleton className="h-8 w-full" />

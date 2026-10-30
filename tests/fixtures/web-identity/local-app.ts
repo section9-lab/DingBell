@@ -232,8 +232,9 @@ export async function startLocalApplication(configured = true, options: { mail?:
       startupOutput = (startupOutput + String(chunk)).slice(-6000);
     });
     let ready = false;
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline && child.exitCode === null) {
+    // Cold Vite/workerd dependency optimization belongs to fixture setup, not UI timing.
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline && child.exitCode === null && child.signalCode === null) {
       try {
         if ((await fetch(`${baseURL}/api/health`, { signal: AbortSignal.timeout(1_000) })).status === 200) { ready = true; break; }
       } catch { /* Wait for workerd. */ }

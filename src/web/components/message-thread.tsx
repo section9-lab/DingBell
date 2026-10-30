@@ -60,7 +60,7 @@ export function MessageTimeline({ messages, pageKey, earlier, anchorId, view, on
   const { date: messageDate } = useCompanySettings();
   if (!messages.length) return <MessageEmpty title="暂无已导入消息" description="会话已发现，消息历史可能仍在读取。稍后刷新查看。" />;
   return <MessageScrollerProvider key={pageKey} autoScroll={!earlier} defaultScrollPosition={earlier ? 'start' : 'end'}>
-    <MessageScroller>
+    <MessageScroller className="bg-muted/20">
       <ReadingPosition anchorId={anchorId} view={view} onPosition={onPosition} />
       <MessageScrollerViewport aria-label="消息记录" role="region" tabIndex={0}>
         <MessageScrollerContent className="p-4 sm:p-6">
@@ -71,8 +71,8 @@ export function MessageTimeline({ messages, pageKey, earlier, anchorId, view, on
             return <MessageScrollerItem key={message.id} messageId={message.id}>
               <Message align={outbound ? 'end' : 'start'}>
                 <MessageContent>
-                  <MessageHeader>{sender}</MessageHeader>
-                  <Bubble variant={outbound ? 'secondary' : 'muted'} align={outbound ? 'end' : 'start'}>
+                  <MessageHeader className="text-xs text-muted-foreground">{sender}</MessageHeader>
+                  <Bubble variant={outbound ? 'secondary' : 'outline'} align={outbound ? 'end' : 'start'}>
                     <BubbleContent>
                       {message.isImage ? <Marker><MarkerIcon><ImageOff /></MarkerIcon><MarkerContent>图片消息暂不展示</MarkerContent></Marker> : message.content.length ? <p dir="auto" className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content.join('\n')}</p> : <p>此消息没有可显示的文本。</p>}
                     </BubbleContent>
@@ -91,8 +91,8 @@ export function MessageTimeline({ messages, pageKey, earlier, anchorId, view, on
 
 export function ConversationHeader({ conversation, messages, back, ...scope }: ContextProps & { back: () => void }) {
   const [open, setOpen] = useState(false);
-  return <header className="flex shrink-0 items-center gap-3 border-b p-4">
-    <Button variant="ghost" size="icon-sm" aria-label="返回会话列表" onClick={back} className="md:hidden"><ArrowLeft /></Button>
+  return <header className="flex shrink-0 items-center gap-3 border-b bg-background px-4 py-3">
+    <Button variant="ghost" size="icon-sm" aria-label="返回会话列表" onClick={back} className="lg:hidden"><ArrowLeft /></Button>
     <div className="min-w-0 flex-1"><h2 className="truncate font-semibold" aria-label={`会话 ${conversation.platformThreadId}`}>买家咨询</h2><p className="mt-1 truncate text-xs text-muted-foreground">{conversation.store.name} · Ozon</p></div>
     <Sheet open={open} onOpenChange={setOpen}><SheetTrigger render={<Button variant="outline" size="icon-sm" aria-label="会话详情" />}><Info /></SheetTrigger><SheetContent className="w-full overflow-y-auto"><SheetHeader><SheetTitle>会话详情</SheetTitle><SheetDescription>查看商品、订单包裹、消息来源与同步范围。</SheetDescription></SheetHeader><ConversationContext {...scope} conversation={conversation} messages={messages} /></SheetContent></Sheet>
   </header>;
@@ -101,7 +101,7 @@ export function ConversationHeader({ conversation, messages, back, ...scope }: C
 export function ConversationAside({ conversation, messages, ...scope }: ContextProps) {
   const wide = useSyncExternalStore(subscribeWide, () => window.matchMedia('(min-width: 1440px)').matches, () => false);
   if (!wide) return null;
-  return <aside aria-label="会话上下文" className="hidden w-68 shrink-0 overflow-y-auto border-l bg-muted/20 min-[1440px]:block"><h2 className="px-5 pt-5 font-medium">会话详情</h2><ConversationContext {...scope} conversation={conversation} messages={messages} /></aside>;
+  return <aside aria-label="会话上下文" className="hidden w-64 shrink-0 overflow-y-auto border-l bg-background min-[1440px]:block"><h2 className="px-5 pt-5 font-medium">会话详情</h2><ConversationContext {...scope} conversation={conversation} messages={messages} /></aside>;
 }
 
 function subscribeWide(onChange: () => void) {
