@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/section9-lab/DingBell/security/advisories/new
+    about: Report privately. Never disclose credentials or customer data in a public issue.
+  - name: Deployment and self-hosting questions
+    url: https://github.com/section9-lab/DingBell/blob/main/docs/09-self-hosting.md
+    about: Installation, secrets, backup and upgrade guidance.

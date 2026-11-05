@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible defect using synthetic data only
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Never paste real customer messages, store API keys, credentials, database dumps or production logs.** Replace them with synthetic examples.
+
+        Security problems must be reported privately — see [SECURITY.md](../SECURITY.md).
+  - type: dropdown
+    id: target
+    attributes:
+      label: Deployment target
+      options:
+        - Cloudflare Workers / D1
+        - Vercel
+        - Self-managed Node
+        - Local development (Vite + Miniflare)
+        - Unsure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Tag, release, or the first 7 characters of the commit.
+      placeholder: f7f138d
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Exact steps with synthetic inputs. Include the relevant settings and whether outbound or AI execution was enabled.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized error codes and request IDs, not raw provider bodies.
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks run
+      description: Output of `npm run check`, or the specific suite that reproduces the problem.
+      render: shell
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed credentials, customer content and production data from this report.
+          required: true
+        - label: I searched existing issues before opening this one.
+          required: true

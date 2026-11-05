@@ -28,16 +28,27 @@ Never commit `.dev`, `.dev.vars`, provider keys, Cloudflare credentials, custome
 6. New paid/external behavior must be opt-in and fail closed when configuration is absent. No DingBell commercial account or license server may become a core dependency.
 7. Update architecture, acceptance and implementation-progress documentation with evidence boundaries.
 
+## Project layout and package boundaries
+
+The application lives in `src/`. `packages/agent-runtime`, `deploy/cloudflare`, `deploy/vercel` and the probes are separately installed npm targets with their own lockfiles. Do not import another target's files through a `node_modules` path; add an explicit bridge module instead. The Pi runtime packages must stay on the same exact version across the three runtime targets. See [repository package and runtime boundaries](docs/18-monorepo.md).
+
 ## Required checks
 
 ```sh
+npm run lint
 npm run check
 npx playwright install chromium
 npm run test:web:portable
 ```
 
-`check` includes platform typechecks, full unit/module tests, native portable builds/execution tests, build-isolation checks and release/license checks. Run additional affected native suites when changing their contracts. Historical `test:web` scenarios must be migrated to current contracts, not silently deleted or represented as passing portable release checks. See [hardening boundaries](docs/16-production-hardening.md). Local synthetic tests do not establish real Ozon delivery, model quality, supplier billing or cloud capacity.
+`lint` runs Biome in lint-only mode; formatting is intentionally not enforced so reviews are not buried in reflow. Keep new code readable, avoid unused imports and variables, and give every interactive element a valid role when using `aria-label`.
+
+`check` includes platform typechecks, full unit/module tests, native portable builds/execution tests, build-isolation checks and lint/dependency/license release checks. Run additional affected native suites when changing their contracts. Historical `test:web` scenarios must be migrated to current contracts, not silently deleted or represented as passing portable release checks. See [hardening boundaries](docs/16-production-hardening.md). Local synthetic tests do not establish real Ozon delivery, model quality, supplier billing or cloud capacity.
 
 ## Pull requests
 
 Keep changes focused. State migrations, environment variables, security/privacy effects, rollback constraints, tests run and unverified external conditions. Never weaken a constraint merely to make historical or synthetic fixtures pass.
+
+Add an entry under `Unreleased` in [CHANGELOG.md](CHANGELOG.md) for user-visible behavior, schema, dependency or operational changes.
+
+Report security problems privately as described in [SECURITY.md](SECURITY.md), and follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) in all project spaces.

@@ -2,6 +2,25 @@
   "name": "dingbell",
   "version": "0.1.0",
   "private": true,
+  "description": "AI customer support for ecommerce teams: shared TypeScript business core with Cloudflare, Vercel and self-managed Node adapters.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/section9-lab/DingBell.git"
+  },
+  "bugs": {
+    "url": "https://github.com/section9-lab/DingBell/issues"
+  },
+  "homepage": "https://github.com/section9-lab/DingBell#readme",
+  "keywords": [
+    "ozon",
+    "customer-support",
+    "ai-agents",
+    "cloudflare-workers",
+    "durable-objects",
+    "drizzle",
+    "hono",
+    "self-hosted"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24.14.0 <25"
@@ -129,5 +148,6 @@
       }
     }
   },
-  "license": "MIT"
+  "license": "MIT",
+  "author": "DingBell contributors"
 }

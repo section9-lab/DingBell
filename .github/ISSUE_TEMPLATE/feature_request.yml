@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a capability, integration or documentation change
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        DingBell is deliberately conservative about outbound messaging, credentials and paid execution. Proposals that add external side effects or cost must explain how they fail closed.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Store synchronization (Ozon catalog, orders, chat)
+        - AI reception and agent tools
+        - Knowledge base and retrieval
+        - Accounting and costing
+        - Identity, membership and permissions
+        - Deployment target or operations
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is currently impossible, unsafe or unclear? Describe the customer support workflow, not the implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and cost impact
+      description: Does this send messages, spend money, call a third party, store personal data, or change an authorization boundary? How does it fail closed when configuration is missing?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I read the accepted boundaries in docs/03-acceptance.md and docs/16-production-hardening.md.
+          required: false

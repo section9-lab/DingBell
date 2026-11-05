@@ -1,5 +1,8 @@
 # DingBell
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Verify](https://github.com/section9-lab/DingBell/actions/workflows/verify.yml/badge.svg)](https://github.com/section9-lab/DingBell/actions/workflows/verify.yml)
+
 AI customer support for ecommerce teams, with a shared TypeScript business core and Pi Durable runtime adapters.
 
 | Target | Agent execution | Business persistence and coordination |
@@ -62,6 +65,15 @@ Cloud probes require explicit `--isolated-cloud`, create uniquely named syntheti
 
 See [production hardening and remaining boundaries](docs/16-production-hardening.md) for Node guard semantics, financial safety and historical-data recovery limits. The [repository package and runtime boundaries](docs/18-monorepo.md) explain the independently locked targets and their dependency checks.
 
+## Project policies
+
+- [Contributing](CONTRIBUTING.md) — setup, change requirements and required checks
+- [Code of conduct](CODE_OF_CONDUCT.md) — community expectations and enforcement
+- [Security policy](SECURITY.md) — private reporting, scope and known boundaries
+- [Changelog](CHANGELOG.md) — released and unreleased changes
+
+Never include customer content, store credentials, database dumps or production logs in issues, pull requests or screenshots.
+
 ## License
 
-DingBell is licensed under [MIT](LICENSE). Dependencies retain their own terms; see [third-party notices](THIRD_PARTY_NOTICES.md) and `npm run licenses:inventory` for every target's locked dependency inventory. [Contributing](CONTRIBUTING.md).
+DingBell is licensed under [MIT](LICENSE). Dependencies retain their own terms; see [third-party notices](THIRD_PARTY_NOTICES.md) and `npm run licenses:inventory` for every target's locked dependency inventory.
