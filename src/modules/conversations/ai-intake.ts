@@ -65,7 +65,7 @@ export async function readAiIntakeAdmission(db:D1Database,scope:ControlScope,mes
   JOIN message m ON m.conversation_id=c.id AND m.organization_id=c.organization_id AND m.store_id=c.store_id
   JOIN ingest_event e ON e.message_id=m.id AND e.organization_id=m.organization_id AND e.store_id=m.store_id AND e.conversation_id=m.conversation_id
   WHERE cc.controller_id=? AND cc.organization_id=? AND cc.store_id=? AND cc.conversation_id=? AND m.id=?
-  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND c.platform_status='Opened' AND m.is_image=0 AND length(CAST(m.content AS BLOB))<=15000`)
+  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened' AND m.is_image=0 AND length(CAST(m.content AS BLOB))<=15000`)
   .bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId,messageId).first<{content:string;inputRevision:number;eventId:string}>();
  if(!row)return null;const event=await readInboundEvent(db,scope,row.eventId);if(!event)return null;
  const matches=await Promise.all(policyStageSchema.options.map(async stage=>{const p=await selectReplyPolicy(db,scope,stage);return p?{stage,policyId:p.id,policyRevision:p.revision,mode:p.config.mode,language:p.config.language}:null;}));

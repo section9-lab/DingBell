@@ -1,6 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { PiHarness } from '../../../deploy/cloudflare/node_modules/agents/dist/harness/pi/index.js';
-import { Lifecycle } from '../../../deploy/cloudflare/node_modules/agents/dist/lifecycle/index.js';
+import { PiHarness, Lifecycle } from '../../../deploy/cloudflare/agent-dependencies.ts';
 import { ROOT_CONVERSATION_ID, context, openAgent, providerId, readResult } from '../../../packages/agent-runtime/harness.ts';
 import type { AgentDriver, AgentKind } from '../../../packages/agent-runtime/contracts.ts';
 import { BusinessAgentAuthority } from '../agents/authority.ts';
@@ -15,6 +14,7 @@ export class PiAgentObject extends DurableObject<CloudflareEnv> {
   readonly services: PortableAgents;
   readonly harness: PiHarness;
   readonly lifecycle: Lifecycle;
+  protected providerFetch: typeof fetch = (input, init) => fetch(input, init);
   constructor(ctx: DurableObjectState, env: CloudflareEnv) {
     super(ctx,env);
     const state: ExecutionStateSql = {
@@ -23,7 +23,7 @@ export class PiAgentObject extends DurableObject<CloudflareEnv> {
     };
     initializeExecutionState(state);
     if (!env.DB) throw new Error('DATABASE_UNAVAILABLE');
-    this.authority = new BusinessAgentAuthority(env.DB,withRuntime(env),state);
+    this.authority = new BusinessAgentAuthority(env.DB,withRuntime(env),state,(input,init)=>this.providerFetch(input,init));
     const uid = () => {
       const row=state.prepare('SELECT uid FROM runtime_agent_binding').get();
       if(!row)throw new Error('AGENT_BINDING_UNAVAILABLE'); return String(row.uid);
@@ -61,12 +61,6 @@ export class PiAgentObject extends DurableObject<CloudflareEnv> {
   async translationClose(...args: Parameters<Method<'translation','close'>>) { this.scope('translation',args[1]); return this.services.translation.close(...args); }
   async translationDispatch(...args: Parameters<Method<'translation','dispatch'>>) { this.scope('translation',args[0].id); return this.services.translation.dispatch(...args); }
   async translationRead(...args: Parameters<Method<'translation','read'>>) { this.scope('translation',args[0]); return this.services.translation.read(...args); }
-  async replyTestLookup(...args: Parameters<Method<'replyTest','lookup'>>) { this.scope('reply-test',args[0]); return this.services.replyTest.lookup(...args); }
-  async replyTestInspect(...args: Parameters<Method<'replyTest','inspect'>>) { this.scope('reply-test',args[0]); return this.services.replyTest.inspect(...args); }
-  async replyTestPrepare(...args: Parameters<Method<'replyTest','prepare'>>) { this.scope('reply-test',args[1]); return this.services.replyTest.prepare(...args); }
-  async replyTestClose(...args: Parameters<Method<'replyTest','close'>>) { this.scope('reply-test',args[1]); return this.services.replyTest.close(...args); }
-  async replyTestDispatch(...args: Parameters<Method<'replyTest','dispatch'>>) { this.scope('reply-test',args[0].id); return this.services.replyTest.dispatch(...args); }
-  async replyTestRead(...args: Parameters<Method<'replyTest','read'>>) { this.scope('reply-test',args[0]); return this.services.replyTest.read(...args); }
   async supportLookup(...args: Parameters<Method<'support','lookup'>>) { this.scope('support',args[0].id); return this.services.support.lookup(...args); }
   async supportInspect(...args: Parameters<Method<'support','inspect'>>) { this.scope('support',args[0].id); return this.services.support.inspect(...args); }
   async supportPrepare(...args: Parameters<Method<'support','prepare'>>) { this.scope('support',args[0].id); return this.services.support.prepare(...args); }

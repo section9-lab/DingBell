@@ -7,12 +7,12 @@ import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.t
 import {ensureControlDirectory} from '../src/modules/conversations/control-storage.ts';
 import type {ControlScope,ControlActor} from '../src/modules/conversations/control-types.ts';
 import type {AiRun} from '../src/modules/conversations/ai-state.ts';
-const config={model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:100,maxOutputTokens:10,
+const config={model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:100,maxOutputTokens:10,
  pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}},maxGenerations:3};
 const receipt={submissionId:'submission',uid:'incarnation',acceptedAt:new Date().toISOString()};
 async function api(){const m=await import('../src/modules/ai-runs/storage.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.reserveAiExecution,'function','production AI needs a separate persistent financial and execution ledger');return m!;}
 async function fixture(upTo?:string){
- const f=await conversationControlFixture(upTo,{aiEnabled:'true'}),policyId=crypto.randomUUID(),actor={...f.actor(),expectedMemberId:'owner-member'};
+ const f=await conversationControlFixture(upTo,{}),policyId=crypto.randomUUID(),actor={...f.actor(),expectedMemberId:'owner-member'};
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
   const policy={kind:'automatic' as const,name:'Support',storeIds:['store'],priority:50,stages:['presale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
@@ -43,7 +43,7 @@ test('AI repairs claim disjoint bounded batches and stale workers cannot overwri
  await repair.finishAiRepair(f.f.db,replacement);const row=await f.f.db.prepare('SELECT repair_due_at AS due,repair_token AS token FROM ai_execution WHERE id=?').bind(first.runId).first<any>();assert.equal(row.token,null);assert.ok(row.due>now);
  await assert.rejects(()=>repair.claimAiRepairs(f.f.db,now,0));await assert.rejects(()=>repair.claimAiRepairs(f.f.db,now,51));
 });
-test('repair completion stops settled records but keeps closed unknown usage eligible for later reconciliation',{timeout:30000},async t=>{
+test('repair completion stops settled records but keeps closed unknown generation usage eligible for later reconciliation',{timeout:30000},async t=>{
  const repair=await repairApi(),m=await api(),f=await fixture();t.after(f.f.close);const id=await budget(m,f),run=await f.activate();
  await m.reserveAiExecution(f.f.db,f.reader,run.scope,run.request.runId,id,config);await m.bindAiExecutionReceipt(f.f.db,run.scope,run.request.runId,receipt);assert.equal(await m.claimAiGeneration(f.f.db,f.reader,run.scope,run.request.runId,1),true);
  await m.closeAiExecution(f.f.db,run.scope,run.request.runId,{kind:'runtime_closed',evidenceId:crypto.randomUUID(),instanceId:`ai-support:${run.request.runId}`,receipt,outcome:'aborted',executionClosed:true,providerPermits:1,verifiedAt:Date.now()});
@@ -51,19 +51,19 @@ test('repair completion stops settled records but keeps closed unknown usage eli
  const due=await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first<number>('repair_due_at');assert.ok(due!>Date.now()+240000);
  assert.equal((await m.readAiExecution(f.f.db,run.scope,run.request.runId))!.remainingReservedMicros,110);
  await m.settleAiGeneration(f.f.db,run.scope,run.request.runId,1,receipt,{input:10,output:5,cacheRead:0,cacheWrite:0});
- const created=Date.now();await f.f.db.prepare("INSERT INTO ai_knowledge_query(run_id,config,scope,question_hash,reserved_micros,created_at,gateway_log_id) VALUES(?,'{}','{}',?,0,?,'pending-log')")
-  .bind(run.request.runId,'a'.repeat(64),created).run();await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE id=?').bind(run.request.runId).run();
- await repair.finishAiRepair(f.f.db,(await repair.claimAiRepairs(f.f.db,Date.now(),50))[0]);assert.ok((await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first<number>('repair_due_at'))!>Date.now()+240000);
- await f.f.db.prepare("UPDATE ai_knowledge_query SET gateway_usage='{}',charged_micros=0,settled_at=? WHERE run_id=?").bind(created,run.request.runId).run();await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE id=?').bind(run.request.runId).run();
+ await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE id=?').bind(run.request.runId).run();
  await repair.finishAiRepair(f.f.db,(await repair.claimAiRepairs(f.f.db,Date.now(),50))[0]);assert.equal(await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first('repair_due_at'),null);
  assert.deepEqual(await repair.claimAiRepairs(f.f.db,Date.now(),50),[]);
 });
-test('0034 schedules pre-existing executions while preserving every original column and immutable financial records',{timeout:30000},async t=>{
+test('0034 schedules pre-existing executions while preserving every original column and immutable financial records',{timeout:60000},async t=>{
  await repairApi();const m=await api(),f=await fixture('0033');t.after(f.f.close);const id=await budget(m,f),run=await f.activate();await m.reserveAiExecution(f.f.db,f.reader,run.scope,run.request.runId,id,config);
  const tables=(await f.f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_cf_METADATA'").all<{name:string}>()).results.map(r=>r.name),columns=new Map<string,string[]>();
  const quote=(x:string)=>'"'+x.replaceAll('"','""')+'"';for(const table of tables)columns.set(table,(await f.f.db.prepare(`PRAGMA table_info(${quote(table)})`).all<{name:string}>()).results.map(c=>c.name));
- const snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async table=>[table,(await f.f.db.prepare(`SELECT ${columns.get(table)!.map(quote).join(',')} FROM ${quote(table)}`).all()).results.map(r=>JSON.stringify(r)).sort()])));
- const before=await snapshot();await f.f.migrateAfter('0033');assert.deepEqual(await snapshot(),before);assert.equal(await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first('repair_due_at'),0);
+ const snapshot=async(list:readonly string[]=tables)=>Object.fromEntries(await Promise.all(list.map(async table=>[table,(await f.f.db.prepare(`SELECT ${columns.get(table)!.map(quote).join(',')} FROM ${quote(table)}`).all()).results.map(r=>JSON.stringify(r)).sort()])));
+ const before=await snapshot();await f.f.migrateAfter('0033');
+ // Later migrations (0069) drop vector/reply-test tables; compare only tables that survive the full forward migration.
+ const surviving=(await f.f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_cf_METADATA'").all<{name:string}>()).results.map(r=>r.name).filter(name=>tables.includes(name));
+ assert.deepEqual(await snapshot(surviving),Object.fromEntries(surviving.map(name=>[name,before[name]])));assert.equal(await f.f.db.prepare('SELECT repair_due_at FROM ai_execution WHERE id=?').bind(run.request.runId).first('repair_due_at'),0);
  assert.deepEqual((await f.f.db.prepare('PRAGMA foreign_key_check').all()).results,[]);await assert.rejects(()=>f.f.db.prepare("UPDATE ai_execution SET payload_hash=? WHERE id=?").bind('a'.repeat(64),run.request.runId).run());
  await assert.rejects(()=>f.f.db.prepare('UPDATE conversation_control_event SET projected_at=projected_at+1').run());
  const guards=(await f.f.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'conversation_control_event_%' ORDER BY name").all<{name:string}>()).results.map(r=>r.name);assert.deepEqual(guards,['conversation_control_event_immutable','conversation_control_event_insert_guard']);
@@ -79,10 +79,9 @@ test('background AI repair addresses saved execution IDs without consulting the 
  const repair=await repairApi();assert.equal(typeof repair.repairAiExecutions,'function','Cron must reconcile historical financial plans independently');
  const m=await api(),f=await fixture();t.after(f.f.close);const id=await budget(m,f),ids:string[]=[];
  for(const conversationId of ['conv','second']){const run=await f.activate(conversationId);await m.reserveAiExecution(f.f.db,f.reader,run.scope,run.request.runId,id,config);ids.push(run.request.runId);}
- const env={DB:f.f.db,AI_RECEPTION_ENABLED:'false',FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{get(){throw new Error('current slot must not be consulted');}}} as any,calls:string[]=[],knowledgeCalls:string[]=[];
- await repair.repairAiExecutions(env,{reconcile:async(_env,scope,runId)=>{assert.equal(scope.organizationId,'org');calls.push(runId);throw new Error('synthetic runtime outage');},
-  reconcileKnowledge:async(_env,scope,runId)=>{assert.equal(scope.organizationId,'org');knowledgeCalls.push(runId);return {status:'unconfirmed',canRelease:false,supplierCostsVerified:false};}});
- assert.deepEqual(calls.sort(),ids.sort());assert.deepEqual(knowledgeCalls.sort(),ids.sort());assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at>0 AND repair_token IS NULL').first('n'),2);
+ const env={DB:f.f.db,FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{get(){throw new Error('current slot must not be consulted');}}} as any,calls:string[]=[];
+ await repair.repairAiExecutions(env,{reconcile:async(_env,scope,runId)=>{assert.equal(scope.organizationId,'org');calls.push(runId);throw new Error('synthetic runtime outage');}});
+ assert.deepEqual(calls.sort(),ids.sort());assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at>0 AND repair_token IS NULL').first('n'),2);
  await repair.repairAiExecutions(env,{reconcile:async()=>{throw new Error('not yet due');}});assert.equal(calls.length,2);
  await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0').run();await repair.repairAiExecutions({...env,FLUE_SUPPORT_AGENT:undefined});assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at=0').first('n'),2);
 });

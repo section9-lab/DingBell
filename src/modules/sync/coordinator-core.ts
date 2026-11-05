@@ -3,8 +3,10 @@ import type { SyncBindings, SyncBucket } from './bindings.ts';
 import type { SyncScope } from './types.ts';
 import { getStoreCoordinatorRuntime, getStoreSendCooldown, recordStoreSendCooldown } from './storage.ts';
 import { runSyncPage } from './runner.ts';
+import {deliverInboundEvents} from '../conversations/inbound-delivery.ts';
+import {dispatchAiReceptions} from '../ai-runs/dispatch.ts';
 
-export function createStoreCoordinator(Base: typeof DurableObject<SyncBindings>) {
+export function createStoreCoordinator(Base: typeof DurableObject<SyncBindings>,dependencies:{fetcher?:typeof fetch}={}) {
 return class StoreCoordinator extends Base {
   async wake(scope: SyncScope): Promise<void> {
     if (!scope || ![scope.orgId, scope.storeId].every(value => typeof value === 'string' && value.length > 0 && value.length <= 256)) throw new Error('Invalid sync scope.');
@@ -56,7 +58,11 @@ return class StoreCoordinator extends Base {
 
   protected async runPage(scope: SyncScope): Promise<void> {
     if (!this.env.DB) throw new Error('Sync database is unavailable.');
-    await runSyncPage({ ...this.env, DB: this.env.DB }, scope, { reserve: (bucket, now) => this.reserve(bucket, now) });
+    await runSyncPage({ ...this.env, DB: this.env.DB }, scope, { fetcher:dependencies.fetcher,reserve: (bucket, now) => this.reserve(bucket, now),onCommittedLive:scope=>{
+      // Do not hold the read lane (or a webhook acknowledgement) while AI work is admitted.
+      // Both delivery and dispatch already have durable outboxes and the scheduled repair path.
+      this.ctx.waitUntil((async()=>{await deliverInboundEvents(this.env,scope);await dispatchAiReceptions(this.env,{},scope);})().catch(()=>{}));
+    } });
   }
 
   protected async reserve(bucket: SyncBucket, now: number): Promise<number> {

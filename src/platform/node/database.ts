@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { retiringTables, retirementArchivePlan, assertRetirementArchives } from '../database/retirement.ts';
 
 function binding(value: unknown): SQLInputValue {
   if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint' || value instanceof Uint8Array) return value;
@@ -75,7 +76,17 @@ export async function migrateSqlite(database: SqliteDatabase, directory: string)
     const previous = database.sqlite.prepare('SELECT sha256 FROM dingbell_migrations WHERE name=?').get(name);
     if (previous) { if (previous.sha256 !== hash) throw new Error(`Applied migration changed: ${name}`); continue; }
     database.sqlite.exec('BEGIN IMMEDIATE');
-    try { database.sqlite.exec(sql); database.sqlite.prepare('INSERT INTO dingbell_migrations VALUES(?,?)').run(name, hash); database.sqlite.exec('COMMIT'); }
+    try {
+      for (const table of retiringTables(sql)) {
+        if (!database.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
+        const plan = retirementArchivePlan(table);
+        for (const statement of plan.statements) database.sqlite.exec(statement);
+        assertRetirementArchives([database.sqlite.prepare(plan.verify).get()!], [table]);
+      }
+      database.sqlite.exec(sql);
+      database.sqlite.prepare('INSERT INTO dingbell_migrations VALUES(?,?)').run(name, hash);
+      database.sqlite.exec('COMMIT');
+    }
     catch (error) { database.sqlite.exec('ROLLBACK'); throw error; }
   }
   if (database.sqlite.prepare('PRAGMA foreign_key_check').all().length) throw new Error('SQLite foreign key check failed.');

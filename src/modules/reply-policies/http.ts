@@ -5,9 +5,10 @@ import { policyVersionSchema, replyPolicyConfigSchema } from '../../shared/reply
 import { auditedChange, type AuditOutcome } from '../audit/operation.ts';
 import { readCompanySettings } from '../company-settings/storage.ts';
 import { configured, limitedBody, signedIn } from '../identity/http.ts';
-import { changePolicy, checkPolicy, createPolicy, listPolicies, ownsPolicyStores, readPolicy, readPolicyHistory, type PolicyActor, type PolicyChange } from './storage.ts';
+import { changePolicy, checkPolicy, checkPolicyConfig, createPolicy, listPolicies, ownsPolicyStores, readPolicy, readPolicyHistory, savePolicy, type PolicyActor, type PolicyChange } from './storage.ts';
 
 const createSchema=v.strictObject({id:v.pipe(v.string(),v.uuid()),config:replyPolicyConfigSchema});
+const saveSchema=v.strictObject({expectedVersion:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1)),config:replyPolicyConfigSchema});
 const expected={expectedVersion:policyVersionSchema};
 const schemas={draft:v.strictObject({...expected,config:replyPolicyConfigSchema}),test:v.strictObject(expected),
   publish:v.strictObject(expected),pause:v.strictObject(expected),restore:v.strictObject({...expected,revision:policyVersionSchema})};
@@ -57,6 +58,29 @@ export function registerReplyPolicyRoutes(app:Hono<ApplicationEnv>) {
       if(denied)return changed?unconfirmed(c):denied;
       if(!changed)return conflict(c);
       const current=await readPolicy(c.env.DB!,actor,id);return current?jsonResponse(c,current):unconfirmed(c);
+    });
+    return result.auditComplete?result.response:unconfirmed(c);
+  });
+  app.post(`${base}/:id/save`,configured,limitedBody,signedIn,async c=>{
+    const actor=actorFor(c),denied=await authorize(c,actor);if(denied)return denied;
+    const id=c.req.param('id'),parsed=v.safeParse(saveSchema,await c.req.json().catch(()=>null));
+    if(!v.safeParse(v.pipe(v.string(),v.uuid()),id).success||!parsed.success)
+      return apiError(c,'INVALID_REQUEST','Provide valid configuration and the current policy version.',400);
+    const {config,expectedVersion}=parsed.output;
+    const current=await readPolicy(c.env.DB!,actor,id);
+    if(expectedVersion>0&&!current)return unavailable(c);
+    if(current&&current.policy.kind!==config.kind)return apiError(c,'INVALID_REQUEST','The policy kind cannot change.',400);
+    const result=await auditedChange(record(c,actor,id,'save',expectedVersion),async()=>{
+      if((current?.policy.version??0)!==expectedVersion)return conflict(c);
+      const problem=await checkPolicyConfig(c.env.DB!,actor,id,config);
+      if(problem)return apiError(c,problem,problem==='POLICY_OVERLAP'?'An active automatic policy overlaps at the same priority.':'One or more policy stores are unavailable.',409);
+      const changed=await savePolicy(c.env.DB!,actor,id,expectedVersion,config,c.get('requestId'));
+      const denied=await authorize(c,actor);if(denied)return changed?unconfirmed(c):denied;
+      if(!changed){
+        const problem=await checkPolicyConfig(c.env.DB!,actor,id,config);
+        return problem?apiError(c,problem,'The policy scope is no longer available.',409):conflict(c);
+      }
+      const latest=await readPolicy(c.env.DB!,actor,id);return latest?jsonResponse(c,latest):unconfirmed(c);
     });
     return result.auditComplete?result.response:unconfirmed(c);
   });

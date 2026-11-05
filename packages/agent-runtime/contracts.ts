@@ -1,8 +1,9 @@
-export type AgentKind = 'translation' | 'reply-test' | 'support';
+export type AgentKind = 'translation' | 'support';
 export interface AgentTool { name: string; description: string; parameters: Record<string, unknown>; timeoutMs: number }
 export interface AgentDefinition {
   uid: string; kind: AgentKind; requestId: string; acceptedAt: string; input: string; instructions: string;
   modelId: string; maxOutputTokens: number; tools: AgentTool[];
+  modelConnection?: { baseUrl: string; contextWindow: number; cost: { input:number;output:number;cacheRead:number;cacheWrite:number } };
 }
 export interface AgentReceipt { submissionId: string; uid: string; acceptedAt: string }
 export type AgentResult = { outcome: 'pending' } | { outcome: 'failed' } | { outcome: 'aborted' } | { outcome: 'completed'; text: string; metadata: unknown };

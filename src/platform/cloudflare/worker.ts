@@ -5,8 +5,6 @@ import { createStoreCoordinator } from '../../modules/sync/coordinator-core.ts';
 import { runScheduled } from '../../scheduled.ts';
 import { withRuntime, type CloudflareEnv } from './runtime.ts';
 export { PiAgentObject } from './agent.ts';
-export { KnowledgeIndexWorkflow } from '../../modules/knowledge/index-workflow.ts';
-export { KnowledgeReviewWorkflow } from '../../modules/knowledge/review-workflow.ts';
 class RuntimeObject extends DurableObject<CloudflareEnv> {
   constructor(ctx:DurableObjectState,env:CloudflareEnv){super(ctx,withRuntime(env));}
 }
@@ -20,8 +18,7 @@ class LegacyArchive extends DurableObject {
 export class FlueReplyPreviewAgent extends LegacyArchive {}
 export class FlueReplyTestAgent extends LegacyArchive {}
 export class FlueSupportAgent extends LegacyArchive {}
-const app=createApp();
-export default {
+export function createWorker(app = createApp()) { return {
   async fetch(request:Request,env:CloudflareEnv,ctx:ExecutionContext){
     const path=new URL(request.url).pathname;
     if(path==='/api'||path.startsWith('/api/'))return app.fetch(request,withRuntime(env),ctx);
@@ -29,4 +26,5 @@ export default {
     return env.ASSETS?.fetch(request)??new Response(null,{status:404});
   },
   async scheduled(_event:ScheduledController,env:CloudflareEnv){await runScheduled(withRuntime(env));},
-} satisfies ExportedHandler<CloudflareEnv>;
+} satisfies ExportedHandler<CloudflareEnv>; }
+export default createWorker();

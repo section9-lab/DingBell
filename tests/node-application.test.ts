@@ -126,12 +126,32 @@ test('Node Pi translation preserves original receipt and settles the original bu
   const conflict=await submitReplyPreview(app.env,actor,target,{...input,source:'different'});assert.equal(conflict.outcome,'conflict');assert.equal(calls,1);
 });
 
-for(const mode of ['sent','unknown'] as const)test(`Node sender preserves a ${mode} outcome across concurrent replay and process restart`,{timeout:30000},async context=>{
+for(const mode of ['sent','unknown','ordered-control'] as const)test(`Node sender preserves ${mode} across concurrent replay and process restart`,{timeout:30000},async context=>{
+ const outcome=mode==='unknown'?'unknown':'sent',events:string[]=[];
+ const committed=Promise.withResolvers<void>(),allowIO=Promise.withResolvers<void>(),network=Promise.withResolvers<void>();let paused=false;
+ context.after(()=>{allowIO.resolve();network.resolve();});
+ if(mode==='ordered-control'){
+  const {ObjectHost}=await import('../src/platform/node/objects.ts'),namespace=ObjectHost.prototype.namespace;
+  context.mock.method(ObjectHost.prototype,'namespace',function(this:InstanceType<typeof ObjectHost>,kind:string,construct:(ctx:DurableObjectState)=>unknown){
+   return namespace.call(this,kind,ctx=>{
+    const transaction=ctx.storage.transaction.bind(ctx.storage);
+    ctx.storage.transaction=async closure=>{
+     const result=await transaction(closure);
+     if(!paused&&result&&typeof result==='object'&&'intent'in result&&result.intent&&typeof result.intent==='object'&&'state'in result.intent&&result.intent.state==='sending'){
+      paused=true;committed.resolve();await allowIO.promise;
+     }
+     return result;
+    };
+    return construct(ctx);
+   });
+  });
+ }
  const {encryptCredentials}=await import('../src/modules/stores/credentials.ts');
  const directory=await mkdtemp(join(tmpdir(),'dingbell-node-send-'));let calls=0;
  const variables={OUTBOUND_ENABLED:'true',STORE_CREDENTIAL_ACTIVE_KEY:'test',STORE_CREDENTIAL_KEYS:JSON.stringify({test:btoa('t'.repeat(32))})};
  const options={dataDirectory:directory,migrationsDirectory:resolve('migrations'),variables,commerceFetch:async(input:Parameters<typeof fetch>[0],init?:RequestInit)=>{
   calls++;assert.equal(String(input),'https://api-seller.ozon.ru/v1/chat/send/message');assert.equal(new Headers(init?.headers).get('api-key'),'synthetic-api-key');assert.deepEqual(JSON.parse(String(init?.body)),{chat_id:'thread',text:'Здравствуйте!'});
+  if(mode==='ordered-control'){events.push('send-started');await network.promise;}
   if(mode==='unknown')throw new Error('Synthetic lost provider acknowledgement');return Response.json({result:'success'});
  }};
  let app=await createNodeApplication(options);context.after(async()=>{await app.close();await rm(directory,{recursive:true,force:true});});
@@ -147,10 +167,21 @@ for(const mode of ['sent','unknown'] as const)test(`Node sender preserves a ${mo
  let controller=app.env.CONVERSATION_CONTROLLER!.getByName(scope.controllerId);
  assert.equal((await controller.execute(scope,actor,{commandId:crypto.randomUUID(),action:'claim',expectedVersion:0})).outcome,'accepted');
  const command={commandId:crypto.randomUUID(),action:'send_reply' as const,expectedVersion:1,body:'Здравствуйте!'};
+ if(mode==='ordered-control'){
+  const first=controller.execute(scope,actor,command),waking=(async()=>{
+   await first;const deadline=Date.now()+10000;
+   while(!paused&&Date.now()<deadline){await app.tick();if(!paused)await delay(30);}
+   assert.equal(paused,true,'the original queued send must reach its durable dispatch boundary');
+  })();await Promise.race([committed.promise,waking]);
+  const later=controller.execute(scope,actor,{commandId:crypto.randomUUID(),action:'resolve',expectedVersion:2}).then(result=>{events.push('resolve-accepted');return result;});
+  await new Promise<void>(done=>setImmediate(done));assert.deepEqual(events,[],'resolve must not be acknowledged before protected send initiation');
+  allowIO.resolve();assert.equal((await first).outcome,'accepted');assert.equal((await later).outcome,'accepted');
+  assert.deepEqual(events,['send-started','resolve-accepted']);network.resolve();await waking;
+ }
  const results=await Promise.all(Array.from({length:6},()=>controller.execute(scope,actor,command)));for(const result of results)assert.equal(result.outcome,'accepted',JSON.stringify(result));
  const until=Date.now()+12000;let saved=await controller.readReply(scope,actor,command.commandId);
  while(saved.outcome==='found'&&['queued','sending'].includes(saved.reply.status)&&Date.now()<until){await app.tick();await delay(30);saved=await controller.readReply(scope,actor,command.commandId);}
- assert.equal(saved.outcome,'found');if(saved.outcome==='found')assert.equal(saved.reply.status,mode,JSON.stringify(saved));assert.equal(calls,1);
+ assert.equal(saved.outcome,'found');if(saved.outcome==='found')assert.equal(saved.reply.status,outcome,JSON.stringify(saved));assert.equal(calls,1);
  await app.close();app=await createNodeApplication(options);controller=app.env.CONVERSATION_CONTROLLER!.getByName(scope.controllerId);
  await controller.execute(scope,actor,command);await app.tick();assert.equal(calls,1);assert.deepEqual(await controller.readReply(scope,actor,command.commandId),saved);
 });

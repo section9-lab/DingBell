@@ -65,7 +65,6 @@ test('a new product snapshot requires an explicit current draft version and neve
   const f = await fixture(); t.after(f.close); f.source();
   const response = await f.preview(); assert.equal(response.status, 200); let preview = await response.json() as any;
   assert.equal((await f.request('/product-import', f.command(preview))).status, 200); const id = preview.documentId;
-  f.sqlite.prepare("UPDATE knowledge_revision SET status='ready',index_profile='synthetic',mutation_id='visible',tested_at=1,published_profile='synthetic',published_mutation_id='copy',published_at=2 WHERE document_id=?").run(id);
   assert.equal((await f.request(`/${id}/publish`, { expectedVersion: 1 })).status, 200);
   const previous = f.command(preview); f.source('1001', 'store-a', 'Другая модель');
   assert.equal((await f.request('/product-import', previous)).status, 409);

@@ -13,7 +13,17 @@ for(const value of ['.dev','.dev.vars','dist','test-results','data','backups','.
 const wrangler=JSON.parse((await readFile(resolve(root,'wrangler.jsonc'),'utf8')).replace(/^\s*\/\/.*$/gm,''));
 if((wrangler.r2_buckets??[]).length)failures.push('Default deployment unexpectedly binds optional R2.');
 const example=await readFile(resolve(root,'config/runtime.env.example'),'utf8');
-for(const flag of ['OUTBOUND_ENABLED','TRANSLATION_ENABLED','REPLY_TEST_ENABLED','AI_RECEPTION_ENABLED','AI_OUTBOUND_ENABLED','KNOWLEDGE_INDEXING_ENABLED','KNOWLEDGE_VECTOR_CLEANUP_ENABLED']){
+for(const flag of ['OUTBOUND_ENABLED','TRANSLATION_ENABLED','AI_OUTBOUND_ENABLED']){
  if(!new RegExp(`^${flag}=false$`,'m').test(example)||wrangler.vars?.[flag]!=='false')failures.push(`${flag} must default to false in both configuration examples and Cloudflare bindings.`);
 }
+for(const [name,command] of Object.entries(pkg.scripts??{})){
+ for(const file of command.split(/\s+/).filter(value=>/\.(?:test|spec)\.ts$/.test(value)&&!value.includes('*'))){
+  try{await access(resolve(root,file));}catch{failures.push(`${name} references missing test ${file}`);}
+ }
+}
+const bindings=new Map((wrangler.durable_objects?.bindings??[]).map(value=>[value.name,value.class_name]));
+for(const [binding,className] of [['PI_AGENT','PiAgentObject'],['CONVERSATION_CONTROLLER','ConversationController'],['STORE_COORDINATOR','StoreCoordinator']]){
+ if(bindings.get(binding)!==className)failures.push(`Missing active native object binding: ${binding}.`);
+}
+if((wrangler.workflows??[]).length)failures.push('Text knowledge must not bind retired vector workflows.');
 if(failures.length){console.error('Release readiness: BLOCKED\n- '+failures.join('\n- '));process.exitCode=1;}else console.log('Release structure, MIT license and disabled defaults passed.');

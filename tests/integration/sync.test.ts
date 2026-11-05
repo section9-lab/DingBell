@@ -73,6 +73,10 @@ test('real StoreCoordinator serializes per-store permits and preserves buckets a
   assert.equal(await permit('store-a', 'product-details', 2_000), 3_000);
   assert.equal(await permit('store-a', 'fbs-list', 2_000), 3_000);
   assert.equal(await permit('store-a', 'fbs-detail', 2_000), 3_000);
+  assert.equal(await permit('store-a', 'fbo-list', 2_000), 3_000);
+  assert.equal(await permit('store-a', 'fbo-detail', 2_000), 3_000);
+  assert.equal(await permit('store-a','fbp-list',2_000),3_000);
+  assert.equal(await permit('store-a','fbp-detail',2_000),3_000);
 });
 
 test('native Cron recovers a lost wake, alarms import a page, and pause removes future work across restart', { timeout: 30_000 }, async context => {
@@ -198,7 +202,8 @@ test('native product-only alarms hydrate facts and keep stopped synchronization 
   assert.equal(requests.length,beforeRestart);
 });
 
-test('native FBS-only alarms resume an unfinished frozen window after restart', {timeout:30_000},async context=>{
+for(const mode of ['fbs','fbo','fbp'] as const)test(`native ${mode.toUpperCase()}-only alarms resume an unfinished frozen window after restart`, {timeout:30_000},async context=>{
+  const source=mode==='fbs'?'fbs_postings':mode==='fbo'?'fbo_postings':'fbp_postings',listPath=mode==='fbs'?'/v4/posting/fbs/list':mode==='fbo'?'/v3/posting/fbo/list':'/v1/posting/fbp/list',getPath=mode==='fbs'?'/v3/posting/fbs/get':mode==='fbo'?'/v2/posting/fbo/get':'/v1/posting/fbp/get';
   const statePath=await mkdtemp(join(tmpdir(),'dingbell-fbs-alarm-'));
   const keys={STORE_CREDENTIAL_KEYS:JSON.stringify({v1:btoa('b'.repeat(32))}),STORE_CREDENTIAL_ACTIVE_KEY:'v1'};
   const requests:{path:string;body:Record<string,unknown>}[]=[];
@@ -208,8 +213,8 @@ test('native FBS-only alarms resume an unfinished frozen window after restart', 
     outboundService:async(request:Request)=>{
       const url=new URL(request.url);assert.equal(url.origin,'https://api-seller.ozon.ru');
       const body=await request.json() as Record<string,unknown>;requests.push({path:url.pathname,body});
-      if(url.pathname==='/v4/posting/fbs/list')return body.cursor?WorkerResponse.json({postings:[],has_next:false}):WorkerResponse.json({postings:[posting],has_next:true,cursor:'frozen-next'});
-      if(url.pathname==='/v3/posting/fbs/get')return WorkerResponse.json({result:posting});
+      if(url.pathname===listPath)return mode==='fbp'?WorkerResponse.json({postings:body.cursor?[]:[{...posting,products:posting.products.map(item=>({...item,price:{amount:item.price,currency:'RUB'}}))}],cursor:body.cursor?'':'frozen-next'}):body.cursor?WorkerResponse.json({postings:[],has_next:false}):WorkerResponse.json({postings:[posting],has_next:true,cursor:'frozen-next'});
+      if(url.pathname===getPath)return mode==='fbp'?WorkerResponse.json({posting:{...posting,status:7,products:posting.products.map(item=>({...item,marketplace_seller_price:{amount:item.price,currency:'RUB'}}))}}):WorkerResponse.json({result:posting});
       throw new Error('Unexpected synthetic network request');
     },
   };
@@ -225,27 +230,27 @@ test('native FBS-only alarms resume an unfinished frozen window after restart', 
     database.prepare("INSERT INTO member (id,organization_id,user_id,role,created_at) VALUES ('member','org','admin','admin',1)"),
     database.prepare("INSERT INTO session (id,token,user_id,expires_at,created_at,updated_at) VALUES ('session','session','admin',?,1,1)").bind(Date.now()+3_600_000),
     database.prepare("INSERT INTO store (id,organization_id,name,platform_store_id,status,credential_key_version,credential_nonce,credential_ciphertext,capabilities,checked_at,expires_at,created_at,updated_at) VALUES ('store','org','Store','123456','verified',?,?,?,?,?,?,1,1)")
-      .bind(envelope.keyVersion,envelope.nonce,envelope.ciphertext,JSON.stringify([{code:'auth',status:'available'},{code:'orders_fbs_read',status:'available'}]),Date.now(),Date.now()+86_400_000),
+      .bind(envelope.keyVersion,envelope.nonce,envelope.ciphertext,JSON.stringify([{code:'auth',status:'available'},{code:`orders_${mode}_read`,status:'available'}]),Date.now(),Date.now()+86_400_000),
   ]);
-  assert.ok(await setSyncSourceEnabled(database as unknown as D1Database,actor,scope.storeId,'fbs_postings',0,true));
+  assert.ok(await setSyncSourceEnabled(database as unknown as D1Database,actor,scope.storeId,source,0,true));
   async function command(op:string){
     const response=await mf.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op,name:JSON.stringify([scope.orgId,scope.storeId]),scope})});
     assert.equal(response.status,200);return response.json();
   }
   await command('cron');
   const firstDeadline=Date.now()+8_000;
-  while(Date.now()<firstDeadline && await database.prepare('SELECT cursor FROM fbs_sync_window').first('cursor')!=='frozen-next')await delay(25);
-  const checkpoint=await database.prepare('SELECT since,"to",cursor FROM fbs_sync_window').first<{since:number;to:number;cursor:string}>();
+  while(Date.now()<firstDeadline && await database.prepare(`SELECT cursor FROM ${mode}_sync_window`).first('cursor')!=='frozen-next')await delay(25);
+  const checkpoint=await database.prepare(`SELECT since,"to",cursor FROM ${mode}_sync_window`).first<{since:number;to:number;cursor:string}>();
   assert.equal(checkpoint?.cursor,'frozen-next');
   await mf.dispose();mf=new Miniflare(options);database=await mf.getD1Database('DB');
   await command('cron');
   const completedDeadline=Date.now()+10_000;
-  while(Date.now()<completedDeadline && (await database.prepare('SELECT last_completed_to FROM fbs_sync_window').first('last_completed_to')!==checkpoint!.to || await database.prepare('SELECT detail_facts FROM fbs_posting').first('detail_facts')===null))await delay(25);
-  assert.equal(await database.prepare('SELECT last_completed_to FROM fbs_sync_window').first('last_completed_to'),checkpoint!.to);
-  const lists=requests.filter(request=>request.path==='/v4/posting/fbs/list');assert.equal(lists.length,2);
+  while(Date.now()<completedDeadline && (await database.prepare(`SELECT last_completed_to FROM ${mode}_sync_window`).first('last_completed_to')!==checkpoint!.to || await database.prepare(`SELECT detail_facts FROM ${mode}_posting`).first('detail_facts')===null))await delay(25);
+  assert.equal(await database.prepare(`SELECT last_completed_to FROM ${mode}_sync_window`).first('last_completed_to'),checkpoint!.to);
+  const lists=requests.filter(request=>request.path===listPath);assert.equal(lists.length,2);
   assert.deepEqual(lists[0].body.filter,lists[1].body.filter);assert.equal(lists[1].body.cursor,'frozen-next');
-  assert.equal(JSON.parse((await database.prepare('SELECT detail_facts FROM fbs_posting').first<string>('detail_facts'))!).products[0].price,'1530.0000');
-  assert.equal(await database.prepare("SELECT count(*) FROM store_sync_source WHERE source<>'fbs_postings'").first('count(*)'),0);
-  assert.ok(await setSyncSourceEnabled(database as unknown as D1Database,actor,scope.storeId,'fbs_postings',1,false));
+  assert.equal(JSON.parse((await database.prepare(`SELECT detail_facts FROM ${mode}_posting`).first<string>('detail_facts'))!).products[0].price,'1530.0000');
+  assert.equal(await database.prepare(`SELECT count(*) FROM store_sync_source WHERE source<>'${source}'`).first('count(*)'),0);
+  assert.ok(await setSyncSourceEnabled(database as unknown as D1Database,actor,scope.storeId,source,1,false));
   await command('wake');assert.equal(await command('inspect'),null);
 });

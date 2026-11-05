@@ -13,7 +13,7 @@ import {createPolicy,changePolicy} from '../../src/modules/reply-policies/storag
 import {conversationControlFixture} from '../fixtures/conversation-control.ts';
 
 async function fixture(){
- const f=await conversationControlFixture(undefined,{aiEnabled:'true'}),policyId=crypto.randomUUID();
+ const f=await conversationControlFixture(undefined,{}),policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
   await f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('customer-1','org','store','conv','1','Customer','inbound','[\"Мне нужен человек.\"]',0,0,1,1,'incremental')").run();

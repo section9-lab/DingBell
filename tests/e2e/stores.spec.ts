@@ -126,7 +126,7 @@ test('read-only checks display partial access and keep temporary provider failur
   expect(states).toMatchObject({ auth: 'available', products_read: 'available', chats_read: 'denied', orders_fbs_read: 'available', reply: 'unknown', proactive_chat: 'unknown' });
   await expect(page.getByText('部分能力可用', { exact: true })).toBeVisible();
   await expect(page.getByText('权限不足', { exact: true })).toBeVisible();
-  expect(application.storeRequests.map(item => item.path).sort()).toEqual(['/v1/roles', '/v3/chat/list', '/v3/product/list', '/v4/posting/fbs/list']);
+  expect(application.storeRequests.map(item => item.path).sort()).toEqual(['/v1/roles', '/v3/chat/list', '/v3/posting/fbo/list', '/v3/product/list', '/v4/posting/fbs/list']);
   expect(application.storeRequests.every(item => item.method === 'POST')).toBe(true);
   const evidence = fileURLToPath(new URL('../../test-results/stage2e-2026-10-09/', import.meta.url));
   await mkdir(evidence, { recursive: true });
@@ -219,10 +219,10 @@ test('a committed credential change with a lost acknowledgement is reread withou
   expect(application.storeRequests).toEqual([]);
 });
 
-test('pause and disconnect retain store history while suppressing checks and deleting saved credentials', async ({ page, application }) => {
+test('pause preserves credentials while explicit credential deletion removes them without deleting history', async ({ page, application }) => {
   await openStores(page, application);
   const store = await addStore(page, application);
-  for (const [label, status] of [['暂停连接', 'paused'], ['恢复连接', 'unverified'], ['断开连接', 'disconnected']] as const) {
+  for (const [label, status] of [['暂停连接', 'paused'], ['恢复连接', 'unverified'], ['删除凭证', 'disconnected']] as const) {
     await page.getByRole('button', { name: label, exact: true }).click();
     const dialog = page.getByRole('dialog', { name: label, exact: true });
     await dialog.getByRole('button', { name: `确认${label}`, exact: true }).click();

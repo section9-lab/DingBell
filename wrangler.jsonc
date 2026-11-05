@@ -7,16 +7,8 @@
   "vars": {
     "OUTBOUND_ENABLED": "false",
     "TRANSLATION_ENABLED": "false",
-    "REPLY_TEST_ENABLED": "false",
-    "AI_RECEPTION_ENABLED": "false",
-    "AI_OUTBOUND_ENABLED": "false",
-    "KNOWLEDGE_INDEXING_ENABLED": "false",
-    "KNOWLEDGE_VECTOR_CLEANUP_ENABLED": "false"
+    "AI_OUTBOUND_ENABLED": "false"
   },
-  "workflows": [
-    { "binding": "KNOWLEDGE_WORKFLOW", "name": "dingbell-knowledge-index", "class_name": "KnowledgeIndexWorkflow" },
-    { "binding": "KNOWLEDGE_REVIEW_WORKFLOW", "name": "dingbell-knowledge-review", "class_name": "KnowledgeReviewWorkflow" }
-  ],
   "durable_objects": {
     "bindings": [
       { "name": "PI_AGENT", "class_name": "PiAgentObject" },

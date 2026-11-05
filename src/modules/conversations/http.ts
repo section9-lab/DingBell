@@ -5,6 +5,8 @@ import { findStore, type StoreActor } from '../stores/storage.ts';
 import { findConversation, InvalidConversationCursor, listConversations, listMessages, listMessageUpdates } from './read.ts';
 import type { ConversationListOptions, ConversationQueue, ConversationStateFilter, ConversationSummary, MessagePreview, MessageView } from './read-types.ts';
 import { readMessageContext } from './context.ts';
+import { readMessageImage, MessageImageUnavailable } from './images.ts';
+import type { StoreDependencies } from '../stores/bindings.ts';
 
 const path='/api/companies/:companyId/conversations';
 const notFound=(c:Context<ApplicationEnv>)=>apiError(c,'NOT_FOUND','The company, store or conversation is not available.',404);
@@ -36,12 +38,25 @@ function invalid(c:Context<ApplicationEnv>,error:unknown){
   throw error;
 }
 
-export function registerConversationRoutes(app:Hono<ApplicationEnv>){
+export function registerConversationRoutes(app:Hono<ApplicationEnv>, deps: StoreDependencies = {}){
+  app.get(`${path}/:id/messages/:messageId/images/:index`,configured,signedIn,async c=>{
+    const actor=await actorFor(c);if(!actor)return notFound(c);
+    try {
+      query(c,[]);
+      const index=c.req.param('index')!;
+      if(!/^(0|[1-9][0-9]{0,2})$/.test(index))return notFound(c);
+      const result=await readMessageImage(c.env.DB!,c.env,actor,c.req.param('id')!,c.req.param('messageId')!,Number(index),deps.storeFetch,c.req.raw.signal);
+      return result??notFound(c);
+    }catch(error){
+      if(error instanceof MessageImageUnavailable)return apiError(c,'MESSAGE_IMAGE_UNAVAILABLE','The image could not be read from the store. Try again later.',502);
+      return invalid(c,error);
+    }
+  });
   app.get(`${path}/:id/messages/:messageId/context`,configured,signedIn,async c=>{
     const actor=await actorFor(c);if(!actor)return notFound(c);
     try {
       const parameters=query(c,['afterPosting']);
-      const result=await readMessageContext(c.env.DB!,actor,c.req.param('id')!,c.req.param('messageId')!,value(parameters,'afterPosting'));
+      const result=await readMessageContext(c.env.DB!,actor,c.req.param('id')!,c.req.param('messageId')!,value(parameters,'afterPosting',260));
       return result?jsonResponse(c,result):notFound(c);
     }catch(error){return invalid(c,error);}
   });
@@ -51,9 +66,9 @@ export function registerConversationRoutes(app:Hono<ApplicationEnv>){
       const parameters=query(c,['storeId','searchField','search','queue','state','cursor','limit']);
       const storeId=value(parameters,'storeId'),field=value(parameters,'searchField'),search=value(parameters,'search');
       const queue=value(parameters,'queue')??'all',state=value(parameters,'state')??'all';
-      if((field===undefined)!==(search===undefined)||field!==undefined&&!['thread','order'].includes(field))throw new RangeError('Invalid search.');
+      if(field!==undefined&&(search===undefined||!['thread','order'].includes(field)))throw new RangeError('Invalid search.');
       if(!['all','mine','unassigned'].includes(queue)||!['all','needs_reply','waiting_customer','waiting_internal','resolved'].includes(state))throw new RangeError('Invalid queue or state.');
-      const options:ConversationListOptions={...paging(parameters),storeId,queue:queue as ConversationQueue,state:state as ConversationStateFilter,...(field&&search?{search:{field:field as 'thread'|'order',value:search}}:{})};
+      const options:ConversationListOptions={...paging(parameters),storeId,queue:queue as ConversationQueue,state:state as ConversationStateFilter,...(search?{search:{field:(field??'all') as 'all'|'thread'|'order',value:search}}:{})};
       if(storeId&&!await findStore(c.env.DB!,actor,storeId,false))return notFound(c);
       const result=await listConversations(c.env.DB!,actor,options);
       return result?jsonResponse(c,{companyId:actor.orgId,viewerMemberId:result.viewerMemberId,counts:result.counts,

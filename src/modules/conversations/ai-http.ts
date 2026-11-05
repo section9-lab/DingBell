@@ -2,8 +2,9 @@ import type {Context,Hono} from 'hono';
 import * as v from 'valibot';
 import {apiError,jsonResponse,type ApplicationEnv} from '../../http.ts';
 import {configured,limitedBody,signedIn} from '../identity/http.ts';
+import {diagnoseAiReceptionBlocker} from './ai-listening.ts';
 import {aiReceptionCommandSchema,aiReceptionSchema} from '../../shared/ai-reception.ts';
-import {supportConfigurationView} from '../ai-runs/configuration.ts';
+import {companySupportConfigurationView} from '../company-model/runtime.ts';
 import {selectAiBudget} from '../ai-runs/budget.ts';
 import {getConversationController} from './control-bindings.ts';
 import {ensureControlDirectory,readControlAccess} from './control-storage.ts';
@@ -48,14 +49,19 @@ export function registerAiReceptionRoutes(app:Hono<ApplicationEnv>){
    if(method==='post'&&parsed?.success){
     if(read.receipt&&read.receipt.expectedVersion!==parsed.output.expectedVersion)return apiError(c,'COMMAND_CONFLICT','Keep the original command and expected version when recovering its result.',409);
     if(!read.receipt){
-     const config=supportConfigurationView(c.env);
+     const config=await companySupportConfigurationView(c.env,actor.orgId);
      if(!config.enabled)return apiError(c,'AI_DISABLED','Automatic reception is disabled for this deployment.',403);
      if(!config.modelConfigured||!config.pricesConfigured||config.runReservationMicros===null)return apiError(c,'AI_NOT_CONFIGURED','A reviewed model, pricing configuration and runtime are required.',503);
      if(!await selectAiBudget(c.env.DB!,scope,config.runReservationMicros))return apiError(c,'AI_BUDGET_UNAVAILABLE','An enabled production budget with sufficient full-run allowance is required.',412);
      const result=await controller.resumeAiReception(scope,actor,parsed.output);
      if(result.outcome==='not_found')return missing();
      if(result.outcome==='conflict')return apiError(c,'CONVERSATION_CHANGED','Refresh the conversation before choosing another operation.',409);
-     if(result.outcome==='unavailable')return apiError(c,'AI_RECEPTION_UNAVAILABLE','Check published policies and channel availability, and wait for any prior execution to close.',412);
+     if(result.outcome==='unavailable'){
+      const blocker=await diagnoseAiReceptionBlocker(c.env.DB!,scope);
+      if(blocker==='policy_draft_only')return apiError(c,'AI_POLICY_DRAFT_ONLY','The published policy only drafts replies. Switch its reply mode to automatic, then publish the new revision.',412);
+      if(blocker==='policy_missing')return apiError(c,'AI_POLICY_UNPUBLISHED','No published automatic reply policy covers this store and stage.',412);
+      return apiError(c,'AI_RECEPTION_UNAVAILABLE','Check published policies and channel availability, and wait for any prior execution to close.',412);
+     }
      read=await controller.readAiReception(scope,actor,commandId);if(read.outcome!=='found')return missing();
      if(!read.receipt)throw new Error('RESUMPTION_UNCONFIRMED');
     }

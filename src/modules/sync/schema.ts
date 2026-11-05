@@ -11,7 +11,7 @@ export const storeCoordinator = sqliteTable('store_coordinator', {
   uniqueIndex('store_coordinator_scope_unique').on(table.storeId,table.organizationId),
   check('store_coordinator_fence_valid',sql`${table.fence}>=0`),
   check('store_coordinator_lease_complete',sql`(${table.leaseSource} IS NULL AND ${table.leaseToken} IS NULL AND ${table.leaseUntil} IS NULL)
-    OR (${table.leaseSource} IS NOT NULL AND ${table.leaseSource} IN ('chat','products','fbs_postings') AND ${table.leaseToken} IS NOT NULL AND ${table.leaseUntil} IS NOT NULL)`),
+    OR (${table.leaseSource} IS NOT NULL AND ${table.leaseSource} IN ('chat','products','fbs_postings','fbo_postings','fbp_postings') AND ${table.leaseToken} IS NOT NULL AND ${table.leaseUntil} IS NOT NULL)`),
 ]);
 
 export const storeSyncSource = sqliteTable('store_sync_source', {
@@ -24,6 +24,6 @@ export const storeSyncSource = sqliteTable('store_sync_source', {
   foreignKey({columns:[table.storeId,table.organizationId],foreignColumns:[storeCoordinator.storeId,storeCoordinator.organizationId]}).onDelete('cascade'),
   uniqueIndex('store_sync_source_scope_unique').on(table.storeId,table.organizationId,table.source),
   index('store_sync_source_due_idx').on(table.enabled,table.dueAt,table.storeId),
-  check('store_sync_source_valid',sql`${table.source} IN ('chat','products','fbs_postings')`),
+  check('store_sync_source_valid',sql`${table.source} IN ('chat','products','fbs_postings','fbo_postings','fbp_postings')`),
   check('store_sync_source_counters_valid',sql`${table.epoch}>=0 AND ${table.failures}>=0`),
 ]);

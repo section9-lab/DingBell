@@ -10,8 +10,11 @@ export { context };
 export { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
 export const providerId = 'dingbell-controlled';
 export async function openAgent(storage: Storage, definition: AgentDefinition, authority: AgentAuthority, onWake?: HarnessOptions['onWake']): Promise<Harness> {
-  const base = nvidiaProvider(), original = base.getModels().find(model => model.id === definition.modelId) ?? (definition.modelId === legacyNemotron.id ? legacyNemotron : undefined);
-  if (!original || original.baseUrl !== 'https://integrate.api.nvidia.com/v1') throw new Error('AGENT_MODEL_UNSUPPORTED');
+  const base = nvidiaProvider(), custom = definition.modelConnection;
+  const original = custom ? { ...legacyNemotron, id: definition.modelId, name: definition.modelId, baseUrl: custom.baseUrl,
+    headers: undefined, reasoning: false, cost: custom.cost, contextWindow: custom.contextWindow, maxTokens: definition.maxOutputTokens }
+    : base.getModels().find(model => model.id === definition.modelId) ?? (definition.modelId === legacyNemotron.id ? legacyNemotron : undefined);
+  if (!original || (!custom && original.baseUrl !== 'https://integrate.api.nvidia.com/v1')) throw new Error('AGENT_MODEL_UNSUPPORTED');
   const model = { ...original, provider: providerId };
   const models = createModels();
   models.setProvider({ ...base, id: providerId, getModels: () => [model],
@@ -21,7 +24,7 @@ export async function openAgent(storage: Storage, definition: AgentDefinition, a
       if (selected.id !== model.id || selected.provider !== providerId || selected.baseUrl !== original.baseUrl) throw new Error('AGENT_MODEL_UNSUPPORTED');
       return base.streamSimple(model, transcript, { ...options, maxRetries: 0, maxTokens: definition.maxOutputTokens,
         timeoutMs: 45_000, temperature: 1,
-        samplingParams: { tool_choice: definition.tools.length ? 'auto' : 'none', parallel_tool_calls: false, chat_template_kwargs: { enable_thinking: false } },
+        samplingParams: { tool_choice: definition.tools.length ? 'auto' : 'none', parallel_tool_calls: false, ...(custom ? {} : { chat_template_kwargs: { enable_thinking: false } }) },
         fetch: async (input, init) => {
           const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
           if (init?.method !== 'POST' || typeof init.body !== 'string') throw new Error('AGENT_REQUEST_UNSUPPORTED');

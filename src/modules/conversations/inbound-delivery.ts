@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import type {SyncScope} from '../sync/types.ts';
 import {getConversationController} from './control-bindings.ts';
 import {reconcileConversationAi,type SupportBindings} from '../ai-runs/execution.ts';
 import type {ControlScope} from './control-types.ts';
@@ -7,12 +8,12 @@ const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(86400000000000
 const claimSchema=v.strictObject({eventId:id,organizationId:id,storeId:id,conversationId:id,token:v.pipe(v.string(),v.uuid())});
 export type InboundClaim=v.InferOutput<typeof claimSchema>;
 /** Reuse the ingest outbox; expired delivery leases never imply that the controller rejected a message. */
-export async function claimInboundEvents(db:D1Database,now:number,limit=50):Promise<InboundClaim[]>{
+export async function claimInboundEvents(db:D1Database,now:number,limit=50,scope?:SyncScope):Promise<InboundClaim[]>{
  v.parse(time,now);v.parse(v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(50)),limit);const token=crypto.randomUUID();
  const rows=await db.prepare(`UPDATE ingest_event SET delivery_due_at=?,delivery_token=? WHERE id IN
-  (SELECT id FROM ingest_event WHERE state='pending' AND processed_at IS NULL AND delivery_due_at<=? ORDER BY delivery_due_at,created_at,id LIMIT ?)
+  (SELECT id FROM ingest_event WHERE state='pending' AND processed_at IS NULL AND delivery_due_at<=? ${scope?'AND organization_id=? AND store_id=?':''} ORDER BY delivery_due_at,created_at,id LIMIT ?)
   RETURNING id AS eventId,organization_id AS organizationId,store_id AS storeId,conversation_id AS conversationId`)
-  .bind(now+60000,token,now,limit).all<Omit<InboundClaim,'token'>>();
+  .bind(now+60000,token,now,...(scope?[scope.orgId,scope.storeId]:[]),limit).all<Omit<InboundClaim,'token'>>();
  return rows.results.map(row=>v.parse(claimSchema,{...row,token}));
 }
 export async function finishInboundEvent(db:D1Database,value:InboundClaim,outcome:'accepted'|'ignored',now:number,enqueueAi:boolean|'active_only'=false){
@@ -44,9 +45,9 @@ async function directory(db:D1Database,claim:InboundClaim):Promise<ControlScope|
  ]);
  return results[1]!.results[0] as unknown as ControlScope??null;
 }
-export async function deliverInboundEvents(env:SupportBindings){
+export async function deliverInboundEvents(env:SupportBindings,scopeFilter?:SyncScope){
  if(!env.DB||!env.CONVERSATION_CONTROLLER)return;
- const claims=await claimInboundEvents(env.DB,Date.now());
+ const claims=await claimInboundEvents(env.DB,Date.now(),50,scopeFilter);
  for(let offset=0;offset<claims.length;offset+=5)await Promise.allSettled(claims.slice(offset,offset+5).map(async claim=>{
   const scope=await directory(env.DB!,claim);if(!scope)return;
   let timer:ReturnType<typeof setTimeout>|undefined;
@@ -54,7 +55,7 @@ export async function deliverInboundEvents(env:SupportBindings){
    await Promise.race([(async()=>{
     const result=await getConversationController(env,scope.controllerId).receiveInbound(scope,claim.eventId);
     if(result.outcome!=='accepted'&&result.outcome!=='ignored')return;
-    await finishInboundEvent(env.DB!,claim,result.outcome,Date.now(),env.AI_RECEPTION_ENABLED==='true'&&(env.FLUE_SUPPORT_AGENT||env.AGENT_RUNTIME)?true:'active_only');
+    await finishInboundEvent(env.DB!,claim,result.outcome,Date.now(),(env.FLUE_SUPPORT_AGENT||env.AGENT_RUNTIME)?true:'active_only');
     // Revocation is already durable. Historical executions also have an independent repair cursor.
     if(result.outcome==='accepted')await reconcileConversationAi(env,scope);
    })(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('INBOUND_DELIVERY_TIMEOUT')),3000);})]);

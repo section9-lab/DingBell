@@ -44,8 +44,20 @@ test('historical, outbound, unverified-live and older deliveries cannot reopen o
  const older=await append(f,{at:Date.now()-1000}),newer=await append(f);const accepted=await receive(f,newer);assert.equal(accepted.state.version,3);assert.equal((await receive(f,older)).outcome,'ignored');
  assert.equal((await f.call('inbound',{eventId:newer},{...f.scope,organizationId:'other'})).body.outcome,'unavailable');assert.equal((await f.call('read')).body.view.state.version,3);
 });
+test('platform bot or outbound copies after customer input never block that input from reaching AI',{timeout:30000},async t=>{
+ const f=await conversationControlFixture();t.after(f.close);await command(f,0,'claim');
+ const buyer=await append(f);
+ const botId=crypto.randomUUID();
+ await f.db.batch([
+  f.db.prepare(`INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode)
+   VALUES(?,'org','store','conv',?,'ChatBot','unknown','["bot copy"]',0,0,?,?,'incremental')`).bind(botId,`bot:${buyer}`,Date.now()+1000,Date.now()+1000),
+  f.db.prepare(`INSERT INTO ingest_event(id,schema_version,organization_id,store_id,conversation_id,message_id,state,live_observed_at,trace_id,created_at)
+   VALUES(?,1,'org','store','conv',?,'observed',?,'synthetic',?)`).bind(crypto.randomUUID(),botId,Date.now()+1000,Date.now()+1000),
+ ]);
+ const result=await receive(f,buyer);assert.equal(result.outcome,'accepted');assert.equal(result.state.workStatus,'needs_reply');
+});
 test('a resumed AI converts fresh input to one durable target and human control revokes that target',{timeout:30000},async t=>{
- const f=await conversationControlFixture(undefined,{aiEnabled:'true'});t.after(f.close);const policyId=await policy(f);
+ const f=await conversationControlFixture(undefined,{});t.after(f.close);const policyId=await policy(f);
  const resumed=await f.call('ai-listen',{actor:{...f.actor(),expectedMemberId:'owner-member'},request:{commandId:crypto.randomUUID(),expectedVersion:0,previousRunId:null}});assert.equal(resumed.body.outcome,'accepted');
  const messageId=await append(f),results=await Promise.all(Array.from({length:4},()=>receive(f,messageId)));assert.ok(results.every(r=>r.outcome==='accepted'));assert.ok(results.every(r=>r.state.version===2));assert.equal((await f.call('ai-listening')).body,null);
  const target=(await f.call('ai-pending-input')).body;assert.equal(target.event.messageId,messageId);assert.equal(target.controlEpoch,results[0].state.controlEpoch);assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);
@@ -55,7 +67,7 @@ test('a resumed AI converts fresh input to one durable target and human control 
  await command(f,4,'takeover');assert.equal((await f.call('ai-pending-input')).body,null);const replay=await receive(f,secondId);assert.equal(replay.state.reception,'human');assert.equal(replay.state.version,5);assert.equal((await f.call('ai-pending-input')).body,null);assert.equal(f.providerRequests.length,0);
 });
 test('input received before explicit resumption cannot become its pending AI target',{timeout:30000},async t=>{
- const f=await conversationControlFixture(undefined,{aiEnabled:'true'});t.after(f.close);await policy(f);const id=await append(f);
+ const f=await conversationControlFixture(undefined,{});t.after(f.close);await policy(f);const id=await append(f);
  assert.equal((await f.call('ai-listen',{actor:{...f.actor(),expectedMemberId:'owner-member'},request:{commandId:crypto.randomUUID(),expectedVersion:0,previousRunId:null}})).body.outcome,'accepted');
  assert.equal((await receive(f,id)).outcome,'ignored');assert.equal((await f.call('ai-pending-input')).body,null);assert.ok((await f.call('ai-listening')).body);
  await command(f,1,'resolve');await f.restart();assert.equal((await receive(f,id)).outcome,'ignored');assert.equal((await f.call('read')).body.view.state.version,2);
@@ -64,7 +76,7 @@ test('new input on a paused conversation keeps initial admission available witho
  const f=await conversationControlFixture();t.after(f.close);const result=await receive(f,await append(f));assert.equal(result.state.controlEpoch,0);assert.equal(result.state.reception,'paused');assert.equal((await f.call('ai-pending-input')).body,null);
 });
 test('late delivery of an input already admitted to the active AI run does not restart that run',{timeout:30000},async t=>{
- const f=await conversationControlFixture(undefined,{aiEnabled:'true'});t.after(f.close);const policyId=await policy(f),messageId=await append(f),runId=crypto.randomUUID();
+ const f=await conversationControlFixture(undefined,{});t.after(f.close);const policyId=await policy(f),messageId=await append(f),runId=crypto.randomUUID();
  assert.equal((await f.call('ai-start',{request:{runId,expectedVersion:0,messageId,policyId,stage:'presale',language:'ru'}})).body.outcome,'accepted');
  const result=await receive(f,messageId);assert.equal(result.outcome,'ignored');assert.equal(result.state.version,1);assert.equal((await f.call('ai-pending-input')).body,null);assert.ok((await f.call('ai-read',{runId})).body);
  await command(f,1,'resolve');await f.restart();assert.equal((await receive(f,messageId)).outcome,'ignored');assert.equal((await f.call('read')).body.view.state.version,2);
@@ -76,7 +88,7 @@ test('inbound receipt survives projection failure and restart, and its transacti
  await assert.rejects(()=>projectControlEvents(f.db,f.scope,[{scope:f.scope,receipt:{...result.receipt,event:{...result.receipt.event,scope:{...f.scope,organizationId:'other'}}}}],Date.now()),/SCOPE_MISMATCH/);
 });
 test('replacement input cannot rotate an unclosed execution ledger or reuse an unrelated message',{timeout:30000},async t=>{
- const f=await conversationControlFixture(undefined,{aiEnabled:'true'});t.after(f.close);const policyId=await policy(f),messageId=await append(f),runId=crypto.randomUUID();
+ const f=await conversationControlFixture(undefined,{});t.after(f.close);const policyId=await policy(f),messageId=await append(f),runId=crypto.randomUUID();
  assert.equal((await f.call('ai-start',{request:{runId,expectedVersion:0,messageId,policyId,stage:'presale',language:'ru'}})).body.outcome,'accepted');
  const budgetId=crypto.randomUUID(),startsAt=Math.floor(Date.now()/86400000)*86400000;
  assert.equal((await changeAiBudget(f.db,{...f.actor(),expectedMemberId:'owner-member'},{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:2000000,maxRuns:10})).outcome,'applied');

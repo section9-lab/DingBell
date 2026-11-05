@@ -6,10 +6,13 @@ import { companyFor, configured, limitedBody, signedIn } from '../identity/http.
 import { storeDTO } from '../stores/http.ts';
 import { findStore, type StoreActor } from '../stores/storage.ts';
 import { getProductCounts } from '../products/storage.ts';
-import { getFbsCounts } from '../orders/storage.ts';
+import { getFbsCounts, getFboCounts,getFbpCounts } from '../orders/storage.ts';
 import { syncConfigured, wakeStoreSync } from './bindings.ts';
+import { canEnableSync, syncCapabilityErrorCode } from './capability.ts';
 import { getStoreSync, getSyncSource, setStoreSyncEnabled, setSyncSourceEnabled } from './storage.ts';
 import type { StoreSyncRecord, SyncSourceRecord } from './types.ts';
+import {readPostingHistory} from '../orders/history.ts';
+import {registerOrderHistoryRoutes} from '../orders/history-http.ts';
 
 const path = '/api/companies/:companyId/stores/:storeId/sync';
 const changeSchema = v.strictObject({ enabled: v.boolean(), expectedEpoch: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER)) });
@@ -28,24 +31,26 @@ function syncDTO(state: SyncView, acknowledged?: SyncSourceRecord) {
     blockedUntil: current.blockedUntil !== null && current.blockedUntil > 0 ? new Date(current.blockedUntil).toISOString() : null,
     lastError: current.lastError, failures: current.failures,
     running: current.leaseUntil !== null && current.leaseUntil > Date.now(),
-    ...('postingCount' in state ? { source: 'fbs_postings', postingCount: state.postingCount, readyCount: state.readyCount, pendingCount: state.pendingCount, failedCount: state.failedCount,
+    ...('postingCount' in state ? { source: current.source, postingCount: state.postingCount, readyCount: state.readyCount, pendingCount: state.pendingCount, failedCount: state.failedCount,
       historyStart: state.historyStart === null ? null : new Date(state.historyStart).toISOString(),
       windowSince: state.windowSince === null ? null : new Date(state.windowSince).toISOString(),
       windowTo: state.windowTo === null ? null : new Date(state.windowTo).toISOString(),
-      lastCompletedTo: state.lastCompletedTo === null ? null : new Date(state.lastCompletedTo).toISOString() }
+      lastCompletedTo: state.lastCompletedTo === null ? null : new Date(state.lastCompletedTo).toISOString(),...('history' in state?{history:state.history}:{}) }
       : 'productCount' in state ? { source: 'products', productCount: state.productCount, readyCount: state.readyCount, pendingCount: state.pendingCount, failedCount: state.failedCount }
       : { conversationCount: state.conversationCount, messageCount: state.messageCount }),
   };
 }
 
 export function registerSyncRoutes(app: Hono<ApplicationEnv>) {
-  for (const source of ['chat', 'products', 'fbs_postings'] as const) {
-    const endpoint = source === 'chat' ? path : `${path}/${source === 'products' ? 'products' : 'fbs-postings'}`;
+  registerOrderHistoryRoutes(app);
+  for (const source of ['chat', 'products', 'fbs_postings', 'fbo_postings','fbp_postings'] as const) {
+    const endpoint = source === 'chat' ? path : `${path}/${source === 'products' ? 'products' : source==='fbs_postings'?'fbs-postings':source==='fbo_postings'?'fbo-postings':'fbp-postings'}`;
     async function readState(c: Context<ApplicationEnv>, actor: StoreActor, storeId: string): Promise<SyncView | null> {
       if (source === 'chat') return getStoreSync(c.env.DB!, actor, storeId);
       const current = await getSyncSource(c.env.DB!, actor, storeId, source);
-      const counts = current && await (source === 'products' ? getProductCounts : getFbsCounts)(c.env.DB!, actor, storeId);
-      return current && counts ? { ...current, ...counts } : null;
+      const counts = current && await (source === 'products' ? getProductCounts : source==='fbs_postings'?getFbsCounts:source==='fbo_postings'?getFboCounts:getFbpCounts)(c.env.DB!, actor, storeId);
+      if(!current||!counts)return null;
+      return {...current,...counts,...(source==='fbs_postings'||source==='fbo_postings'||source==='fbp_postings'?{history:await readPostingHistory(c.env.DB!,actor,storeId,source)}:{})};
     }
     app.get(endpoint, configured, signedIn, async c => {
       const state = await readState(c, actorFor(c), c.req.param('storeId')!);
@@ -64,9 +69,8 @@ export function registerSyncRoutes(app: Hono<ApplicationEnv>) {
       if (enabled && !syncConfigured(c.env)) return apiError(c, 'SYNC_NOT_CONFIGURED', 'Configure the synchronization runtime and credential encryption first.', 503);
       if (enabled) {
         const view = storeDTO(store);
-        const capability = source === 'chat' ? 'chats_read' : source === 'products' ? 'products_read' : 'orders_fbs_read';
-        if (!view.hasCredentials || !['verified', 'partial'].includes(view.status) || !['auth', capability].every(code => view.capabilities.some(item => item.code === code && item.status === 'available'))) {
-          return apiError(c, source === 'chat' ? 'SYNC_CAPABILITY_REQUIRED' : source === 'products' ? 'PRODUCT_SYNC_CAPABILITY_REQUIRED' : 'FBS_SYNC_CAPABILITY_REQUIRED', 'Verify current credential and resource access before enabling synchronization.', 409);
+        if (!canEnableSync(view, source)) {
+          return apiError(c, syncCapabilityErrorCode(source), 'Verify current credential and resource access before enabling synchronization.', 409);
         }
       }
       const record = async (outcome: AuditOutcome) => {

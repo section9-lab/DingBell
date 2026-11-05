@@ -1,5 +1,7 @@
 # DingBell 实施进度与验证记录
 
+**2026-11-04 当前补充：** 首轮生产加固已覆盖 Node 显式并发边界、商品货源最终 SQL 授权、全目录 FTS5 文本检索、旧发布证明兼容、预算/价格失败关闭及退役记录归档。最终完整本地单元/模块回归为 1148/1148（无失败、无跳过，Node 24.22.1），另有便携浏览器 15 项、编译 Cloudflare 浏览器 1 项、编译产物/native 集成 14 项及升级 20 项通过；范围与限制见[首轮记录](16-production-hardening.md)，具体结果以实际执行日志为准。本补充不改写下文历史结果，也不表示历史浏览器全集、真实模型/平台、灾难恢复或生产容量已验收。
+
 更新日期：2026-10-11。对应方案：0.2。当前阶段：**6B-20 已完成本地 AI 共享发送链路并合并到 main；R12-1 已补跨账本只读核对，R12-2 已收口回归，R12-3 已补 Gateway 嵌入结算，R12-4 已补翻译/问答测试的持久费用修复，R12-5 已补持久账本核对状态和受限页面告警，R12-6 已补公司异常汇总、退避和本地积压边界；R09-1—4 已完成受控转人工资料处理；R14-1—4 已完成会话/公司日志、全部组合筛选和冻结业务时间线；R15-1/2 已完成两类 CSV；R16-1 已新增 100,000 行作业数据库状态机与可选私有 R2 适配；R17 已完成基础分析与公开口径；R18-1 已补独立自部署、贡献、升级、排障和锁定许可证清单骨架；R20-1 已公开数据治理现状并固定删除失败关闭；R19-1 已并列公开技术 claims 与确认 AI 外发意图；R21-1 已交付全产品只读降级状态合同；R22-1 已补真实 D1 文件备份升级、旧/新恢复和密钥轮换矩阵；R23-1 已增加 10,000 会话/100,000 消息本地容量夹具；R06-1 已新增旧知识向量清理状态机；R07-1 已扩大双语检索语料并增加 10,000 文档目录夹具；R10-1 已新增主动通知调度和发送前失败关闭合同；新增严格限制为 local D1 的随机密码演示账号命令。真实 Gateway/供应商发票、外部通知及生产规模核对，以及真实模型、平台与云端整阶段验收仍未完成。** 历史分批结果保留在下文，R09 最终范围见第 94—97 节。
 
 用户已同意持续按计划实施和校验，无需逐批询问是否继续；6B-20 保存后曾暂停，现按用户要求恢复。第 6—14 节保留早期独立云端探针、真实 Ozon 读取及模型验证；第 16—25 节为身份、店铺和只读消息中心；后续人工消息中心、知识、预算与 AI 链路以对应分批记录为准。业务日志、一键部署及真实环境完整验收继续待办，不将本地合成验证记为生产放行。
@@ -3142,3 +3144,101 @@ Cloudflare 最新真云检查使用全新 D1、全部 54 份迁移、实际 Pi W
 20 个浏览器场景均已通过，采用完整运行及定向复跑：完整运行 16 通过、4 失败；其中两项夹具冷启动未到健康状态，一项为上述手机布局问题，一项为过时的身份复核断言。冷启动健康等待独立为 60 秒、夹具准备为 90 秒，UI 操作测试仍为 60 秒，没有配置自动重试。首轮定向复跑 3 通过、身份顺序断言仍失败；最终列表先行与身份先行两项均通过。该旧断言假设身份复核卸载工作区并丢弃分页，但第 128 节已经改用 Activity 保留状态；现两种顺序都验证旧成员游标返回 400、旧计数隐藏、显式返回第一页后仅展示新成员范围，后续队列筛选与撤权断言继续执行，没有为此修改产品权限逻辑。
 
 最终检查：根/前端 TypeScript、Node 与 Cloudflare 生产构建、前端合同 182/182、产物隔离 11/11、六组锁文件许可证与发布结构均通过。无独立 Lint 命令；完成差异空白检查及新增代码的类型、组件复用和依赖审阅。本轮没有重做后端全量或真云部署，也没有启用仍待安装验收的部署按钮。截图使用真实本地应用与合成数据，输出到忽略的 `test-results/ui-polish/`。
+
+## 131. 会话面板只留 AI 托管（2026-10-31）
+
+会话面板重写为“一条托管状态 + 可选回复编辑器”。`conversation-control-panel.tsx` 只读取 `GET /control` 并用 `claim`/`takeover` 取消托管，不再渲染认领、转交、解决、备注、日志与时间线；`ai-reception-control.tsx` 收敛为「开启 AI 托管」按钮，保留 `ai-resumptions` 的命令编号、本机 pending 记录、丢失回执后的核对与显式重试，并保证在 AI 已生效时仍能核对旧操作。`conversation-reply-composer.tsx` 重写为原文输入、可选俄语翻译、直接发送：有非空原文即出现发送按钮，译文非空时发送译文并携带 `previewRequestId`，不再有预览确认弹窗、最近发送、取消发送、恢复草稿和 AI 草稿。
+
+删除不再可达的 `conversation-notes-dialog`、`conversation-activity-dialog`、`conversation-timeline-dialog`、`conversation-handoff-brief`、`conversation-ai-draft`、`conversation-reply-cancel`、`reply-test-panel`。这些入口对应的服务端命令、HTTP 合同和 `tests/integration/conversation-control.test.ts`（45 项）保持不变。
+
+验证：根与前端 TypeScript 通过；`src/web/lib` 合同 187/187；重写后的 `tests/e2e/ai-reception-ui.spec.ts` 5/5（托管切换、丢失回执恢复、原始编号重试、部署未启用、版本被后续操作隔离）；另用真实本地应用验证“取消托管后翻译并发送译文”“不翻译直接发送原文”两条路径，发送请求分别为俄语译文与中文原文。未运行完整 `npm test`（长时后台任务被系统终止），也未迁移仍引用旧入口的 8 个浏览器用例，故本轮不声称完整回归通过。
+
+## 132. 能力与数据总览（2026-11-01）
+
+新增 `src/modules/readiness/http.ts`（`GET /api/companies/:companyId/readiness`，只读）与 `src/web/pages/capabilities.tsx`（`/workspace/capabilities`）。接口返回部署开关元数据（`OUTBOUND`/`TRANSLATION`/`REPLY_TEST`/`AI_RECEPTION`/`AI_OUTBOUND`/`KNOWLEDGE_*`，模型与价格是否就绪）、各店铺四类同步的 `enabled/epoch/lastError/lastSuccessAt/blockedUntil/running/canEnable`、知识发布数与已启用策略数；不返回凭证、消息正文或用量明细。`src/modules/sync/capability.ts` 抽出「凭证 + `auth` + 目标资源只读能力」判定，`sync/http.ts` 的启用校验改为复用，界面使用同一函数显示按钮可用性。
+
+前端总览页把同步开关放到一处（复用既有 `POST .../sync` 与 `expectedEpoch`），并与 8 项接待准备、6 个部署变量并列展示；店铺详情底部过期文案改为指向该页。部署开关仍不可在界面切换。
+
+验证：根与前端 TypeScript 通过；`src/web/lib` 191/191；`tests/integration/sync.test.ts` 5/5；`tests/e2e/capabilities.spec.ts` 通过；`npm run build:node` 产物包含新页面。未运行完整 `npm test` 与完整 e2e 套件，`stores.spec.ts`、`sync.spec.ts` 的既有失败不在本轮范围内。
+
+## 133. 会话同步不再自我饱和（2026-11-01）
+
+`runSyncPage` 的历史页续期改为 `historyDueIn(hasNext, messageCount)`：未读完 1 秒，本页有新消息 60 秒，没有新消息 900 秒；`getDueSyncCursor` 的排序改为 discovery → `backfill` → `incremental`，让新会话先导入首屏；`commitSyncPage` 在发现页提交后追加一条更新：若 `conversation.last_message_id` 与 `sync_cursor.cursor` 不一致，就把该会话的增量任务提前到当前时刻。这样新消息由发现页触发而不是靠每会话高频轮询，常驻平台请求从约 172 页/分钟降到 6–10 页/分钟。
+
+同时修正列表摘要：`summaryColumns` 从「取正文第一段」改为「取第一个非空段落」，`previewTruncated` 按非空段落数与 280 字符上限判定。Ozon 的咨询消息常带空引导段（`["", "Здравствуйте! …"]`），旧逻辑会让会话列表只剩「买家：…」。
+
+验证：TypeScript 通过；`tests/sync-storage.test.ts` 29/29、`tests/sync-runner.test.ts` 15/15、`tests/integration/sync.test.ts` 5/5、`tests/conversations-read.test.ts` 14/14。真实数据：修复前 87 个任务超时、最老迟到 515 秒、新会话 4 分钟仍未导入消息；修复后队列排空至 3 个，买家咨询入库并在消息中心显示正文。
+
+## 134. 移除 AI 接待部署开关（2026-11-01）
+
+删除 `AI_RECEPTION_ENABLED`。此前它是一道分布式部署总闸，虽然模型、密钥、价格全部来自「公司设置 > AI 模型」（写入 `company_ai_model_revision`），但只要它不为准确的 `true`，点「开启 AI 托管」就固定返回 403 `AI_DISABLED`，界面上无法解除——页面底部「当前部署未开启 AI 接待」正是同一变量。现在接待能力只由模型配置本身决定：保存了可用连接即可用，缺价格、缺预算、缺已发布策略仍分别以 503 `AI_NOT_CONFIGURED`、412 `AI_BUDGET_UNAVAILABLE`、412 `AI_RECEPTION_UNAVAILABLE` 拒绝，自动发送仍受 `AI_OUTBOUND_ENABLED`、`OUTBOUND_ENABLED` 与店铺外发权限四重约束。
+
+改动覆盖 16 个文件 31 处判定：HTTP 入口（`company-model/runtime.ts` 的 `enabled` 现等于 `modelConfigured` 与提示词外发规则之积）、Durable Object 授权层（`controller-core.ts` 七处）、模型调用（`provider.ts`）、草稿写入（`answer.ts`）、知识检索（`knowledge.ts`）、调度与入站投递（`dispatch.ts`、`inbound-delivery.ts`）、Agent 运行时（`authority.ts` 按 kind 分支，support 恒为允许）、降级视图、能力总览与两处部署配置示例。`supportConfigurationView` 的 `enabled` 改为 `modelConfigured` 与提示词规则之积，缺价格时走 `catch` 分支返回 `false`，避免「没配模型也算已启用」。`AI_DISABLED`、`AI_NOT_CONFIGURED` 的界面文案改为指向「公司设置 > AI 模型」，「能力与数据」页的 AI 托管行不再依赖 `enabled` 分支。
+
+测试同步调整：以开关为前提的场景改用仍然存在的闸门（模型未配置、预算停用/不足、`DB` 缺失、`FLUE_SUPPORT_AGENT` 缺失）；`ai-runtime`、`ai-send-pipeline` 等处的开关循环收敛为两个出站开关；`conversation-control` 夹具删除 `aiEnabled` 选项，`restart` 首参保留为被忽略的兼容参数，避免大范围改写调用点。
+
+验证：`tsc --noEmit`（根 + web）通过；`npm test` 1214 通过、8 失败，逐项修复后 `tests/ai-*.test.ts`、`company-model`、`node-support` 199/199 通过，`tests/integration/ai-handoff.test.ts`、`ai-listening.test.ts`、`ai-runs`、`ai-intake` 44/44 通过。`tests/integration/ai-runtime.test.ts` 在本机夹具启动阶段失败（子进程 vite 拉不起 health 端点），在同一工作区回退改动后结果相同，判定为环境问题而非本次回归。
+
+## 135. 消息显示平台已读标记（2026-11-01）
+
+`message.is_read` 自会话同步起就已入库，但读取层从未取出：`readMessagePage` 的候选查询不选该列，`MessageView` 不含该字段，`tests/conversations-http.test.ts` 还断言 DTO 里没有 `isRead`。现按“展示平台已提供的数据、不制造本地未读”的口径把它透出：`read.ts` 在候选查询中选 `message.is_read AS isRead`，`MessageView` 增加 `isRead: boolean`，`messageDTO` 沿用展开自动带出；前端 `messageSchema` 增加 `v.boolean()`，消息气泡底部在“平台时间”之后显示“平台已读/平台未读”。
+
+`isRead` 只是导入时保存的平台标记：读取不重新请求平台、不回写、不因打开会话改变；界面对商家与买家消息使用同一句中性的“平台已读/平台未读”，不推断是谁读的。会话列表摘要与按成员的本地未读计数都不包含它，本地未读仍未实现，`docs/02-architecture.md` 中“不返回本地未读假状态”的约束继续成立，并在 11.3D 补了口径说明。
+
+验证：`tsc --noEmit`（根 + `src/web`）通过；`tests/conversations-http.test.ts`、`tests/conversations-read.test.ts`、`src/web/lib/conversations-api.test.ts`、`src/web/lib/conversation-message-window.test.ts` 合计 37/37；`tests/e2e/conversations.spec.ts` 的导入用例新增 3 条“平台未读”断言并通过。另用临时 Node 适配器用例（已删除）播种读/未读各一条消息并截图核对排版，右侧与左侧气泡的页脚对齐正常。
+
+## 136. 会话列表改显示买家标识与回复归属状态（2026-11-01）
+
+列表首行原为店铺名，同一店铺下所有会话看着完全一样。Ozon 的 `/v3/chat/list` 与 `/v3/chat/history` 只返回 `user.id`/`user.type`，没有买家姓名，`docs/02-architecture.md` 也明确不解析买家姓名，因此改为显示平台标识而不是编造姓名：`summaryColumns` 增加 `buyerSenderId`（该会话最近一条带 `sender_id` 的入站消息，同一 SQL 取得，无入站消息为 null），`ConversationSummary`、`summary()`、HTTP DTO 与前端 `summaryFields`（`v.nullable(id)`）同步增加该字段。界面显示「买家 …末四位」，无入站消息回退为「会话 …平台会话 ID 末四位」，完整 ID 放 title；店铺名移到状态行，与新状态、负责人同列。
+
+状态文案改为待商家回复、待用户回复、待内部处理、已解决，同时更新分析页 `currentBacklog` 的排除项说明。只改显示文案，`needs_reply`/`waiting_customer`/`waiting_internal`/`resolved` 枚举、`state` 查询参数、workflow 投影与 DO 控制契约均未改变，历史数据不需要迁移。
+
+验证：`tsc --noEmit`（根 + `src/web`）通过；`tests/conversations-http.test.ts`（新增 `buyerSenderId` 与空会话为 null 的断言）、`tests/conversations-read.test.ts`（摘要白名单加入 `buyerSenderId`，检索到的大整数入站 `sender_id`）、`tests/conversations-queue-read.test.ts`、`src/web/lib/conversations-api.test.ts` 合计 41/41；`tests/analytics.test.ts` 2/2。另用临时 Node 适配器用例（已删除）播种三个会话截图核对：首行标识、状态徽标、店铺名与「未分配」同列显示不重叠，筛选下拉为新的四项文案。
+
+## 137. 商品资料增加可编辑的货源与采购价（2026-11-01）
+
+商品页此前只有 Ozon 只读快照，内部采购成本无处记录。现新增公司自有表 `product_sourcing`（`0059_product_sourcing.sql`，主键 `store_id`+`product_id`，随 `product` 级联删除），字段为货源、采购价、币种、更新时间和更新人。它与 `product`/`product_source_snapshot` 完全分离：记录成本既不写回平台，也不会被下一次商品重扫覆盖；清空两项即删除该行，商品恢复“未填写”。
+
+写入走 `POST /api/companies/:companyId/commerce/products/:productId/sourcing`（`limitedBody` + 严格对象），要求公司所有者或管理员，并照旧校验 session 与店铺可见范围；货源 trim 后 1–200 字符且不含控制字符，采购价必须是大于 0 的十进制（最多 10 位整数、4 位小数），币种为 3 位大写代码，价格与币种必须同时提供或同时为空。commerce 商品列表/详情 DTO 增加 `sourcing` 投影（`supplySource`、`purchasePrice`、`purchaseCurrency`、`updatedAt`、`updatedByName`），通过 `product_sourcing` 与 `user` 左连接取得，未记录时为 null。
+
+界面：列表新增「货源 / 采购价」列，所有者和管理员点击单元格打开编辑对话框，成员只读看到「未填写」；详情卡片新增「货源与采购价」区块，可直接编辑货源、采购价与币种，显示最近更新人和时间，并可清除记录。保存后失效商品列表与详情查询，页面提示「已保存」。
+
+验证：`tests/commerce-http.test.ts` 新增用例覆盖首写、列表/详情回读、覆盖写不新增行、价格与币种耦合、格式与超长拒绝、成员 403、跨公司 404、跨店铺 404 与清空删除，全文件 6/6；`tests/products-storage.test.ts`、`tests/products-runner.test.ts`、`src/web/lib/commerce-api.test.ts` 26/26；`tests/knowledge-product-import.test.ts`、`tests/product-sku-migration.test.ts` 与 `src/web/lib/*.test.ts` 202/202；`tsc --noEmit`（根与 `src/web`）均通过。本地 D1 应用 `0059` 后用演示账号实测：列表列、对话框保存、列表回显「1688 · 义乌星原玩具厂 / 38.50 CNY」、详情区块显示「最近更新 2026/11/01 · 本地演示管理员」。全程未调用任何平台写接口。
+
+## 137. 修复订单中心迁移丢失表约束名称（2026-11-01）
+
+完整单元测试 `npm test` 为 1231/1232，唯一失败是 `tests/sync-storage.test.ts:283`：它断言裸 UPDATE 半截租约时 SQLite 报出 `store_coordinator_lease_complete`，实际拿到的是 CHECK 表达式原文。原因是订单中心那批手写迁移重建 `store_coordinator`、`store_sync_source`、`sync_cursor`、`posting_history_sync` 时把 drizzle 风格的命名约束写成了匿名 `CHECK(...)`，SQLite 因此只回显表达式，约束名这一层可观察契约被静默丢掉。
+
+按既有命名（`0055_order_center.sql` 重建前的 `store_coordinator_fence_valid`、`store_coordinator_lease_complete`、`store_sync_source_valid`、`store_sync_source_counters_valid`、`sync_cursor_*`）恢复，并给 0057/0058 新建的 `posting_history_sync` 与 FBP 三张表补上 `posting_history_*`、`fbp_posting_*`、`fbp_observation_*`、`fbp_window_*` 约束名。约束表达式本身、列、索引、外键和触发器都没有变化，只补名称，不改变任何校验行为。
+
+0057/0058 尚未提交，也没有对应的 drizzle 元数据快照（`migrations/meta` 只到 0053），因此直接改原文而不追加一条仅重命名的迁移；已经本地应用过旧 0058 的开发库不会自动改名，重建一次本地库即可，云端尚未执行这两个迁移。
+
+验证：`tests/sync-storage.test.ts` 29/29；`tests/orders-fbp.test.ts`、`tests/orders-fbo.test.ts`、`tests/orders-history.test.ts`、`tests/sync-storage.test.ts`、`tests/sync-runner.test.ts`、`tests/conversation-work-status-migration.test.ts`、`tests/product-sourcing.test.ts` 合计 61/61。
+
+## 133. AI 接待取消价格与预算门槛（2026-11-01）
+
+产品决定：AI 接待不再要求先核实价格或维护预算，保存公司模型连接即可用。
+
+- 价格可选：`resolveSupportConfiguration` 不再因 `company_ai_model_revision.execution` 为空返回 null；缺省使用 0 单价与 131072/2048 的 token 包络，因此预留金额为 0、结算记 0，不推测真实价格。`companySupportConfigurationView` 的 `pricesConfigured`/`runReservationMicros` 随之恒为可用值。前端移除「高级设置：价格与执行限额」表单；已保存的 execution 在再次保存时原样保留，不再被清空。
+- 预算不再拦截准入：`selectAiBudget` 在无可用预算时回退到每公司一条 `ai-unbounded-<orgId>` 兜底预算（启用、窗口 0–8640000000000000、额度 9007199254740991 微美元、上限 1000000 次），D1 触发器 `ai_budget_overlap` 与 API 重叠校验、预算列表均忽略该保留编号，因此商家仍可创建自己的预算而不冲突。`AI_BUDGET_UNAVAILABLE` 的 412 分支实际不再触发，`ai-http.ts` 的配置分支保留。
+- 降级页改为读取公司模型视图（此前读部署环境变量，与实际接待能力脱节），状态收敛为 `configuration_unavailable` / `available`，不再产生 `budget_unavailable`。设置页预算区块仅保留「策略测试用量预算」，AI 接待预算面板移除。
+- 新增迁移 `0060_ai_unbounded_budget.sql`（重建重叠触发器）；本地库在下次启动时自动应用。
+- 验证见下条记录；已知代价：无价格时 `ai_generation.charged_micros` 恒为 0，预算与用量台账不再是真实成本来源。
+
+## 138. 货源补充采购链接（2026-11-01）
+
+货源记录只能写供应商名称，无法回看采购页面。`product_sourcing` 增加可选列 `purchase_url`（`0061_product_sourcing_url.sql`，`ALTER TABLE … ADD COLUMN` 带长度 CHECK），详情表单在「货源」下方新增「采购链接」输入框，填好后右侧出现「打开」按钮（`target=_blank` + `rel="noreferrer noopener"`）；商品列表的操作列对已填链接的商品多一个「采购页」链接。
+
+校验按纵深防御处理：后端 valibot 要求 trim 后长度 ≤2048、形如 `http(s)://非空白`、`new URL` 能解析出 hostname 且不含用户名密码，前端 `linkProblem()` 给出同样的即时提示；空字符串一律归一为 null。链接与价格、货源相互独立，三者全空才删除整行，因此只填链接也是合法记录。DTO 增加 `purchaseUrl`，仍与平台快照隔离。
+
+验证：`tests/commerce-http.test.ts` 全 6/6，其中来源用例扩展到 13 种非法输入（`javascript:`、缺协议、带账号密码、超长、含空格），并覆盖「只填链接」与「全清空删除」；`tsc --noEmit`（根与 `src/web`）通过；重新 `npm run build:node` 后用本地演示账号实测：详情页「采购链接 → 打开」、保存回显 `https://detail.1688.com/offer/620000000001.html`、列表首行出现「采购页」。
+
+## 138. 会话首行改完整平台标识并识别「sender id 其实是订单号」（2026-11-01）
+
+上一节按 `buyerSenderId` 后四位显示「买家 …9708」，用户指出那不是用户名。用本店真实凭证只读核对：`/v3/chat/list` 只返回 `chat_id/chat_status/chat_type/created_at`，`/v3/chat/history` 的 `user` 只有 `id`/`type`，`/v3/posting/fbs/get` 的 `customer`、`addressee` 在本店样本里都是 null。也就是说 Ozon Seller API 没有买家姓名可显示，任何「用户名」都只能来自平台标识。
+
+核对同时发现一个更实际的问题：Ozon 有时把**订单号本身**当 `user.id` 返回（消息 `sender_id=86910324`，同一条消息的 `order_number=86910324-0074`）。这类值当买家 ID 展示会误导。
+
+改法：摘要查询里把 `buyerSenderId` 子查询改成 `json_object('senderId',...,'orderNumber',...)`，`orderNumber` 仅当 `order_number` 以 `sender_id || '-'` 开头时取值，仍是同一次索引查找。`ConversationSummary` 增加 `buyerOrderNumber`，HTTP DTO 与前端 `summaryFields`（`v.nullable(id)`）同步。界面按 `buyerOrderNumber` → `buyerSenderId` → `platformThreadId` 依次显示「订单 86910324-0074」「买家 294329708」「会话 <平台会话 ID>」，完整标识直接展示（容器 `truncate` 截断），完整值放 title；不再截取后四位。
+
+验证：`tsc --noEmit`（根 + `src/web`）通过；`tests/conversations-read.test.ts` 新增「sender id 是订单号时报告为订单」「同一条消息的无关订单号不算」两条断言，与 `conversations-http`、`conversations-queue-read`、前端合同合计 42/42；`src/web/lib/*.test.ts` 193/193。用 Node 适配器播种三条会话（纯买家 ID、订单号型 ID、无消息）截图核对：首行分别为「买家 294329708」「订单 86910324-0074」「会话 acf4a862-…」，旧的「…后四位」不再出现，第三行 UUID 由容器截断且时间列不被挤压。

@@ -89,6 +89,15 @@ export default {
         await env.DB.batch(input.statements.map((sql:string)=>env.DB.prepare(sql)));
         return Response.json({ok:true});
       }
+      if(input.op==='fixture-migrate-many') {
+        // Keep each migration in its original D1 transaction, but avoid one
+        // Node-to-workerd RPC for every migration file.
+        for (const migration of input.migrations as {name:string;statements:string[]}[]) {
+          try { await env.DB.batch(migration.statements.map(sql=>env.DB.prepare(sql))); }
+          catch (error) { return Response.json({migration:migration.name,error:String(error)},{status:500}); }
+        }
+        return Response.json({ok:true});
+      }
       if(input.op==='cron') {
         const actualDB=env.DB;
         const repairs:string[]=[],wakes:string[]=[];

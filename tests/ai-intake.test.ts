@@ -6,10 +6,10 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {conversationControlFixture} from './fixtures/conversation-control.ts';
 import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.ts';
 import {changeAiBudget,reserveAiExecution,readAiExecution,bindAiExecutionReceipt,claimAiGeneration,settleAiGeneration,closeAiExecution} from '../src/modules/ai-runs/storage.ts';
-const intakeConfig={maxGenerations:1,model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'intake-v1',maxInputTokens:100,maxOutputTokens:100,
+const intakeConfig={maxGenerations:1,model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'intake-v1',maxInputTokens:100,maxOutputTokens:100,
  pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}}};
 async function fixture(through?:string,aiTimeoutMs=60000){
- const f=await conversationControlFixture(through,{aiEnabled:'true',aiTimeoutMs}),policyId=crypto.randomUUID();
+ const f=await conversationControlFixture(through,{aiTimeoutMs}),policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
   const config={kind:'automatic' as const,name:'All stages',storeIds:['store'],priority:50,stages:['presale' as const,'order' as const,'aftersale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:'merchant data'};

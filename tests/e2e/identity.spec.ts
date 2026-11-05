@@ -1,5 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { startLocalApplication } from '../fixtures/web-identity/local-app.ts';
+import { signOut } from './support/session.ts';
 
 type LocalApplication = Awaited<ReturnType<typeof startLocalApplication>>;
 const test = base.extend<{ application: LocalApplication; configured: boolean }>({
@@ -98,7 +99,7 @@ test('one pending sign-in leads through company selection, switching, refresh an
     await expect(page.getByText('测试公司 B', { exact: true }).first()).toBeVisible();
     const active = await page.request.get(`${application.baseURL}/api/companies`);
     expect((await active.json()).activeCompanyId).toBe('company-b');
-    await page.getByRole('button', { name: '退出登录', exact: true }).click();
+    await signOut(page);
     await expect(page).toHaveURL(`${application.baseURL}/login`);
     await expect(page.getByLabel('密码', { exact: true })).toBeEmpty();
     expect((await page.request.get(`${application.baseURL}/api/companies`)).status()).toBe(401);

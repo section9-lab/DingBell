@@ -1,4 +1,4 @@
-export const capabilityCodes = ['auth', 'products_read', 'chats_read', 'orders_fbs_read', 'reply', 'proactive_chat'] as const;
+export const capabilityCodes = ['auth', 'products_read', 'chats_read', 'orders_fbs_read', 'orders_fbo_read', 'orders_fbp_read', 'reply', 'proactive_chat'] as const;
 export type CapabilityCode = typeof capabilityCodes[number];
 export interface StoreCapability {
   code: CapabilityCode;
@@ -69,8 +69,10 @@ export async function inspectOzonCapabilities(credentials: { clientId: string; a
       check('products_read', '/v3/product/list', { filter: { visibility: 'ALL' }, last_id: '', limit: 1 }, 'items'),
       check('chats_read', '/v3/chat/list', { limit: 1 }, 'chats'),
       check('orders_fbs_read', '/v4/posting/fbs/list', { filter: { since: new Date(now.getTime() - 7 * 86_400_000).toISOString(), to: now.toISOString() }, limit: 1 }, 'postings'),
+      check('orders_fbo_read', '/v3/posting/fbo/list', { filter: { since: new Date(now.getTime() - 7 * 86_400_000).toISOString(), to: now.toISOString() }, limit: 1 }, 'postings'),
+      check('orders_fbp_read','/v1/posting/fbp/list',{filter:{since:new Date(now.getTime()-7*86_400_000).toISOString(),to:now.toISOString()},sort_by:'in_process_at',sort_dir:'ASC',limit:1},'postings'),
     ]);
-    results.splice(1, 3, ...reads);
+    results.splice(1, 5, ...reads);
     return results;
   } finally { clearTimeout(timer); }
 }

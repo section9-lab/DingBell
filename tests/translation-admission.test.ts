@@ -18,7 +18,9 @@ const actor:TranslationActor={orgId:'org',actorUserId:'staff',sessionId:'staff-s
 const input:Omit<TranslationInput,'budgetId'>={requestId:'request',storeId:'store',conversationId:'conv',expectedMemberId:'staff-member',source:'  请确认尺寸。\r\n谢谢。 ',sourceRevision:3};
 
 test('deployment translation configuration is default closed and requires every explicitly reviewed price',()=>{
-  for(const value of [{},{...env,TRANSLATION_ENABLED:'false'},{...env,TRANSLATION_ENABLED:'TRUE'},{...env,TRANSLATION_CONFIG_JSON:undefined},{...env,TRANSLATION_CONFIG_JSON:'{'}])assert.equal(readTranslationDeploymentConfig(value),null);
+  for(const value of [{},{...env,TRANSLATION_ENABLED:'false'},{...env,TRANSLATION_ENABLED:'TRUE'},{...env,TRANSLATION_CONFIG_JSON:'{'}])assert.equal(readTranslationDeploymentConfig(value),null);
+  assert.equal(readTranslationDeploymentConfig({...env,TRANSLATION_CONFIG_JSON:undefined}),null);
+  assert.equal(readTranslationDeploymentConfig({...env,TRANSLATION_CONFIG_JSON:''}),null);
   for(const field of ['inputMicrosPerMillion','outputMicrosPerMillion','cacheReadMicrosPerMillion','cacheWriteMicrosPerMillion'] as const){
     const pricing={...config.pricing,[field]:undefined};assert.equal(readTranslationDeploymentConfig({...env,TRANSLATION_CONFIG_JSON:JSON.stringify({...config,pricing})}),null);
   }
@@ -78,10 +80,10 @@ test('admission replays frozen requests before reading changed deployment settin
     assert.equal((await admitTranslationPreview(f.db,actor,{...input,expectedMemberId:'new-member'},env)).outcome,'conflict');
   }finally{await f.close();}
 });
-test('admission fails closed before reservation for disabled deployment, invalid config or no single current bucket',{timeout:30_000},async()=>{
+test('admission fails closed for disabled deployment, invalid config or an ambiguous budget window',{timeout:30_000},async()=>{
   const f=await fixture();try{
     assert.equal((await admitTranslationPreview(f.db,actor,input,{})).outcome,'disabled');
-    for(const bad of [{TRANSLATION_ENABLED:'true'},{...env,TRANSLATION_CONFIG_JSON:'{'},{...env,TRANSLATION_CONFIG_JSON:JSON.stringify({...config,maxInputTokens:contextWindow-1})}])
+    for(const bad of [{...env,TRANSLATION_CONFIG_JSON:'{'},{...env,TRANSLATION_CONFIG_JSON:JSON.stringify({...config,maxInputTokens:contextWindow-1})}])
       assert.equal((await admitTranslationPreview(f.db,actor,input,bad)).outcome,'not_configured');
     assert.equal((await admitTranslationPreview(f.db,actor,input,env)).outcome,'budget_unavailable');
     await fund(f.db);
@@ -92,6 +94,24 @@ test('admission fails closed before reservation for disabled deployment, invalid
     assert.equal(await f.db.prepare('SELECT SUM(reserved_micros) AS n FROM translation_budget_bucket').first('n'),0);
     await assert.rejects(admitTranslationPreview(f.db,actor,{...input,source:''},env),/INVALID_TRANSLATION_INPUT/);
     await assert.rejects(admitTranslationPreview(f.db,actor,{...input,budgetId:'budget'} as typeof input,env),/INVALID_TRANSLATION_INPUT/);
+  }finally{await f.close();}
+});
+test('explicitly reviewed free translation reuses its zero-cost ledger without inventing prices',{timeout:30_000},async()=>{
+  const f=await fixture();try{
+    const zero={TRANSLATION_ENABLED:'true',TRANSLATION_CONFIG_JSON:JSON.stringify({...config,pricing:{...config.pricing,inputMicrosPerMillion:0,outputMicrosPerMillion:0,cacheReadMicrosPerMillion:0,cacheWriteMicrosPerMillion:0}})};
+    const first=await admitTranslationPreview(f.db,actor,input,zero);
+    assert.equal(first.outcome,'reserved');assert.ok('run' in first);
+    assert.equal(first.run.budgetId,'translation-zero:org');assert.equal(first.run.reservedMicros,0);
+    assert.equal((await admitTranslationPreview(f.db,actor,input,zero)).outcome,'existing');
+    assert.deepEqual(await f.db.prepare("SELECT enabled,limit_micros AS budget,reserved_micros AS reserved FROM translation_budget_bucket WHERE id='translation-zero:org'").first(),
+      {enabled:1,budget:0,reserved:0});
+    assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM translation_budget_bucket').first('n'),1);
+    // 已经存在的计费窗口始终优先，零成本部署不会覆盖它。
+    await f.db.prepare("DELETE FROM reply_preview_run").run();
+    await f.db.prepare("DELETE FROM translation_budget_bucket WHERE id='translation-zero:org'").run();
+    await fund(f.db,'reviewed');
+    assert.equal((await admitTranslationPreview(f.db,actor,{...input,requestId:'priced'},zero)).outcome,'reserved');
+    assert.equal(await f.db.prepare("SELECT id FROM translation_budget_bucket WHERE id='translation-zero:org'").first(),null);
   }finally{await f.close();}
 });
 test('admission retains final transactional authorization after server-side budget selection',{timeout:30_000},async()=>{

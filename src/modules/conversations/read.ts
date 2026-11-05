@@ -4,7 +4,7 @@ import type { ConversationDetail, ConversationListOptions, ConversationListResul
 
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
-const searchSchema=v.strictObject({field:v.picklist(['thread','order']),value:identifier});
+const searchSchema=v.strictObject({field:v.picklist(['all','thread','order']),value:identifier});
 const queueSchema=v.picklist(['all','mine','unassigned']);
 const stateFilterSchema=v.picklist(['all','needs_reply','waiting_customer','waiting_internal','resolved']);
 const listCursorSchema=v.strictObject({v:v.literal(2),kind:v.literal('list'),orgId:identifier,storeId:v.nullable(identifier),search:v.nullable(searchSchema),viewerMemberId:identifier,queue:queueSchema,state:stateFilterSchema,at:v.nullable(timestamp),id:identifier});
@@ -34,9 +34,9 @@ function decodeCursor(value:string):unknown {
 
 interface SummaryRow {
   id:string;storeId:string;storeName:string;storeStatus:ConversationSummary['store']['status'];
-  platformThreadId:string;platformType:string;platformStatus:string;platformCreatedAt:number;importedAt:number;lastMessageAt:number|null;latestMessage:string|null;
+  platformThreadId:string;platformType:string;platformStatus:string;platformCreatedAt:number;importedAt:number;lastMessageAt:number|null;latestMessage:string|null;buyer:string|null;
 }
-interface MessageRow extends Omit<MessageView,'content'|'isImage'> {content:string;isImage:number}
+interface MessageRow extends Omit<MessageView,'content'|'isImage'|'isRead'> {content:string;isImage:number;isRead:number}
 interface ListRow extends SummaryRow {
   viewerMemberId:string;allCount:number;mineCount:number;unassignedCount:number;
   workflowSchemaVersion:number|null;workflowVersion:number|null;workflowLifecycle:string|null;workflowStatus:string|null;assignedMemberId:string|null;assigneeName:string|null;
@@ -45,17 +45,28 @@ const summaryColumns=`conversation.id,store.id AS storeId,store.name AS storeNam
   conversation.platform_thread_id AS platformThreadId,conversation.platform_type AS platformType,conversation.platform_status AS platformStatus,
   conversation.platform_created_at AS platformCreatedAt,conversation.imported_at AS importedAt,conversation.last_message_at AS lastMessageAt,
   (SELECT json_object('id',recent.id,'platformMessageId',recent.platform_message_id,
-    'content',json(CASE WHEN json_array_length(recent.content)=0 THEN '[]' ELSE json_array(substr(json_extract(recent.content,'$[0]'),1,280)) END),
-    'previewTruncated',json_array_length(recent.content)>1 OR length(COALESCE(json_extract(recent.content,'$[0]'),''))>280,'senderId',recent.sender_id,
+    'content',json(CASE WHEN (SELECT count(*) FROM json_each(recent.content) WHERE length(trim(value))>0)=0 THEN '[]'
+      ELSE json_array(substr(json_extract((SELECT json_group_array(value) FROM json_each(recent.content) WHERE length(trim(value))>0),'$[0]'),1,280)) END),
+    'previewTruncated',(SELECT count(*) FROM json_each(recent.content) WHERE length(trim(value))>0)>1
+      OR length(COALESCE(json_extract((SELECT json_group_array(value) FROM json_each(recent.content) WHERE length(trim(value))>0),'$[0]'),''))>280,'senderId',recent.sender_id,
     'senderType',recent.sender_type,'direction',recent.direction,'isImage',recent.is_image,'eventAt',recent.event_at)
    FROM message AS recent WHERE recent.organization_id=conversation.organization_id AND recent.store_id=conversation.store_id AND recent.conversation_id=conversation.id
-   ORDER BY recent.event_at DESC,recent.id DESC LIMIT 1) AS latestMessage`;
+   ORDER BY recent.event_at DESC,recent.id DESC LIMIT 1) AS latestMessage,
+  (SELECT json_object('senderId',inbound.sender_id,
+    'orderNumber',CASE WHEN inbound.order_number IS NOT NULL
+      AND substr(inbound.order_number,1,length(inbound.sender_id)+1)=inbound.sender_id||'-' THEN inbound.order_number ELSE NULL END)
+   FROM message AS inbound WHERE inbound.organization_id=conversation.organization_id
+    AND inbound.store_id=conversation.store_id AND inbound.conversation_id=conversation.id
+    AND inbound.direction='inbound' AND inbound.sender_id IS NOT NULL
+    ORDER BY inbound.event_at DESC,inbound.id DESC LIMIT 1) AS buyer`;
 const fromConversation='FROM conversation JOIN store ON store.id=conversation.store_id AND store.organization_id=conversation.organization_id';
 function summary(row:SummaryRow):ConversationSummary {
   const latest=row.latestMessage===null?null:JSON.parse(row.latestMessage) as Omit<MessagePreview,'isImage'|'previewTruncated'> & {isImage:number;previewTruncated:number};
+  const buyer=row.buyer===null?null:JSON.parse(row.buyer) as {senderId:string;orderNumber:string|null};
   return {id:row.id,store:{id:row.storeId,name:row.storeName,status:row.storeStatus},platformThreadId:row.platformThreadId,platformType:row.platformType,
     platformStatus:row.platformStatus,platformCreatedAt:row.platformCreatedAt,importedAt:row.importedAt,lastMessageAt:row.lastMessageAt,
-    latestMessage:latest===null?null:{...latest,isImage:!!latest.isImage,previewTruncated:!!latest.previewTruncated}};
+    latestMessage:latest===null?null:{...latest,isImage:!!latest.isImage,previewTruncated:!!latest.previewTruncated},
+    buyerSenderId:buyer?.senderId??null,buyerOrderNumber:buyer?.orderNumber??null};
 }
 
 function workflow(row:ListRow):ConversationWorkflow {
@@ -77,7 +88,8 @@ export async function listConversations(db:D1Database,actor:StoreActor,options:C
   if(options.storeId!==undefined){where.push('conversation.store_id=?');values.push(options.storeId);}
   if(options.search){
     if(options.search.field==='thread')where.push('conversation.platform_thread_id=?');
-    else{where.push('conversation.id IN (SELECT matched.conversation_id FROM message AS matched WHERE matched.organization_id=? AND matched.order_number=?)');values.push(actor.orgId);}
+    else if(options.search.field==='order'){where.push('conversation.id IN (SELECT matched.conversation_id FROM message AS matched WHERE matched.organization_id=? AND matched.order_number=?)');values.push(actor.orgId);}
+    else{where.push('(conversation.platform_thread_id=? OR conversation.id IN (SELECT matched.conversation_id FROM message AS matched WHERE matched.organization_id=? AND matched.order_number=?))');values.push(options.search.value,actor.orgId);}
     values.push(options.search.value);
   }
   if(state==='resolved')where.push("control.lifecycle='resolved'");
@@ -156,7 +168,7 @@ async function readMessagePage(db:D1Database,actor:StoreActor,id:string,limit:nu
       WHERE conversation.id=? AND conversation.organization_id=? AND ${storeAccess('store.organization_id',false)}
     ),candidates AS (
       SELECT message.id,message.platform_message_id AS platformMessageId,message.sender_id AS senderId,message.sender_type AS senderType,
-        message.direction,message.content,message.is_image AS isImage,message.event_at AS eventAt,message.received_at AS receivedAt,message.ingest_mode AS ingestMode,
+        message.direction,message.content,message.is_image AS isImage,message.is_read AS isRead,message.event_at AS eventAt,message.received_at AS receivedAt,message.ingest_mode AS ingestMode,
         message.order_number AS orderNumber,message.sku,appended.sequence
       FROM message JOIN visible ON message.conversation_id=visible.id AND message.organization_id=visible.orgId AND message.store_id=visible.storeId
       JOIN message_append AS appended ON appended.message_id=message.id AND appended.conversation_id=visible.id
@@ -181,7 +193,7 @@ async function readMessagePage(db:D1Database,actor:StoreActor,id:string,limit:nu
 }
 function message(row:MessageRow):MessageView {
   return {id:row.id,sequence:row.sequence,platformMessageId:row.platformMessageId,senderId:row.senderId,senderType:row.senderType,direction:row.direction,
-    content:JSON.parse(row.content) as string[],isImage:!!row.isImage,eventAt:row.eventAt,receivedAt:row.receivedAt,ingestMode:row.ingestMode,orderNumber:row.orderNumber,sku:row.sku};
+    content:JSON.parse(row.content) as string[],isImage:!!row.isImage,isRead:!!row.isRead,eventAt:row.eventAt,receivedAt:row.receivedAt,ingestMode:row.ingestMode,orderNumber:row.orderNumber,sku:row.sku};
 }
 export async function listMessages(db:D1Database,actor:StoreActor,id:string,options:MessageListOptions):Promise<MessageListResult|null>{
   checkId(id);checkLimit(options.limit);let cursor:HistoryCursor|undefined;

@@ -11,10 +11,11 @@ import { createTranslationBudget, setTranslationBudgetEnabled } from '../../src/
 test('production Cloudflare Pi adapter executes translation and settles its original receipt exactly once', {timeout:90000},async context=>{
  const directory=await mkdtemp(join(tmpdir(),'dingbell-production-pi-'));let calls=0;
  const config={provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'nvidia-nemotron-super-v1',promptVersion:'ru-translation-v1',maxInputTokens:262144,maxOutputTokens:512,pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}};
- const built=JSON.parse(await readFile('dist/dingbell/wrangler.json','utf8')) as {main:string};
- const modules=await Promise.all((await readdir('dist/dingbell',{recursive:true})).filter(file=>file.endsWith('.js')).map(async file=>({type:'ESModule' as const,path:resolve('dist/dingbell',file),contents:await readFile(resolve('dist/dingbell',file),'utf8')})));
- modules.sort((a,b)=>Number(b.path===resolve('dist/dingbell',built.main))-Number(a.path===resolve('dist/dingbell',built.main)));
- const mf=new Miniflare({modules,modulesRoot:resolve('dist/dingbell'),compatibilityDate:'2026-06-01',compatibilityFlags:['nodejs_compat'],
+ const workerDirectory=resolve(process.env.DINGBELL_TEST_DIST??'dist','dingbell');
+ const built=JSON.parse(await readFile(join(workerDirectory,'wrangler.json'),'utf8')) as {main:string};
+ const modules=await Promise.all((await readdir(workerDirectory,{recursive:true})).filter(file=>file.endsWith('.js')).map(async file=>({type:'ESModule' as const,path:resolve(workerDirectory,file),contents:await readFile(resolve(workerDirectory,file),'utf8')})));
+ modules.sort((a,b)=>Number(b.path===resolve(workerDirectory,built.main))-Number(a.path===resolve(workerDirectory,built.main)));
+ const mf=new Miniflare({modules,modulesRoot:workerDirectory,compatibilityDate:'2026-06-01',compatibilityFlags:['nodejs_compat'],
   bindings:{APP_BASE_URL:'http://localhost',BETTER_AUTH_SECRET:crypto.randomUUID()+crypto.randomUUID(),TRANSLATION_ENABLED:'true',TRANSLATION_CONFIG_JSON:JSON.stringify(config),NVAPI_KEY:'synthetic-never-real'},
   d1Databases:{DB:'portable-runtime'},d1Persist:join(directory,'d1'),durableObjectsPersist:join(directory,'objects'),
   durableObjects:{PI_AGENT:{className:'PiAgentObject',useSQLite:true},CONVERSATION_CONTROLLER:{className:'ConversationController',useSQLite:true},STORE_COORDINATOR:{className:'StoreCoordinator',useSQLite:true}},

@@ -7,7 +7,7 @@
 3. Export/backup D1 and separately retain Worker secrets, credential key versions, Durable Object/Workflow/R2 inventories and external reconciliation checkpoints. D1 Time Travel alone is not a complete system backup.
 4. Record the deployed Worker version, D1 migration list, Durable Object migration tags, bindings, compatibility date and scheduled triggers.
 5. Restore the backup into an isolated installation and run representative reads before touching production.
-6. Build from the locked dependency graph with Node.js 24.14.0 and run `npm run check` plus affected integration tests.
+6. Build from the locked dependency graph with the validated Node 24 line (currently 24.22.x) and run `npm run check` plus affected integration/browser tests.
 
 Never place customer data, database exports or secrets in this repository or CI artifacts without an approved protected retention policy.
 
@@ -16,13 +16,24 @@ Never place customer data, database exports or secrets in this repository or CI 
 DingBell migrations are forward, ordered files. Apply D1 migrations before a Worker that reads new schema. Then deploy the generated Worker containing append-only Durable Object migration tags. Finally verify read-only paths before selectively restoring external switches.
 
 ```sh
-npx wrangler d1 migrations list DB --remote
-npx wrangler d1 migrations apply DB --remote
 npm run build
-npx wrangler deploy --config dist/dingbell/wrangler.json
+npx wrangler d1 migrations list DB --remote --config dist/dingbell/wrangler.json
+npm run deploy:cloudflare
+# Only after quiescing legacy work, backing up and reviewing the inventory:
+# npm run deploy:cloudflare -- --archive-retired
 ```
 
 For each step, capture the command, UTC time, commit, target account/database, sanitized result and reviewer. Do not automatically retry an uncertain deployment or migration without rereading its state.
+
+## Retired subsystem data (0065 / 0067 / 0069)
+
+These historical SQL files are unchanged and contain destructive `DROP TABLE` operations. **Do not bypass the deployment helper with direct `wrangler d1 migrations apply` on an existing installation.** Before dropping known retired tables, the Node migration runner and Cloudflare deploy helper copy original rows to `dingbell_retired_<table>`, record the original table SQL/count in `dingbell_retirement_archive`, and compare counts and row contents in both directions. Read-only triggers reject archive insert/update/delete. Original IDs, financial values, receipts and source JSON are retained, not recreated as empty replacement ledgers.
+
+Node performs preparation and each original migration in the same SQLite transaction under the installation's exclusive writer lock. Cloudflare requires `--archive-retired` when source tables contain rows. Remote preparation freezes source mutations before copying; stop the old deployment's admissions and jobs first. A failed/uncertain remote preparation can leave frozen sources and verified or partial archives even when no migration/upload ran. Preserve that state, inspect migration/archive inventories, and use the approved backup/recovery procedure; never automatically thaw sources, overwrite an archive, or replay pending external work. Archives are database-resident recovery copies, **not an independent backup**.
+
+If 0069 was already applied without this safeguard, the removed financial rows are gone from that database. An additive migration cannot recover them. Retain the current installation, restore an eligible pre-0069 backup/Time Travel export into a separate isolated database, reconcile its original records against later activity, and authorize a recovery plan. Do not claim that creating empty tables or copying unrelated production budgets restores history.
+
+Legacy knowledge revisions/chunks remain in the database. Previously published vector revisions are readable only when their original ready/indexed/tested/publication proofs agree; no new approval timestamp or profile is invented. Missing Markdown is reconstructed from validated `source_json`, not overlapping chunks. Publications without valid original proof require explicit review/republishing. Migration 0071 backfills the derived FTS5 trigram index; source revisions and citation identities remain authoritative.
 
 ## Compatibility rules
 

@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import {latestCanonicalInput,noPushMessageReview} from '../ozon-push/barrier.ts';
 import {aiScopeSchema} from './ai-state.ts';
 import {storedControlStateSchema} from './control-state.ts';
 import type {ControlScope} from './control-types.ts';
@@ -23,8 +24,7 @@ export async function readInboundEvent(db:D1Database,scope:ControlScope,eventId:
   JOIN message_append a ON a.message_id=m.id AND a.organization_id=m.organization_id AND a.store_id=m.store_id AND a.conversation_id=m.conversation_id
   JOIN conversation_control cc ON cc.organization_id=e.organization_id AND cc.store_id=e.store_id AND cc.conversation_id=e.conversation_id
   WHERE cc.controller_id=? AND e.organization_id=? AND e.store_id=? AND e.conversation_id=? AND e.id=? AND e.schema_version=1
-  AND e.state='pending' AND e.live_observed_at IS NOT NULL AND m.direction='inbound' AND m.ingest_mode='incremental'
-  AND NOT EXISTS(SELECT 1 FROM message newer WHERE newer.organization_id=m.organization_id AND newer.store_id=m.store_id AND newer.conversation_id=m.conversation_id
-    AND (newer.event_at>m.event_at OR (newer.event_at=m.event_at AND newer.id>m.id)))`).bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId,eventId).first<Omit<InboundEvent,'scope'>>();
+  AND e.state='pending' AND e.live_observed_at IS NOT NULL AND m.direction='inbound' AND m.ingest_mode='incremental' AND ${noPushMessageReview('m')}
+  AND ${latestCanonicalInput()}`).bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId,eventId).first<Omit<InboundEvent,'scope'>>();
  return row?v.parse(inboundEventSchema,{scope,...row}):null;
 }

@@ -10,14 +10,19 @@ import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.t
 import {ensureControlDirectory} from '../src/modules/conversations/control-storage.ts';
 import {changeAiBudget,reserveAiExecution,readAiExecution} from '../src/modules/ai-runs/storage.ts';
 import {executeAiRun,reconcileAiExecution,aiRunReader} from '../src/modules/ai-runs/execution.ts';
+import {insertCompanyModel} from '../src/modules/company-model/storage.ts';
+import {sealModelKey} from '../src/modules/company-model/security.ts';
+import {resolveSupportConfiguration} from '../src/modules/company-model/runtime.ts';
 
-const config={maxGenerations:1,model:{provider:'nvidia' as const,model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:512,pricing:{version:'synthetic',currency:'USD' as const,inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}}};
-for(const mode of ['handoff','cancel-before-dispatch'] as const)test(`Node Support ${mode} keeps its budget, original execution and tool authority`,{timeout:30000},async context=>{
+const config={maxGenerations:1,model:{provider:'nvidia' as const,model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:512,pricing:{version:'synthetic',currency:'USD' as const,inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}}};
+for(const mode of ['handoff','cancel-before-dispatch','company-model'] as const)test(`Node Support ${mode} keeps its budget, original execution and tool authority`,{timeout:30000},async context=>{
  const directory=await mkdtemp(join(tmpdir(),'dingbell-node-support-'));let calls=0;
- const options:Parameters<typeof createNodeApplication>[0]={dataDirectory:directory,migrationsDirectory:resolve('migrations'),variables:{AI_RECEPTION_ENABLED:'true',NVAPI_KEY:'synthetic-never-real',AI_RECEPTION_CONFIG_JSON:JSON.stringify(config)},providerFetch:async(input,init)=>{
-  assert.equal(String(input),'https://integrate.api.nvidia.com/v1/chat/completions');calls++;
-  const body=JSON.parse(String(init?.body)) as {tools:{function:{name:string}}[]};assert.deepEqual(body.tools.map(tool=>tool.function.name),['request_handoff']);
-  const chunks=[{id:'synthetic',object:'chat.completion.chunk',created:1,model:config.model.model,choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'call-handoff',type:'function',function:{name:'request_handoff',arguments:JSON.stringify({reason:'customer_request',neededInformation:[]})}}]},finish_reason:'tool_calls'}]},{choices:[],usage:{prompt_tokens:24,completion_tokens:12,total_tokens:36}}];
+ const options:Parameters<typeof createNodeApplication>[0]={dataDirectory:directory,migrationsDirectory:resolve('migrations'),variables:{NVAPI_KEY:mode==='company-model'?undefined:'synthetic-never-real',AI_RECEPTION_CONFIG_JSON:JSON.stringify(config),STORE_CREDENTIAL_ACTIVE_KEY:'v1',STORE_CREDENTIAL_KEYS:JSON.stringify({v1:Buffer.alloc(32,5).toString('base64')})},providerFetch:async(input,init)=>{
+  assert.equal(String(input),mode==='company-model'?'https://api.openai.com/v1/chat/completions':'https://integrate.api.nvidia.com/v1/chat/completions');calls++;
+  if(mode==='company-model')assert.equal(new Headers(init?.headers).get('authorization'),'Bearer synthetic-company-key');
+  const body=JSON.parse(String(init?.body)) as {model:string;tools:{function:{name:string}}[]};
+  assert.equal(body.model,mode==='company-model'?'synthetic-customer-model':config.model.model);assert.deepEqual(body.tools.map(tool=>tool.function.name),mode==='company-model'?['request_handoff','search_knowledge','read_knowledge','get_product_context']:['request_handoff']);
+  const chunks=[{id:'synthetic',object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'call-handoff',type:'function',function:{name:'request_handoff',arguments:JSON.stringify({reason:'customer_request',neededInformation:[]})}}]},finish_reason:'tool_calls'}]},{choices:[],usage:{prompt_tokens:24,completion_tokens:12,total_tokens:36}}];
   return new Response(chunks.map(value=>'data: '+JSON.stringify(value)+'\n\n').join('')+'data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
  }};let app=await createNodeApplication(options);
  context.after(async()=>{await app.close();await rm(directory,{recursive:true,force:true});});
@@ -34,6 +39,11 @@ for(const mode of ['handoff','cancel-before-dispatch'] as const)test(`Node Suppo
  assert.equal((await changeAiBudget(db,actor,{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:1000000,maxRuns:10})).outcome,'applied');
  assert.equal((await changeAiBudget(db,actor,{id:crypto.randomUUID(),action:'set_enabled',budgetId,expectedRevision:0,enabled:true})).outcome,'applied');
  const scope=(await ensureControlDirectory(db,actor,'conv',now))!.scope,controller=app.env.CONVERSATION_CONTROLLER!.getByName(scope.controllerId),id=crypto.randomUUID();
+ if(mode==='company-model'){
+  const base='https://api.openai.com/v1',model='synthetic-customer-model',execution={maxInputTokens:32768,maxOutputTokens:512,...config.model.pricing,autoReply:false};
+  const {version:_version,currency:_currency,...limits}=execution;
+  assert.ok(await insertCompanyModel(db,actor,0,base,model,await sealModelKey(app.env,'org',1,base,model,'synthetic-company-key'),limits));
+ }
  const started=await controller.startAi(scope,{runId:id,expectedVersion:0,messageId:'message',policyId,stage:'presale',language:'ru'});assert.equal(started.outcome,'accepted',JSON.stringify(started));
  if(mode==='cancel-before-dispatch'){
   const reserved=await reserveAiExecution(db,aiRunReader(app.env),scope,id,budgetId,config);assert.ok(reserved.run);await app.env.AGENT_RUNTIME!.support.prepare(reserved.run);
@@ -41,6 +51,13 @@ for(const mode of ['handoff','cancel-before-dispatch'] as const)test(`Node Suppo
   const takeover=await controller.execute(scope,actor,{commandId:crypto.randomUUID(),action:'takeover',expectedVersion:1});assert.equal(takeover.outcome,'accepted',JSON.stringify(takeover));
   await reconcileAiExecution(app.env,scope,id);const run=await readAiExecution(db,scope,id);assert.equal(run?.closure?.kind,'unstarted_closed',JSON.stringify(run));assert.equal(calls,0);
  }else{
+  if(mode==='company-model'){
+   const cost=await resolveSupportConfiguration(app.env,'org');assert.ok(cost);assert.equal((await reserveAiExecution(db,aiRunReader(app.env),scope,id,budgetId,cost.config)).outcome,'reserved');
+   const base='https://api.deepseek.com/v1',model='synthetic-next-model';
+   assert.ok(await insertCompanyModel(db,actor,1,base,model,await sealModelKey(app.env,'org',2,base,model,'synthetic-next-key'),{maxInputTokens:32768,maxOutputTokens:512,inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100,autoReply:false}));
+   assert.equal((await resolveSupportConfiguration(app.env,'org'))?.config.model.model,model);
+   assert.equal((await readAiExecution(db,scope,id))?.config.model.connection?.revision,1);
+  }
   let result=await executeAiRun(app.env,scope,id);const deadline=Date.now()+12000;
   while(!['completed','failed'].includes(result.status)&&Date.now()<deadline){await delay(30);result=await executeAiRun(app.env,scope,id);}
   assert.equal(result.status,'completed',JSON.stringify(await readAiExecution(db,scope,id)));assert.equal(calls,1);

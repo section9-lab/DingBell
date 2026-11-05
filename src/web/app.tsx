@@ -37,10 +37,12 @@ const loadTeam = () => import('./pages/team');
 const loadStores = () => import('./pages/stores');
 const loadCompanySettings = () => import('./pages/company-settings');
 const loadKnowledge = () => import('./pages/knowledge');
+const loadCapabilities = () => import('./pages/capabilities');
 const loadReplyPolicies = () => import('./pages/reply-policies');
 const loadMessages = () => import('./pages/messages');
 const loadProducts = () => import('./pages/products');
 const loadOrders = () => import('./pages/orders');
+const loadAccounting = () => import('./pages/accounting');
 const loadActivity = () => import('./pages/activity');
 const loadInvitation = () => import('./pages/invitation');
 const loadWorkspace = () => import('./pages/workspace');
@@ -51,18 +53,20 @@ const TeamPage = lazy(async () => ({ default: (await loadTeam()).TeamPage }));
 const StoresPage = lazy(async () => ({ default: (await loadStores()).StoresPage }));
 const CompanySettingsPage = lazy(async () => ({ default: (await loadCompanySettings()).CompanySettingsPage }));
 const KnowledgePage = lazy(async () => ({ default: (await loadKnowledge()).KnowledgePage }));
+const CapabilitiesPage = lazy(async () => ({ default: (await loadCapabilities()).CapabilitiesPage }));
 const ReplyPoliciesPage = lazy(async () => ({ default: (await loadReplyPolicies()).ReplyPoliciesPage }));
 const MessagesPage = lazy(async () => ({ default: (await loadMessages()).MessagesPage }));
 const ProductsPage = lazy(async () => ({ default: (await loadProducts()).ProductsPage }));
 const OrdersPage = lazy(async () => ({ default: (await loadOrders()).OrdersPage }));
+const AccountingPage = lazy(async () => ({ default: (await loadAccounting()).AccountingPage }));
 const ActivityPage = lazy(async () => ({ default: (await loadActivity()).ActivityPage }));
 const InvitationPage = lazy(async () => ({ default: (await loadInvitation()).InvitationPage }));
 const CompanySelection = lazy(async () => ({ default: (await loadWorkspace()).CompanySelection }));
 const WorkspacePage = lazy(async () => ({ default: (await loadWorkspace()).WorkspacePage }));
 const workspaceLoaders: Record<string, () => Promise<unknown>> = {
   '/workspace/team': loadTeam, '/workspace/stores': loadStores, '/workspace/settings': loadCompanySettings,
-  '/workspace/knowledge': loadKnowledge, '/workspace/reply-policies': loadReplyPolicies, '/workspace/messages': loadMessages,
-  '/workspace/products': loadProducts, '/workspace/orders': loadOrders, '/workspace/activity': loadActivity,
+  '/workspace/knowledge': loadKnowledge, '/workspace/capabilities': loadCapabilities, '/workspace/reply-policies': loadReplyPolicies, '/workspace/messages': loadMessages,
+  '/workspace/products': loadProducts, '/workspace/orders': loadOrders, '/workspace/accounting': loadAccounting, '/workspace/activity': loadActivity,
 };
 function preloadWorkspaceRoute(pathname: string) {
   return Promise.allSettled([loadWorkspace(), workspaceLoaders[pathname]?.() ?? Promise.resolve()]);
@@ -212,9 +216,9 @@ function IdentityPages({
       }}
       logout={logout}
       notice={notice}
-      section={location.pathname === '/workspace/knowledge' ? 'knowledge' : location.pathname === '/workspace/reply-policies' ? 'policies' : location.pathname === '/workspace/settings' ? 'settings' : location.pathname === '/workspace/team' ? 'team' : location.pathname === '/workspace/stores' ? 'stores' : location.pathname === '/workspace/messages' ? 'messages' : location.pathname === '/workspace/products' ? 'products' : location.pathname === '/workspace/orders' ? 'orders' : location.pathname === '/workspace/activity' ? 'activity' : 'home'}
+      section={location.pathname === '/workspace/accounting' ? 'accounting' : location.pathname === '/workspace/capabilities' ? 'capabilities' : location.pathname === '/workspace/knowledge' ? 'knowledge' : location.pathname === '/workspace/reply-policies' ? 'policies' : location.pathname === '/workspace/settings' ? 'settings' : location.pathname === '/workspace/team' ? 'team' : location.pathname === '/workspace/stores' ? 'stores' : location.pathname === '/workspace/messages' ? 'messages' : location.pathname === '/workspace/products' ? 'products' : location.pathname === '/workspace/orders' ? 'orders' : location.pathname === '/workspace/activity' ? 'activity' : 'home'}
     >
-      {location.pathname === '/workspace/knowledge' ? <KnowledgePage company={active} refresh={reset} /> : location.pathname === '/workspace/reply-policies' ? <ReplyPoliciesPage company={active} refresh={reset} /> : location.pathname === '/workspace/settings' ? <CompanySettingsPage /> : location.pathname === '/workspace/team' ? <TeamPage company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/stores' ? <StoresPage company={active} refresh={reset} /> : location.pathname === '/workspace/messages' ? <MessagesPage company={active} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/products' ? <ProductsPage company={active} /> : location.pathname === '/workspace/orders' ? <OrdersPage company={active} /> : location.pathname === '/workspace/activity' ? <ActivityPage company={active} refresh={reset} /> : undefined}
+      {location.pathname === '/workspace/accounting' ? <AccountingPage key={active.id} company={active} /> : location.pathname === '/workspace/capabilities' ? <CapabilitiesPage company={active} refresh={reset} /> : location.pathname === '/workspace/knowledge' ? <KnowledgePage company={active} refresh={reset} /> : location.pathname === '/workspace/reply-policies' ? <ReplyPoliciesPage company={active} refresh={reset} /> : location.pathname === '/workspace/settings' ? <CompanySettingsPage /> : location.pathname === '/workspace/team' ? <TeamPage company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/stores' ? <StoresPage company={active} refresh={reset} /> : location.pathname === '/workspace/messages' ? <MessagesPage company={active} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/products' ? <ProductsPage company={active} /> : location.pathname === '/workspace/orders' ? <OrdersPage company={active} /> : location.pathname === '/workspace/activity' ? <ActivityPage company={active} refresh={reset} /> : undefined}
     </WorkspacePage>
     </CompanySettingsProvider>
   ) : (
@@ -259,9 +263,11 @@ function IdentityPages({
       <Route path="/workspace/settings" element={workspaceView} />
       <Route path="/workspace/reply-policies" element={workspaceView} />
       <Route path="/workspace/knowledge" element={workspaceView} />
+      <Route path="/workspace/capabilities" element={workspaceView} />
       <Route path="/workspace/messages" element={workspaceView} />
       <Route path="/workspace/products" element={workspaceView} />
       <Route path="/workspace/orders" element={workspaceView} />
+      <Route path="/workspace/accounting" element={workspaceView} />
       <Route path="/workspace/activity" element={workspaceView} />
       <Route path="/invite/:id" element={<InvitationPage identity={data} reset={reset} logout={logout} />} />
       <Route

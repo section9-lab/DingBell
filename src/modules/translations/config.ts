@@ -5,14 +5,16 @@ const nonnegative=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.
 const positive=v.pipe(nonnegative,v.minValue(1));
 const label=v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value=>value===value.trim()&&value.isWellFormed()&&!/[\u0000-\u001f\u007f]/.test(value)));
 const configSchema=v.strictObject({
-  provider:v.literal('nvidia'),model:label,modelConfigVersion:label,promptVersion:label,maxInputTokens:positive,maxOutputTokens:positive,
+  provider:v.picklist(['nvidia','openai-compatible']),model:label,
+  connection:v.optional(v.strictObject({companyId:label,revision:positive,baseUrl:v.pipe(v.string(),v.maxLength(2048),v.url())})),modelConfigVersion:label,promptVersion:label,maxInputTokens:positive,maxOutputTokens:positive,
   pricing:v.strictObject({version:label,currency:v.literal('USD'),inputMicrosPerMillion:nonnegative,outputMicrosPerMillion:nonnegative,cacheReadMicrosPerMillion:nonnegative,cacheWriteMicrosPerMillion:nonnegative}),
 });
 const usageSchema=v.strictObject({input:nonnegative,output:nonnegative,cacheRead:nonnegative,cacheWrite:nonnegative});
 
 export function freezeTranslationConfig(value:unknown):TranslationConfig {
   const parsed=v.safeParse(configSchema,value);
-  if(!parsed.success)throw new RangeError('INVALID_TRANSLATION_CONFIG');
+  if(!parsed.success||(parsed.output.provider==='openai-compatible')!==(parsed.output.connection!==undefined))throw new RangeError('INVALID_TRANSLATION_CONFIG');
+  if(parsed.output.connection)Object.freeze(parsed.output.connection);
   Object.freeze(parsed.output.pricing);
   return Object.freeze(parsed.output);
 }

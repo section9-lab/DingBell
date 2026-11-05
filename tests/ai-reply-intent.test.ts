@@ -24,7 +24,7 @@ async function fixture(prompt='support-reply-v1'){
  }catch(e){await x.f.close();throw e;}
 }
 function interceptInsert(db:D1Database,write:(statement:D1PreparedStatement)=>Promise<unknown>):D1Database{
- return {batch:db.batch.bind(db),prepare(sql:string){const statement=db.prepare(sql);return sql.trimStart().startsWith('INSERT INTO ai_reply_intent')?{bind(...args:unknown[]){return {run:()=>write(statement.bind(...args))};}}:statement;}} as D1Database;
+ return {batch:db.batch.bind(db),prepare(sql:string){const statement=db.prepare(sql);return sql.trimStart().startsWith('UPDATE ai_execution SET reply')?{bind(...args:unknown[]){return {run:()=>write(statement.bind(...args))};}}:statement;}} as D1Database;
 }
 async function noSend(x:Awaited<ReturnType<typeof fixture>>){
  assert.equal((await x.f.db.prepare('SELECT count(*) n FROM send_intent').first<{n:number}>())?.n,0);
@@ -48,8 +48,10 @@ test('AI reply preparation is immutable, scoped and idempotent without creating 
  assert.equal(saved.platformThreadId,'thread');assert.equal(saved.credentialVersion,1);
  assert.equal(saved.platformStoreId,'1');assert.deepEqual(saved.run,x.run);assert.deepEqual(saved.knowledgeEvidence,x.evidence);
  assert.equal(saved.payloadHash,(await x.f.db.prepare('SELECT payload_hash AS hash FROM ai_execution WHERE id=?').bind(runId).first<{hash:string}>())?.hash);
- assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,1);
- await assert.rejects(x.f.db.prepare("UPDATE ai_reply_intent SET body='replaced'").run());await assert.rejects(x.f.db.prepare('DELETE FROM ai_reply_intent').run());
+ assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL').first<{n:number}>())?.n,1);
+ // The frozen reply is immutable: a conflicting body is rejected, and the stored reply never changes.
+ assert.equal((await m.prepareAiReply(x.env,x.read,x.scope,runId,{...x.input,body:'replaced'})).status,'conflict');
+ assert.equal(JSON.parse((await x.f.db.prepare('SELECT reply FROM ai_execution WHERE id=?').bind(runId).first<{reply:string}>())!.reply).body,x.input.body);
  await noSend(x);
 });
 test('concurrent AI preparations preserve one exact body for the original run',{timeout:30000},async t=>{
@@ -57,11 +59,11 @@ test('concurrent AI preparations preserve one exact body for the original run',{
  const inputs=[x.input,{...x.input,body:'Другой ответ.'}],results=await Promise.all(inputs.map(input=>m.prepareAiReply(x.env,x.read,x.scope,runId,input)));
  assert.deepEqual(results.map(r=>r.status).sort(),['conflict','prepared']);
  const saved=await m.reviewAiReply(x.env,x.read,x.scope,runId);assert.ok(saved);assert.equal(saved.body,inputs[results.findIndex(r=>r.status==='prepared')]!.body);
- assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,1);await noSend(x);
+ assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL').first<{n:number}>())?.n,1);await noSend(x);
 });
 test('human-review draft versions and model-invented authority cannot prepare AI replies',{timeout:60000},async t=>{
  const m=await api();
- for(const prompt of ['support-v1','support-knowledge-v1','support-answer-v1']){
+ for(const prompt of ['support-v1','support-knowledge-v1']){
   const x=await fixture(prompt);try{assert.equal((await m.prepareAiReply(x.env,x.read,x.scope,x.run.request.runId,x.input)).status,'unavailable');await noSend(x);}finally{await x.f.close();}
  }
  const x=await fixture();t.after(x.f.close);
@@ -70,11 +72,11 @@ test('human-review draft versions and model-invented authority cannot prepare AI
   {...x.input,actorUserId:'owner'},{...x.input,actorMemberId:'owner-member'},{...x.input,storeId:'foreign'},{...x.input,platformThreadId:'injected'},{...x.input,credentialVersion:2},{...x.input,canSend:true}]){
   assert.equal((await m.prepareAiReply(x.env,x.read,x.scope,x.run.request.runId,input)).status,'unavailable');
  }
- assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,0);await noSend(x);
+ assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL').first<{n:number}>())?.n,0);await noSend(x);
 });
 test('AI preparation and review require all outbound switches and current reply capability',{timeout:30000},async t=>{
  const m=await api(),x=await fixture();t.after(x.f.close);const id=x.run.request.runId;
- for(const flag of ['AI_RECEPTION_ENABLED','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED'])for(const value of [undefined,'false','TRUE']){
+ for(const flag of ['AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED'])for(const value of [undefined,'false','TRUE']){
   assert.equal((await m.prepareAiReply({...x.env,[flag]:value},x.read,x.scope,id,x.input)).status,'unavailable');assert.equal(await m.reviewAiReply({...x.env,[flag]:value},x.read,x.scope,id),null);
  }
  for(const sql of ["UPDATE store SET outbound_enabled=0 WHERE id='store'","UPDATE store SET expires_at=1 WHERE id='store'","UPDATE store SET capabilities='[]' WHERE id='store'"]){
@@ -109,7 +111,7 @@ test('closed original AI executions cannot prepare or review a live reply intent
   const runId=x.run.request.runId;if(prepared)assert.equal((await m.prepareAiReply(x.env,x.read,x.scope,runId,x.input)).status,'prepared');
   await closeAiExecution(x.f.db,x.scope,runId,{kind:'unstarted_closed',evidenceId:crypto.randomUUID(),instanceId:'ai-support:'+runId,executionClosed:true,providerPermits:0,verifiedAt:Date.now()});
   assert.equal((await m.prepareAiReply(x.env,x.read,x.scope,runId,x.input)).status,'unavailable');assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,runId),null);
-  assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,prepared?1:0);await noSend(x);
+  assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL').first<{n:number}>())?.n,prepared?1:0);await noSend(x);
  }finally{await x.f.close();}}
 });
 test('the original AI run deadline revokes prepared and newly requested reply authority',{timeout:30000},async t=>{
@@ -124,13 +126,13 @@ test('the D1 commit guards knowledge, budget and new input races and saved inten
   const x=await fixture();try{
    const db=interceptInsert(x.f.db,async statement=>{await change(x);return statement.run();});
    assert.equal((await m.prepareAiReply({...x.env,DB:db},x.read,x.scope,x.run.request.runId,x.input)).status,'unavailable');
-   assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,0);await noSend(x);
+   assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,x.run.request.runId),null);await noSend(x);
   }finally{await x.f.close();}
  }
  const x=await fixture();try{
   const db=interceptInsert(x.f.db,async statement=>{const result=await statement.run();assert.ok(await withdrawKnowledge(x.f.db,x.actor,x.documentId,2));return result;});
   assert.equal((await m.prepareAiReply({...x.env,DB:db},x.read,x.scope,x.run.request.runId,x.input)).status,'unavailable');
-  assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,1);assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,x.run.request.runId),null);await noSend(x);
+  assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL').first<{n:number}>())?.n,1);assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,x.run.request.runId),null);await noSend(x);
  }finally{await x.f.close();}
 });
 test('lost AI intent commit response stays uncertain and recovers the same identity without duplication',{timeout:30000},async t=>{
@@ -138,7 +140,7 @@ test('lost AI intent commit response stays uncertain and recovers the same ident
  const db=interceptInsert(x.f.db,async statement=>{await statement.run();throw new Error('synthetic lost AI intent commit response');});
  const first=await m.prepareAiReply({...x.env,DB:db},x.read,x.scope,runId,x.input);assert.equal(first.status,'unconfirmed');assert.equal(first.canSend,false);assert.equal(first.sent,false);
  assert.deepEqual(await m.prepareAiReply(x.env,x.read,x.scope,runId,x.input),{status:'prepared',intentId:'ai-reply:'+runId,canSend:false,sent:false});
- assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,1);await noSend(x);
+ assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL').first<{n:number}>())?.n,1);await noSend(x);
 });
 test('the D1 commit rejects credential, thread or capability changes after preflight',{timeout:60000},async()=>{
  const m=await api();
@@ -146,7 +148,7 @@ test('the D1 commit rejects credential, thread or capability changes after prefl
   const x=await fixture();try{
    const db=interceptInsert(x.f.db,async statement=>{await x.f.db.prepare(sql).run();return statement.run();});
    assert.equal((await m.prepareAiReply({...x.env,DB:db},x.read,x.scope,x.run.request.runId,x.input)).status,'unavailable');
-   assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,0);assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,x.run.request.runId),null);await noSend(x);
+   assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,x.run.request.runId),null);await noSend(x);
   }finally{await x.f.close();}
  }
 });
@@ -157,7 +159,7 @@ test('takeover immediately after an AI intent commit preserves history while rev
   assert.equal((await x.f.call('execute',{command:{commandId:crypto.randomUUID(),action:'takeover',expectedVersion:state.version}},x.scope)).body.outcome,'accepted');return result;
  });
  assert.equal((await m.prepareAiReply({...x.env,DB:db},x.read,x.scope,runId,x.input)).status,'unavailable');
- assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,1);assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,runId),null);await noSend(x);
+ assert.equal((await x.f.db.prepare('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL').first<{n:number}>())?.n,1);assert.equal(await m.reviewAiReply(x.env,x.read,x.scope,runId),null);await noSend(x);
 });
 test('saved AI reply authority cannot follow credential rotation, a changed thread or a replaced run',{timeout:60000},async()=>{
  const m=await api();
@@ -172,10 +174,16 @@ test('saved AI reply authority cannot follow credential rotation, a changed thre
 test('0043 rolls back a partial migration and preserves existing rows and foreign keys',{timeout:30000},async t=>{
  const f=await conversationControlFixture('0042');t.after(f.close);
  const tables=(await f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_cf_METADATA' ORDER BY name").all<{name:string}>()).results.map(r=>r.name);
- const snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async table=>[table,(await f.db.prepare(`SELECT * FROM "${table.replaceAll('"','""')}"`).all()).results.map(row=>JSON.stringify(row)).sort()]))),before=await snapshot();
+ const snapshot=async(list:readonly string[] = tables)=>Object.fromEntries(await Promise.all(list.map(async table=>[table,(await f.db.prepare(`SELECT * FROM "${table.replaceAll('"','""')}"`).all()).results.map(row=>JSON.stringify(row)).sort()]))),before=await snapshot();
  const sql=(await readFile(new URL('../migrations/0043_ai_reply_intent.sql',import.meta.url),'utf8')).split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean);
  await assert.rejects(f.db.batch([...sql.map(s=>f.db.prepare(s)),f.db.prepare('SELECT * FROM synthetic_missing_migration_table')]));
  assert.equal(await f.db.prepare("SELECT name FROM sqlite_master WHERE name='ai_reply_intent'").first(),null);assert.deepEqual(await snapshot(),before);
- await f.migrateAfter('0042');assert.deepEqual(await snapshot(),before);assert.equal((await f.db.prepare('SELECT count(*) n FROM ai_reply_intent').first<{n:number}>())?.n,0);
+ await f.migrateAfter('0042');
+ // 后续迁移（0065 起）会删除部分旧表（如 ai_answer）；仅比较两边都存活的表，行必须原样保留。
+ const surviving=(await f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_cf_METADATA' ORDER BY name").all<{name:string}>()).results.map(r=>r.name).filter(name=>tables.includes(name));
+ assert.deepEqual(await snapshot(surviving),Object.fromEntries(surviving.map(name=>[name,before[name]])));
+ assert.equal(await f.db.prepare("SELECT name FROM sqlite_master WHERE name='ai_reply_intent'").first(),null);
+ assert.equal(await f.db.prepare("SELECT name FROM sqlite_master WHERE name='ai_answer'").first(),null);
+ assert.ok(await f.db.prepare("SELECT name FROM pragma_table_info('ai_execution') WHERE name='reply'").first());
  assert.deepEqual((await f.db.prepare('PRAGMA foreign_key_check').all()).results,[]);
 });

@@ -8,6 +8,7 @@ export interface OzonProductDetails {
   id: string; offerId: string; name: string; sku: string | null;
   sources: { sku: string; source: string }[];
   price: string | null; currency: string | null; archived: boolean | null;
+  createdAt: string | null;
   primaryImage: string | null; images: string[];
 }
 const decimalId = /^(0|[1-9][0-9]{0,39})$/;
@@ -27,6 +28,13 @@ function currency(value: unknown): string | null {
   if (typeof value !== 'string' || !/^[A-Z]{3}$/.test(value)) invalid();
   return value;
 }
+// Ozon reports the marketplace creation date ("上架时间") as an ISO 8601 instant,
+// often with fractional seconds and always in UTC ("...Z").
+function timestamp(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || value.length > 64 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || Number.isNaN(Date.parse(value))) invalid();
+  return value;
+}
 function image(value: unknown): string {
   if (typeof value !== 'string' || !value || value.length > 2048) invalid();
   try { const url = new URL(value); if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash || !/(^|\.)ozone\.ru$/i.test(url.hostname)) invalid(); }
@@ -40,18 +48,21 @@ function imageList(value: unknown): string[] {
 }
 
 /** lastId and reportedTotal are provider observations, not a complete catalog snapshot. */
-export async function listOzonProducts(credentials: Credentials, options: { lastId?: string; limit?: number } = {}, fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<{ items: OzonProductListItem[]; lastId: string; reportedTotal: number }> {
+export async function listOzonProducts(credentials: Credentials, options: { lastId?: string; limit?: number; productIds?:readonly string[] } = {}, fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<{ items: OzonProductListItem[]; lastId: string; reportedTotal: number }> {
   // The application budget is 100; the documented provider maximum is 1000.
-  const size = options.limit === undefined ? 50 : options.limit, previous = options.lastId === undefined ? '' : options.lastId;
+  const size = options.limit === undefined ? options.productIds?.length ?? 50 : options.limit, previous = options.lastId === undefined ? '' : options.lastId;
   if (!Number.isSafeInteger(size) || size < 1 || size > 100 || typeof previous !== 'string' || previous.length > 4096) throw new OzonReadError('invalid_request');
-  const value = object((await readOzonJSON(credentials, '/v3/product/list', JSON.stringify({ filter: { visibility: 'ALL' }, last_id: previous, limit: size }), fetcher, signal)).result);
+  const requested=options.productIds;
+  if(requested&&(!Array.isArray(requested)||!requested.length||requested.length>100||new Set(requested).size!==requested.length||requested.some(value=>typeof value!=='string'||!decimalId.test(value))))throw new OzonReadError('invalid_request');
+  const value = object((await readOzonJSON(credentials, '/v3/product/list', JSON.stringify({ filter: { visibility: 'ALL',...(requested?{product_id:requested}:{}) }, last_id: previous, limit: size }), fetcher, signal)).result);
   if (!Array.isArray(value.items) || value.items.length > size || typeof value.last_id !== 'string' || value.last_id.length > 4096 || typeof value.total !== 'number' || !Number.isSafeInteger(value.total) || value.total < 0) invalid();
   // A short page/changed total cannot prove completion. Empty pages are returned as observed.
-  if (value.items.length && (!value.last_id || value.last_id === previous)) invalid();
+  if (!requested && value.items.length && (!value.last_id || value.last_id === previous)) invalid();
   const items = value.items.map(item => {
     const row = object(item);
     return { id: id(row.product_id), offerId: text(row.offer_id), sku: optionalId(row.sku), archived: optionalBoolean(row.archived), hasFboStocks: optionalBoolean(row.has_fbo_stocks), hasFbsStocks: optionalBoolean(row.has_fbs_stocks) };
   });
+  if(requested&&items.some(item=>!requested.includes(item.id)))invalid();
   return { items, lastId: value.last_id, reportedTotal: value.total };
 }
 
@@ -71,7 +82,7 @@ export async function readOzonProductDetails(credentials: Credentials, options: 
     const primary=imageList(row.primary_image),images=imageList(row.images),colors=imageList(row.color_image),all=[...new Set([...primary,...images,...colors])].slice(0,20);
     return { id: productId, offerId: text(row.offer_id), name: text(row.name, 4096), sku: optionalId(row.sku),
       sources: sources.map(item => { const source = object(item); return { sku: id(source.sku), source: text(source.source) }; }),
-      price: price(row.price), currency: currency(row.currency_code), archived: optionalBoolean(row.is_archived),primaryImage:primary[0]??images[0]??colors[0]??null,images:all };
+      price: price(row.price), currency: currency(row.currency_code), archived: optionalBoolean(row.is_archived), createdAt: timestamp(row.created_at), primaryImage:primary[0]??images[0]??colors[0]??null, images:all };
   });
   return { items };
 }

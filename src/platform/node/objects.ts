@@ -4,27 +4,24 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DurableObject } from 'cloudflare:workers';
-
-class Serial {
-  private tail: Promise<unknown> = Promise.resolve();
-  run<T>(action: () => Promise<T>): Promise<T> {
-    const next = this.tail.then(action); this.tail = next.catch(() => undefined); return next;
-  }
-}
+import { Mutex } from 'async-mutex';
+import { ObjectInputGate } from './input-gate.ts';
 
 /** Per-object transactions have their own SQLite connection and rollback boundary. */
 class ObjectStorage {
-  private readonly serial = new Serial();
-  private readonly transactionContext = new AsyncLocalStorage<{alarmChanged:boolean}>();
+  private readonly serial = new Mutex();
+  private readonly transactionContext = new AsyncLocalStorage<{active:boolean;alarmChanged:boolean}>();
   readonly sqlite: DatabaseSync;
   private readonly alarmChanged: (due:number|null)=>void;
-  constructor(sqlite: DatabaseSync, alarmChanged:(due:number|null)=>void) {
+  private readonly input: ObjectInputGate;
+  constructor(sqlite: DatabaseSync, alarmChanged:(due:number|null)=>void, input: ObjectInputGate) {
+    this.input=input;
     this.alarmChanged=alarmChanged;
     this.sqlite = sqlite;
     sqlite.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS alarm (id INTEGER PRIMARY KEY CHECK(id=1), due INTEGER NOT NULL);');
   }
   private async access<T>(action: () => T): Promise<T> {
-    return this.transactionContext.getStore() ? action() : this.serial.run(async () => action());
+    return this.transactionContext.getStore()?.active ? action() : this.input.exclusive(() => this.serial.runExclusive(action));
   }
   get<T>(key: string): Promise<T | undefined> {
     return this.access(() => { const row = this.sqlite.prepare('SELECT value FROM kv WHERE key=?').get(key); return row ? JSON.parse(String(row.value)) as T : undefined; });
@@ -52,18 +49,19 @@ class ObjectStorage {
     });
   }
   async transaction<T>(action: (transaction: ObjectStorage) => Promise<T>): Promise<T> {
-    if (this.transactionContext.getStore()) throw new Error('Nested object transaction.');
-    return this.serial.run(() => this.transactionContext.run({alarmChanged:false}, async () => {
+    if (this.transactionContext.getStore()?.active) throw new Error('Nested object transaction.');
+    return this.input.exclusive(() => this.serial.runExclusive(() => this.transactionContext.run({active:true,alarmChanged:false}, async () => {
       this.sqlite.exec('BEGIN IMMEDIATE');
       let result:T;
       try { result = await action(this); this.sqlite.exec('COMMIT'); }
       catch (error) { this.sqlite.exec('ROLLBACK'); throw error; }
+      finally { this.transactionContext.getStore()!.active=false; }
       if(this.transactionContext.getStore()!.alarmChanged)this.alarmChanged(this.alarmValue());
       return result;
-    }));
+    })));
   }
   private alarmValue():number|null { const row=this.sqlite.prepare('SELECT due FROM alarm').get();return row?Number(row.due):null; }
-  private projectAlarm(){const transaction=this.transactionContext.getStore();if(transaction)transaction.alarmChanged=true;else this.alarmChanged(this.alarmValue());}
+  private projectAlarm(){const transaction=this.transactionContext.getStore();if(transaction?.active)transaction.alarmChanged=true;else this.alarmChanged(this.alarmValue());}
   setAlarm(value: number | Date) { return this.access(() => { const due = Number(value); if (!Number.isSafeInteger(due) || due < 0) throw new Error('Invalid alarm.'); this.sqlite.prepare('INSERT INTO alarm VALUES(1,?) ON CONFLICT(id) DO UPDATE SET due=excluded.due').run(due); this.projectAlarm(); }); }
   deleteAlarm() { return this.access(() => { this.sqlite.exec('DELETE FROM alarm'); this.projectAlarm(); }); }
   getAlarm(): Promise<number | null> { return this.access(() => { const row = this.sqlite.prepare('SELECT due FROM alarm').get(); return row ? Number(row.due) : null; }); }
@@ -86,7 +84,7 @@ class ObjectId {
 
 type ObjectService = { alarm?(): Promise<void> };
 export class ObjectHost {
-  private readonly instances = new Map<string, { instance: ObjectService; storage: ObjectStorage }>();
+  private readonly instances = new Map<string, { instance: ObjectService; storage: ObjectStorage; input: ObjectInputGate }>();
   private readonly pending = new Set<Promise<unknown>>();
   private readonly directory: DatabaseSync;
   private readonly constructors = new Map<string, (ctx: DurableObjectState) => ObjectService>();
@@ -116,17 +114,24 @@ export class ObjectHost {
       let value = this.instances.get(key);
       if (!value) {
         this.directory.prepare('INSERT OR IGNORE INTO object_directory(kind,name) VALUES(?,?)').run(kind, id.name);
-        const storage = new ObjectStorage(new DatabaseSync(join(this.path, createHash('sha256').update(key).digest('hex')+'.sqlite')), due => { this.directory.prepare('UPDATE object_directory SET due=? WHERE kind=? AND name=?').run(due,kind,id.name); });
-        const ctx = { id, storage, blockConcurrencyWhile: <R>(fn: () => Promise<R>) => fn(), waitUntil: (promise: Promise<unknown>) => {
+        const input = new ObjectInputGate();
+        const storage = new ObjectStorage(new DatabaseSync(join(this.path, createHash('sha256').update(key).digest('hex')+'.sqlite')), due => { this.directory.prepare('UPDATE object_directory SET due=? WHERE kind=? AND name=?').run(due,kind,id.name); }, input);
+        const ctx = { id, storage, blockConcurrencyWhile: <R>(fn: () => Promise<R>) => {
+          const guarded = input.block(fn);
+          // Constructors cannot await initialization; the host still owns its
+          // rejection. Awaiting callers receive the original failure unchanged.
+          guarded.catch(() => undefined);
+          return guarded;
+        }, waitUntil: (promise: Promise<unknown>) => {
           this.pending.add(promise); promise.catch(() => undefined).finally(() => this.pending.delete(promise));
         } } as unknown as DurableObjectState;
-        value = { instance: construct(ctx) as ObjectService, storage }; this.instances.set(key, value);
+        value = { instance: construct(ctx) as ObjectService, storage, input }; this.instances.set(key, value);
       }
       const current = value;
       return new Proxy(current.instance, { get(target, property) {
         if (property === 'then') return undefined;
         const method = Reflect.get(target, property);
-        return typeof method === 'function' ? (...args: unknown[]) => Promise.resolve().then(() => Reflect.apply(method, target, args)) : method;
+        return typeof method === 'function' ? (...args: unknown[]) => current.input.run(() => Reflect.apply(method, target, args)) : method;
       } });
     };
     return { idFromName: (name: string) => new ObjectId(name), get, getByName: (name: string) => get(new ObjectId(name)) } as unknown as DurableObjectNamespace<T & Rpc.DurableObjectBranded>;
@@ -142,7 +147,7 @@ export class ObjectHost {
       if (due !== null && due <= now) {
         // Keep a durable retry scheduled even when an alarm fails or the process dies.
         await value.storage.setAlarm(now + 60_000);
-        try { await value.instance.alarm?.(); } catch { /* retry the original work, never synthesize a new intent */ }
+        try { await value.input.run(() => value.instance.alarm?.()); } catch { /* retry the original work, never synthesize a new intent */ }
       }
     }
   }

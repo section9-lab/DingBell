@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { assertLegacyRunsDrained, deployArguments } from '../scripts/deploy-cloudflare.ts';
+import { assertRetirementInventory } from '../src/platform/database/retirement.ts';
 
 const options = { config: '/built/wrangler.json', dryRun: false };
 const config = { name: 'custom-worker', main: 'index.js', d1_databases: [
@@ -35,4 +36,17 @@ test('an upgrade requires a complete, valid zero-count drain proof', () => {
     assert.throws(() => assertLegacyRunsDrained(rows, 1), /could not be confirmed/);
   }
   assert.throws(() => assertLegacyRunsDrained([{ pending: 0 }], 2), /could not be confirmed/);
+});
+
+test('retiring nonempty remote tables requires explicit approval and a complete, valid inventory', () => {
+  const tables = ['reply_test_budget'] as const;
+  assertRetirementInventory([{ name: 'reply_test_budget', records: 0 }], tables, false);
+  assert.throws(() => assertRetirementInventory([{ name: 'reply_test_budget', records: 1 }], tables, false), /--archive-retired/);
+  assertRetirementInventory([{ name: 'reply_test_budget', records: 1 }], tables, true);
+  for (const rows of [[], [{}], [{ name: 'other', records: 0 }], [{ name: 'reply_test_budget', records: '0' }],
+    [{ name: 'reply_test_budget', records: -1 }], [{ name: 'reply_test_budget', records: 0.5 }]]) {
+    assert.throws(() => assertRetirementInventory(rows, tables, true), /could not be confirmed/);
+  }
+  assert.throws(() => assertRetirementInventory([{ name: 'reply_test_budget', records: 0 }, { name: 'reply_test_budget', records: 0 }],
+    ['reply_test_budget', 'reply_test_run'], true), /could not be confirmed/);
 });

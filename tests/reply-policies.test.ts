@@ -187,6 +187,85 @@ test('publication and draft save recheck store and overlap constraints at the co
   assert.equal((await (await f.request(`/${first.policy.id}`)).json() as Detail).policy.version,first.policy.version);
 });
 
+test('direct saves validate and activate atomically without draft or publication requests',async t=>{
+  const f=await fixture();t.after(f.close);
+  const id=crypto.randomUUID();
+  const save=async(expectedVersion:number,config:unknown=automatic())=>f.request(`/${id}/save`,{expectedVersion,config});
+  let response=await save(0);assert.equal(response.status,200,await response.clone().text());
+  let detail=await response.json() as Detail;
+  assert.equal(detail.policy.enabled,true);assert.equal(detail.policy.published?.revision,1);
+  assert.equal(detail.policy.version,1);assert.equal(detail.policy.testedRevision,1);
+  assert.deepEqual(detail.policy.published?.config,automatic());
+  response=await save(1,automatic('直接修改'));assert.equal(response.status,200,await response.clone().text());
+  detail=await response.json() as Detail;
+  assert.equal(detail.policy.published?.revision,2);assert.equal(detail.policy.published?.config.name,'直接修改');
+  assert.equal(detail.policy.draftRevision,2);assert.equal(detail.policy.draftBaseRevision,2);
+  assert.equal((await save(1,automatic('过期修改'))).status,409);
+  assert.equal((await save(0)).status,409);
+  assert.equal((await save(2,notification())).status,400);
+  assert.equal((await f.request(`/${crypto.randomUUID()}/save`,{expectedVersion:0,config:automatic('重叠')})).status,409);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM reply_policy').get()?.n,1,'overlap creates no intermediate policy');
+  detail=await f.action(detail,'pause');
+  response=await save(detail.policy.version,automatic('恢复启用'));assert.equal(response.status,200);
+  detail=await response.json() as Detail;assert.equal(detail.policy.enabled,true);assert.equal(detail.policy.published?.revision,3);
+  const events=f.sqlite.prepare("SELECT action FROM reply_policy_audit_event WHERE policy_id=? AND outcome='succeeded'").all(id);
+  assert.deepEqual(events.map(row=>row.action),['save','save','pause','save']);
+});
+
+test('direct saves reject invalid scope, access and uncertain duplicate writes',async t=>{
+  const f=await fixture();t.after(f.close);
+  const id=crypto.randomUUID(),body={expectedVersion:0,config:automatic()};
+  assert.equal((await f.request(`/${id}/save`,body,'staff')).status,403);
+  assert.equal((await f.request(`/${id}/save`,{...body,config:automatic('跨公司',['store-other'])})).status,409);
+  assert.equal((await f.request(`/${id}/save`,{...body,config:{...automatic(),storeIds:[]}})).status,400);
+  assert.equal((await f.request(`/${id}/save`,{...body,expectedVersion:-1})).status,400);
+  assert.equal((await f.request(`/${id}/save`,body,'owner','company','https://evil.invalid')).status,403);
+  f.sqlite.exec("CREATE TRIGGER direct_outcome_offline BEFORE INSERT ON reply_policy_audit_event WHEN NEW.outcome='succeeded' BEGIN SELECT RAISE(ABORT,'offline'); END");
+  const response=await f.request(`/${id}/save`,body);assert.equal(response.status,503);
+  assert.equal((await response.json() as {error:{code:string}}).error.code,'OPERATION_UNCONFIRMED');
+  f.sqlite.exec('DROP TRIGGER direct_outcome_offline');
+  assert.equal((await f.request(`/${id}/save`,body)).status,409);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM policy_version').get()?.n,1);
+});
+
+test('direct saves roll back snapshot failures and recheck permissions and overlaps at commit',async t=>{
+  const f=await fixture();t.after(f.close);
+  const id=crypto.randomUUID(),body={expectedVersion:0,config:automatic()};
+  f.sqlite.exec("CREATE TRIGGER direct_snapshot_offline BEFORE INSERT ON policy_version BEGIN SELECT RAISE(ABORT,'offline'); END");
+  assert.equal((await f.request(`/${id}/save`,body)).status,503);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM reply_policy').get()?.n,0);
+  f.sqlite.exec('DROP TRIGGER direct_snapshot_offline');
+  let response=await f.request(`/${id}/save`,body);assert.equal(response.status,200);
+  const saved=await response.json() as Detail;
+  f.sqlite.exec("CREATE TRIGGER direct_snapshot_offline BEFORE INSERT ON policy_version BEGIN SELECT RAISE(ABORT,'offline'); END");
+  assert.equal((await f.request(`/${id}/save`,{expectedVersion:1,config:automatic('不应保存')})).status,503);
+  assert.equal(f.sqlite.prepare('SELECT version FROM reply_policy WHERE id=?').get(id)?.version,1);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM policy_version').get()?.n,1);
+  f.sqlite.exec('DROP TRIGGER direct_snapshot_offline');
+  f.before(sql=>{if(sql.includes('WITH candidate(config)')&&sql.includes('UPDATE reply_policy')){
+    f.before(undefined);f.sqlite.exec("UPDATE member SET role='member' WHERE id='admin'");
+  }});
+  assert.equal((await f.request(`/${id}/save`,{expectedVersion:1,config:automatic('撤权修改')},'admin')).status,403);
+  const other=await f.action(await f.create(automatic('并发规则',['store-b'])),'test');
+  f.before(sql=>{if(sql.includes('WITH candidate(config)')&&sql.includes('UPDATE reply_policy')){
+    f.before(undefined);f.sqlite.prepare(`UPDATE reply_policy SET published_revision=1,enabled=1,version=version+1,
+      published_by='owner',published_at=1,published_request_id='other-request',published_time_zone='UTC',draft_base_revision=1 WHERE id=?`).run(other.policy.id);
+  }});
+  response=await f.request(`/${id}/save`,{expectedVersion:1,config:automatic('并发重叠',['store-b'])});assert.equal(response.status,409);
+  assert.equal((await response.json() as {error:{code:string}}).error.code,'POLICY_OVERLAP');
+  const current=await (await f.request(`/${id}`)).json() as Detail;
+  assert.equal(current.policy.version,saved.policy.version);assert.equal(current.policy.published?.config.name,'售前接待');
+});
+
+test('direct notification saves snapshot the current company timezone',async t=>{
+  const f=await fixture();t.after(f.close);
+  f.sqlite.exec("INSERT INTO company_settings(organization_id,time_zone,version,updated_at) VALUES('company','Asia/Shanghai',1,1)");
+  const response=await f.request(`/${crypto.randomUUID()}/save`,{expectedVersion:0,config:notification()});
+  assert.equal(response.status,200,await response.clone().text());
+  const detail=await response.json() as Detail;assert.equal(detail.policy.published?.timeZone,'Asia/Shanghai');
+  assert.equal(detail.policy.enabled,true);
+});
+
 test('policy and history pagination are bounded and never include another company',async t=>{
   const f=await fixture();t.after(f.close);
   let detail=await f.create();

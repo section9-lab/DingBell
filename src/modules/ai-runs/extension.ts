@@ -12,7 +12,7 @@ export const supportExtension=extend<Agent>({base:Base=>class extends Base {
  constructor(...args:ConstructorParameters<typeof Base>){super(...args);this.#context=args[0];this.#env=args[1];}
  private identity(id:string){if(!this.#env.FLUE_SUPPORT_AGENT||this.#env.FLUE_SUPPORT_AGENT.idFromName(`ai-support:${id}`).toString()!==this.#context.id.toString())throw new Error('SUPPORT_SCOPE_MISMATCH');}
  async prepareSupport(scope:ControlScope,id:string){
-  this.identity(id);const env=this.#env;if(env.AI_RECEPTION_ENABLED!=='true'||!env.DB)throw new Error('SUPPORT_DISABLED');
+  this.identity(id);const env=this.#env;if(!env.DB)throw new Error('SUPPORT_DISABLED');
   const run=await readAiExecution(env.DB,scope,id);if(!run||run.closure||JSON.stringify(await aiRunReader(env)(scope,id))!==JSON.stringify(run.payload.run))throw new Error('SUPPORT_UNAVAILABLE');
   validateSupportConfig(run,supportModel.contextWindow);new SupportLedger(this.#context.storage.sql).prepare(run);
  }

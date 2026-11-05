@@ -3,8 +3,8 @@ import {test} from 'node:test';
 import {setTimeout as delay} from 'node:timers/promises';
 import {conversationControlFixture} from '../fixtures/conversation-control.ts';
 import {createPolicy,changePolicy} from '../../src/modules/reply-policies/storage.ts';
-async function fixture(options:{aiEnabled?:string;aiTimeoutMs?:number}={}){
- const f=await conversationControlFixture(undefined,{aiEnabled:'true',...options}),policyId=crypto.randomUUID();
+async function fixture(options:{aiTimeoutMs?:number}={}){
+ const f=await conversationControlFixture(undefined,{...options}),policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
   await f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('customer-1','org','store','conv','1','Customer','inbound','[\"Мне нужен человек.\"]',0,0,1,1,'incremental')").run();
@@ -30,8 +30,7 @@ test('human takeover wins over an old AI run and model input cannot choose autho
  const taken=await f.call('execute',{command:{commandId:crypto.randomUUID(),action:'takeover',expectedVersion:1}});assert.equal(taken.body.outcome,'accepted');
  assert.equal((await f.handoff()).body.outcome,'conflict');const current=(await f.call('read')).body.view.state;assert.equal(current.reception,'human');assert.equal(current.version,2);assert.equal(f.providerRequests.length,0);
 });
-test('disabled admission, changed inputs and changed policies do not grant an old run new authority',{timeout:30000},async t=>{
- const disabled=await fixture({aiEnabled:'false'});t.after(disabled.close);assert.equal((await disabled.start()).body.outcome,'unavailable');assert.equal((await disabled.call('read')).body.view.state.version,0);
+test('changed inputs and changed policies do not grant an old run new authority',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);assert.equal((await f.start()).body.outcome,'accepted');
  assert.equal((await f.call('ai-handoff',{runId:f.request.runId,input:f.input},{...f.scope,organizationId:'other-org'})).body.outcome,'unavailable');
  assert.ok(await changePolicy(f.db,f.actor(),f.request.policyId,3,{action:'pause'},crypto.randomUUID()));assert.equal((await f.handoff()).body.outcome,'unavailable');
@@ -95,6 +94,6 @@ test('internal execution reads retain original authority and reject human-owned,
  const f=await fixture();t.after(f.close);const started=await f.start();assert.equal(started.body.outcome,'accepted');
  const read=()=>f.call('ai-read',{runId:f.request.runId});assert.deepEqual((await read()).body,started.body.receipt.run);
  assert.equal((await f.call('ai-read',{runId:crypto.randomUUID()})).body,null);assert.equal((await f.call('ai-read',{runId:f.request.runId},{...f.scope,organizationId:'foreign'})).body,null);
- await f.restart('false');assert.equal((await read()).body,null);await f.restart('true');assert.deepEqual((await read()).body,started.body.receipt.run);
+ await f.restart();assert.deepEqual((await read()).body,started.body.receipt.run);
  assert.equal((await f.call('execute',{command:{commandId:crypto.randomUUID(),action:'takeover',expectedVersion:1}})).body.outcome,'accepted');assert.equal((await read()).body,null);
 });

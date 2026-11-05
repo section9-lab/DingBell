@@ -6,7 +6,7 @@ import {checkedAiIntakeReceipt,checkedAiDispatchStopReceipt} from './ai-intake.t
 import {checkedAiSendReceipt} from './ai-reply-receipt.ts';
 import { storeAccess } from '../stores/storage.ts';
 import { checkedReplyTranslation, controlCommandSchema, normalizeControlState, storedControlStateSchema } from './control-state.ts';
-import type { ControlAccess, ControlActor, ControlAssignee, ControlDirectory, ControlOutboxEvent as ControlEvent, ControlReceipt, ControlScope, ControlState, StoredControlState, TransferTarget, TransferTargetsPage } from './control-types.ts';
+import type { ControlAccess, ControlActor, ControlAssignee, ControlDirectory, ControlOutboxEvent as ControlEvent, ControlScope, ControlState, StoredControlState, TransferTarget, TransferTargetsPage } from './control-types.ts';
 
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));

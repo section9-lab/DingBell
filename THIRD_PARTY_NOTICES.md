@@ -1,6 +1,6 @@
 # Third-party notices
 
-Generated/reviewed against `package-lock.json` on 2026-10-30. This file records direct packages and design assets; `npm run licenses:check` validates every locked installed package has declared license metadata and emits the machine-readable inventory under `dist/compliance/`. Package license files remain authoritative.
+Generated/reviewed against `package-lock.json` on 2026-11-04. This file records direct packages and design assets; `npm run licenses:check` validates every locked installed package has declared license metadata and emits the machine-readable inventory under `dist/compliance/`. Package license files remain authoritative.
 
 DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29. Dependencies retain their respective licenses. Platform adapter inventories include the independent lockfiles in `packages/agent-runtime`, `deploy/cloudflare` and `deploy/vercel`.
 
@@ -15,10 +15,12 @@ DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29
 | @fontsource-variable/geist | 5.3.0 | OFL-1.1 |
 | @fontsource/noto-sans-sc | 5.3.0 | OFL-1.1 |
 | @hono/node-server | 2.1.4 | MIT |
+| @hookform/resolvers | 7.0.1 | MIT |
 | @json2csv/whatwg | 7.0.8 | MIT |
 | @shadcn/react | 0.3.1 | MIT |
 | @tanstack/react-query | 5.104.1 | MIT |
 | @valibot/to-json-schema | 1.8.0 | MIT |
+| async-mutex | 0.5.0 | MIT |
 | better-auth | 1.7.7 | MIT |
 | class-variance-authority | 0.7.1 | Apache-2.0 |
 | cn | 0.4.0 | MIT |
@@ -32,7 +34,9 @@ DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29
 | react-hook-form | 7.89.0 | MIT |
 | react-router | 8.4.0 | MIT |
 | react-resizable-panels | 4.15.2 | MIT |
+| recharts | 3.10.1 | MIT |
 | valibot | 1.5.0 | MIT |
+| zod | 4.6.7 | MIT |
 
 ## Direct development packages
 

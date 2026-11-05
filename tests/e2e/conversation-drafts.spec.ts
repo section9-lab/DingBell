@@ -1,5 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { startLocalApplication } from '../fixtures/web-identity/local-app.ts';
+import { signOut } from './support/session.ts';
 type Application = Awaited<ReturnType<typeof startLocalApplication>>;
 const test = base.extend<{ application: Application }>({ application: async ({}, use) => {
   const app = await startLocalApplication(true, { mail: true, team: 'roles', stores: 'configured', sync: true, control: true, replies: true });
@@ -30,7 +31,7 @@ test('ordinary drafts survive conversation switches, refresh and offline reautho
   await page.getByRole('button', { name: '切换公司', exact: true }).click(); await page.getByRole('menuitem', { name: /测试公司 A/ }).click(); await page.goto(first); await expect(draft(page)).toHaveValue(body);
   await page.context().setOffline(true); await expect(page.getByRole('heading', { name: '网络已断开', exact: true })).toBeVisible(); await expect(draft(page)).toHaveCount(0);
   await page.context().setOffline(false); await expect(draft(page)).toHaveValue(body); expect(app.replyRequests).toHaveLength(0);
-  await page.getByRole('button', { name: '预览回复', exact: true }).click(); await page.getByRole('dialog', { name: '确认发送给消费者', exact: true }).getByRole('button', { name: '确认发送', exact: true }).click();
+  await page.getByRole('button', { name: '发送', exact: true }).click();
   await expect(draft(page)).toHaveValue(''); await page.reload(); await expect(draft(page)).toHaveValue('');
   await expect.poll(() => app.replyRequests.length).toBe(1); expect(app.replyRequests[0]!.body).toEqual({ chat_id: history.threadId, text: body });
   await page.goto(second); await expect(draft(page)).toHaveValue(other);
@@ -49,7 +50,7 @@ test('replacement membership never inherits a draft, and confirmed revocation an
     await revoked; await expect(draft(member)).toHaveCount(0);
     await expect.poll(() => member.evaluate("Object.values(sessionStorage).some(value => value.includes('PRIVATE-DRAFT'))")).toBe(false);
     expect((await page.request.post(grant('member-a-rejoined'), { headers: { origin: app.baseURL }, data: { expectedGranted: false, granted: true } })).status()).toBe(200);
-    await member.goto(target); await draft(member).fill('LOGOUT-PRIVATE-DRAFT'); await member.getByRole('button', { name: '退出登录', exact: true }).click(); await expect(member).toHaveURL(`${app.baseURL}/login`);
+    await member.goto(target); await draft(member).fill('LOGOUT-PRIVATE-DRAFT'); await signOut(member); await expect(member).toHaveURL(`${app.baseURL}/login`);
     expect(await member.evaluate("Object.values(sessionStorage).some(value => value.includes('PRIVATE-DRAFT'))")).toBe(false);
     await login(member, app, 'admin'); await member.goto(target); await expect(draft(member)).toHaveValue(''); expect(app.replyRequests).toHaveLength(0);
   } finally { await context.close(); }
@@ -64,8 +65,9 @@ test('failed draft storage preserves current input and accepted-send cleanup kee
   })()`);
   const body = 'CURRENT-DRAFT-MUST-NOT-BE-LOST'; await draft(page).fill(body); await expect(draft(page)).toHaveValue(body);
   await expect(page.getByText('草稿自动保存不可用。当前输入仍保留，请勿关闭或刷新页面。', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '预览回复', exact: true }).click(); await page.getByRole('dialog', { name: '确认发送给消费者', exact: true }).getByRole('button', { name: '确认发送', exact: true }).click();
-  await expect(page.getByText('原提交已确认，但本机草稿尚未清理。请恢复浏览器存储后再次核对，暂时不要创建新回复。', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  // 草稿清理失败时提交记录必须留在本机：编辑器让位给待核对提示，不会误以为已经清理干净。
+  await expect(page.getByText('有一条提交尚待核对。请先确认结果，再编辑下一条回复。', { exact: true })).toBeVisible();
   await expect(draft(page)).toHaveCount(0); await page.screenshot({ path: test.info().outputPath('draft-cleanup-unconfirmed.png') });
   await page.reload(); await expect(draft(page)).toHaveCount(0); await page.getByRole('button', { name: '核对提交', exact: true }).click();
   await expect(draft(page)).toHaveValue(''); await page.reload(); await expect(draft(page)).toHaveValue('');

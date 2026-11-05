@@ -155,7 +155,7 @@ return class ConversationController extends Base {
   }
   /** Classifier authorization is distinct from an answer run; both use the same immutable work slot. */
   async readAiWork(scope:ControlScope,runId:string):Promise<AiWork|null>{
-    if(this.env.AI_RECEPTION_ENABLED!=='true'||!this.env.DB||!this.routed(scope)||!v.is(v.pipe(v.string(),v.uuid()),runId))return null;
+    if(!this.env.DB||!this.routed(scope)||!v.is(v.pipe(v.string(),v.uuid()),runId))return null;
     const directory=await readControlDirectory(this.env.DB,scope),value=await this.ctx.storage.get('aiRun');if(!directory||!value)return null;
     const run=v.parse(aiWorkSchema,value);if(run.schemaVersion===1)return this.readAiRun(scope,runId);
     if(run.request.runId!==runId||!sameScope(run.scope,scope)||Date.now()>=run.deadlineAt)return null;
@@ -164,7 +164,7 @@ return class ConversationController extends Base {
   }
   async startAiIntake(scope:ControlScope,value:unknown){
     const request=v.parse(aiIntakeRequestSchema,value);
-    if(this.env.AI_RECEPTION_ENABLED!=='true'||!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
+    if(!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
     const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
     const admission=await readAiIntakeAdmission(this.env.DB,scope,request.messageId),commandId=`ai-intake:${request.runId}`;
     const listening=await this.readAiListening(scope),pending=await this.readPendingAiInput(scope),newInput=listening?await isNewAiInput(this.env.DB,listening,request.messageId):false;
@@ -295,7 +295,7 @@ return class ConversationController extends Base {
     const result=await this.ctx.storage.transaction(async transaction=>{
       const state=await this.state(transaction,directory),saved=await transaction.get<ControlEvent['receipt']>(`receipt:${commandId}`);
       if(saved){if(saved.action!=='ai_listen')return {outcome:'conflict' as const};const receipt=checkedAiListeningReceipt(saved);return receipt.actorUserId===actor.actorUserId&&receipt.actorMemberId===access.memberId&&JSON.stringify(receipt.listening.request)===JSON.stringify(request)&&sameScope(receipt.listening.scope,scope)?{outcome:'accepted' as const,receipt,state,canSend:false as const}:{outcome:'conflict' as const};}
-      if(this.env.AI_RECEPTION_ENABLED!=='true'||boundary===null)return {outcome:'unavailable' as const};
+      if(boundary===null)return {outcome:'unavailable' as const};
       if(state.version!==request.expectedVersion||state.lifecycle!=='open'||state.reception==='ai'||(oldRun?.request.runId??null)!==request.previousRunId||JSON.stringify(await transaction.get('aiRun'))!==JSON.stringify(oldValue)||(oldRun&&state.controlEpoch<=oldRun.controlEpoch))return {outcome:'conflict' as const};
       if(execution&&(!execution.closure||JSON.stringify(execution.payload.run)!==JSON.stringify(oldRun)))return {outcome:'unavailable' as const};
       if([state.version,state.controlEpoch,state.sequence].some(n=>n>=Number.MAX_SAFE_INTEGER-1))return {outcome:'conflict' as const};
@@ -317,7 +317,7 @@ return class ConversationController extends Base {
   }
   /** Internal execution authorization; historical start receipts do not grant a new call. */
   async readAiRun(scope:ControlScope,runId:string):Promise<AiRun|null>{
-    if(this.env.AI_RECEPTION_ENABLED!=='true'||!this.env.DB||!this.routed(scope)||!v.is(v.pipe(v.string(),v.uuid()),runId))return null;
+    if(!this.env.DB||!this.routed(scope)||!v.is(v.pipe(v.string(),v.uuid()),runId))return null;
     const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return null;
     const value=await this.ctx.storage.get('aiRun');if(!value)return null;
     const work=v.parse(aiWorkSchema,value);if(work.schemaVersion!==1)return null;const run=work;if(run.request.runId!==runId||!sameScope(run.scope,scope)||Date.now()>=run.deadlineAt)return null;
@@ -334,7 +334,7 @@ return class ConversationController extends Base {
   /** Internal RPC only. No model argument or simulation result grants admission. */
   async startAi(scope:ControlScope,value:unknown){
     const request=v.parse(aiStartSchema,value);
-    if(this.env.AI_RECEPTION_ENABLED!=='true'||!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
+    if(!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
     const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
     const admission=await readAiAdmission(this.env.DB,scope,request),commandId=`ai-start:${request.runId}`;
     const selected=await selectReplyPolicy(this.env.DB,scope,request.stage);
@@ -376,7 +376,7 @@ return class ConversationController extends Base {
     const result=await this.ctx.storage.transaction(async transaction=>{
       const state=await this.state(transaction,directory),saved=await transaction.get<ControlReceipt|AiReceipt>(`receipt:${commandId}`);
       if(saved){if(saved.action!=='ai_resume')return {outcome:'conflict' as const};const receipt=checkedAiReceipt(saved);return receipt.action==='ai_resume'&&receipt.actorUserId===actor.actorUserId&&receipt.actorMemberId===access.memberId&&receipt.previousRunId===previousRunId&&JSON.stringify(receipt.run.request)===JSON.stringify(request)&&sameScope(receipt.run.scope,scope)?this.aiResult(receipt,state):{outcome:'conflict' as const};}
-      if(this.env.AI_RECEPTION_ENABLED!=='true'||!admission||selected?.id!==admission.policyId||selected.revision!==admission.policyRevision||selected.config.mode!=='automatic')return {outcome:'unavailable' as const};
+      if(!admission||selected?.id!==admission.policyId||selected.revision!==admission.policyRevision||selected.config.mode!=='automatic')return {outcome:'unavailable' as const};
       if(state.version!==request.expectedVersion||state.lifecycle!=='open'||state.reception==='ai'||(oldRun?.request.runId??null)!==previousRunId||JSON.stringify(await transaction.get('aiRun'))!==JSON.stringify(oldValue)
         ||(oldRun&&state.controlEpoch<=oldRun.controlEpoch)||await transaction.get(`receipt:ai-start:${request.runId}`)||await transaction.get(`receipt:ai-handoff:${request.runId}`)||await transaction.get(`receipt:ai-intake:${request.runId}`))return {outcome:'conflict' as const};
       if(execution&&(!execution.closure||JSON.stringify(execution.payload.run)!==JSON.stringify(oldRun)))return {outcome:'unavailable' as const};
@@ -408,7 +408,7 @@ return class ConversationController extends Base {
     const work=v.parse(aiWorkSchema,valueRun);if(work.schemaVersion!==1)return {outcome:'unavailable' as const};const run=work;if(run.request.runId!==runId||!sameScope(run.scope,scope))return {outcome:'unavailable' as const};
     // A committed receipt is historical evidence, even after policy disablement.
     if(!historical){
-      if(this.env.AI_RECEPTION_ENABLED!=='true'||Date.now()>=run.deadlineAt)return {outcome:'unavailable' as const};
+      if(Date.now()>=run.deadlineAt)return {outcome:'unavailable' as const};
       const admission=await readAiAdmission(this.env.DB,scope,run.request);if(JSON.stringify(admission)!==JSON.stringify(run.admission))return {outcome:'unavailable' as const};
     }
     const result=await this.commitHandoff(directory,run,input,'agent');await this.flush(scope);
@@ -796,12 +796,12 @@ return class ConversationController extends Base {
     const frozen=await reviewCompletedAiReply(this.env,(s,id)=>this.readAiRun(s,id),scope,intent.runId);
     if(!frozen||frozen.id!==intent.id||frozen.body!==intent.body||frozen.platformThreadId!==intent.platformThreadId||frozen.credentialVersion!==intent.credentialVersion
       ||frozen.run.controlEpoch!==intent.controlEpoch)return null;
-    return context?.store.platformStoreId===frozen.platformStoreId&&context.platformThreadId===frozen.platformThreadId&&context.store.credentialVersion===frozen.credentialVersion?context:null;
+    return context?.store.platformStoreId===frozen.platformStoreId&&context?.platformThreadId===frozen.platformThreadId&&context?.store.credentialVersion===frozen.credentialVersion?context:null;
   }
   private replyControlGate(context:ReplyDispatchContext,state:ControlState,intent:ReplyIntent) {
     if(state.controlEpoch!==intent.controlEpoch)return 'CONTROL_CHANGED';
     if(intent.schemaVersion===1)return this.replyGate(context,state);
-    if(this.env.OUTBOUND_ENABLED!=='true'||this.env.AI_OUTBOUND_ENABLED!=='true'||this.env.AI_RECEPTION_ENABLED!=='true')return 'OUTBOUND_DISABLED';
+    if(this.env.OUTBOUND_ENABLED!=='true'||this.env.AI_OUTBOUND_ENABLED!=='true')return 'OUTBOUND_DISABLED';
     if(state.lifecycle!=='open'||state.reception!=='ai'||state.workStatus!=='needs_reply'||state.assignedMemberId!==null)return 'CONTROL_CHANGED';
     if(!context.outboundEnabled||!context.replyAvailable||context.store.platform!=='ozon'||context.platformType!=='BUYER_SELLER')return 'CAPABILITY_UNVERIFIED';
     return null;

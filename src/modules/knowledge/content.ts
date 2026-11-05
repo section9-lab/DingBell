@@ -4,10 +4,20 @@ export async function knowledgeHash(value: unknown) {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
 }
+const sourceText = (source: KnowledgeDraft['source']) => source.format === 'product'
+  ? source.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n') : source.content;
+const heading = (title: string, productRef: string | null) => `${title}\n${productRef ? `商品 / Product: ${productRef}\n` : ''}\n`;
+
+/** Legacy revisions retain source_json even when their markdown column was not yet present. */
+export function renderKnowledgeMarkdown(title: string, productRef: string | null, source: KnowledgeDraft['source']) {
+  return heading(title, productRef) + sourceText(source);
+}
+
 export async function prepareKnowledge(orgId: string, documentId: string, revision: number, scope: KnowledgeScope, draft: KnowledgeDraft) {
   const contentHash = await knowledgeHash({ kind: scope.kind, storeId: scope.storeId, productRef: scope.productRef, language: scope.language, ...draft });
-  const content = draft.source.format === 'product' ? draft.source.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n') : draft.source.content;
-  const header = `${draft.title}\n${scope.productRef ? `商品 / Product: ${scope.productRef}\n` : ''}\n`;
+  const content = sourceText(draft.source);
+  const header = heading(draft.title, scope.productRef);
+  const markdown = header + content;
   const encoder = new TextEncoder(), budget = 2400 - encoder.encode(header).length, chars = Array.from(content);
   const chunks: { id: string; ordinal: number; body: string; bodyHash: string }[] = [];
   for (let start = 0; start < chars.length;) {
@@ -25,6 +35,6 @@ export async function prepareKnowledge(orgId: string, documentId: string, revisi
     while (next > start + 1 && overlap + encoder.encode(chars[next - 1]).length <= 200) overlap += encoder.encode(chars[--next]).length;
     start = next;
   }
-  return { ...draft, contentHash, chunks };
+  return { ...draft, contentHash, markdown, chunks };
 }
 export type PreparedKnowledge = Awaited<ReturnType<typeof prepareKnowledge>>;

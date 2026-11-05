@@ -54,8 +54,9 @@ test('conversation read models enforce current scope with real D1 and stable his
   });
   await context.test('summaries use the latest stored message and whitelist all returned fields',async()=>{
     const row=(await listConversations(db,member,{search:{field:'thread',value:'thread-a'},limit:10})).items[0];assert.ok(row);
-    assert.deepEqual(Object.keys(row).sort(),['id','importedAt','lastMessageAt','latestMessage','platformCreatedAt','platformStatus','platformThreadId','platformType','store','workflow']);
+    assert.deepEqual(Object.keys(row).sort(),['buyerOrderNumber','buyerSenderId','id','importedAt','lastMessageAt','latestMessage','platformCreatedAt','platformStatus','platformThreadId','platformType','store','workflow']);
     assert.deepEqual(row.store,{id:'s1',name:'Store s1',status:'paused'});assert.equal(row.latestMessage?.id,'m-03');assert.equal(row.latestMessage?.platformMessageId,big+'03');
+    assert.equal(row.buyerSenderId,big);assert.equal(row.buyerOrderNumber,null);
     assert.equal(row.latestMessage?.senderId,big);assert.equal(row.latestMessage?.senderType,'FutureSender');assert.equal(row.latestMessage?.direction,'unknown');assert.equal(row.latestMessage?.isImage,true);
     assert.deepEqual(row.latestMessage?.content,['raw-m-03']);assert.equal((row.latestMessage as any)?.previewTruncated,true);
     assert.equal(JSON.stringify(row).includes('SECRET'),false);assert.equal('lastMessageId' in row,false);assert.equal('isRead' in row.latestMessage!,false);
@@ -70,7 +71,7 @@ test('conversation read models enforce current scope with real D1 and stable his
     const row=await findConversation(db,member,'c-a');assert.ok(row);assert.equal(row.store.status,'paused');
     assert.deepEqual(row.sync,{enabled:false,lastSuccessAt:777,lastError:'history_denied',backfillComplete:true});
     assert.equal((await findConversation(db,member,'c-b'))?.sync.backfillComplete,false);
-    const empty=await findConversation(db,member,'c-empty1');assert.equal(empty?.latestMessage,null);assert.equal(empty?.sync.backfillComplete,null);
+    const empty=await findConversation(db,member,'c-empty1');assert.equal(empty?.latestMessage,null);assert.equal(empty?.buyerSenderId,null);assert.equal(empty?.buyerOrderNumber,null);assert.equal(empty?.sync.backfillComplete,null);
     assert.deepEqual((await findConversation(db,admin,'c-x'))?.sync,{enabled:false,lastSuccessAt:null,lastError:null,backfillComplete:null});
     assert.equal(JSON.stringify(row).includes('SECRET'),false);assert.equal('customer' in row,false);assert.equal('orders' in row,false);
   });
@@ -78,7 +79,7 @@ test('conversation read models enforce current scope with real D1 and stable his
     const first=await listMessages(db,member,'c-a',{limit:2});assert.ok(first);assert.deepEqual(ids(first.items),['m-02','m-03']);assert.ok(first.nextCursor);
     const second=await listMessages(db,member,'c-a',{limit:2,cursor:first.nextCursor});assert.ok(second);assert.deepEqual(ids(second.items),['m-01']);assert.equal(second.nextCursor,null);
     assert.equal(first.items[1].sku,big);assert.equal(first.items[1].platformMessageId,big+'03');assert.equal(first.items[1].eventAt,200);assert.equal(first.items[1].receivedAt,300);assert.equal(first.items[1].ingestMode,'backfill');
-    assert.equal(first.items[1].orderNumber,'order-01');assert.equal('isRead' in first.items[1],false);
+    assert.equal(first.items[1].orderNumber,'order-01');assert.equal(first.items[1].isRead,true);assert.equal('previewTruncated' in first.items[1],false);
     const empty=await listMessages(db,member,'c-empty1',{limit:2});assert.ok(empty);assert.deepEqual(empty.items,[]);assert.equal(empty.nextCursor,null);
     assert.equal(empty.viewerMemberId,'member-agent');assert.equal(typeof empty.pageCursor,'string');assert.equal(typeof empty.updatesCursor,'string');
   });
@@ -131,6 +132,24 @@ test('conversation read models enforce current scope with real D1 and stable his
     assert.deepEqual(row.latestMessage.content,['🙂'.repeat(280)]);assert.equal((row.latestMessage as any).previewTruncated,true);assert.ok(queries[0].includes('substr('));
     await message('m-empty9','c-long','s1','read-a',501,'order-long','Customer',false,[]);
     const empty=(await findConversation(db,member,'c-long'))?.latestMessage;assert.deepEqual(empty?.content,[]);assert.equal((empty as any)?.previewTruncated,false);
+    // A platform message may carry an empty leading part (Ozon quote blocks do); the
+    // preview must show the first part that actually has text, not a blank one.
+    await message('m-quote7','c-long','s1','read-a',502,'order-long','Customer',false,['','Здравствуйте! У меня вопрос']);
+    const quoted=(await findConversation(db,member,'c-long'))?.latestMessage;
+    assert.deepEqual(quoted?.content,['Здравствуйте! У меня вопрос']);assert.equal((quoted as any)?.previewTruncated,false);
+  });
+  await context.test('an inbound sender id that is really an order number is reported as that order',async()=>{
+    // Ozon sometimes reports the order number itself as the chat user id (86910324 -> 86910324-0074).
+    await db.prepare("INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at,last_message_at) VALUES ('c-order','read-a','s1','thread-order','BUYER_SELLER','OPEN',1,1,510)").run();
+    const inbound=async(id:string,senderId:string,orderNumber:string|null,eventAt:number)=>db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_id,sender_type,direction,content,is_image,is_read,order_number,sku,event_at,received_at,ingest_mode) VALUES (?,?,?,?,?,?,?,?,?,0,1,?,?,?,300,'backfill')")
+      .bind(id,'read-a','s1','c-order',`${big}${eventAt}`,senderId,'Customer','inbound',JSON.stringify(['Здравствуйте']),orderNumber,null,eventAt).run();
+    await inbound('m-order1','86910324','86910324-0074',510);
+    const first=await findConversation(db,member,'c-order');
+    assert.equal(first?.buyerSenderId,'86910324');assert.equal(first?.buyerOrderNumber,'86910324-0074');
+    // An unrelated order on the same message must not be mistaken for this sender's order.
+    await inbound('m-order2','86910324','99999999-0001',511);
+    const second=await findConversation(db,member,'c-order');
+    assert.equal(second?.buyerSenderId,'86910324');assert.equal(second?.buyerOrderNumber,null);
   });
   await context.test('SQL byte budgets preserve oversized messages and advance actual page boundaries without losing history',async()=>{
     await db.prepare("INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at,last_message_at) VALUES ('c-budget','read-a','s1','thread-budget','BUYER_SELLER','OPEN',1,1,600)").run();

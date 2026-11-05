@@ -7,7 +7,7 @@ import {claimInboundEvents,finishInboundEvent,deliverInboundEvents} from '../src
 import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.ts';
 async function api(){const m=await import('../src/modules/ai-runs/dispatch.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.dispatchAiReceptions,'function','accepted inputs need a persistent automatic dispatcher');return m!;}
 async function fixture(){
- const f=await conversationControlFixture(undefined,{aiEnabled:'true'}),policyId=crypto.randomUUID();let clock=Date.now();
+ const f=await conversationControlFixture(undefined,{}),policyId=crypto.randomUUID();let clock=Date.now();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
   const config={kind:'automatic' as const,name:'Reception',storeIds:['store'],priority:50,stages:['presale' as const,'order' as const,'aftersale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
@@ -23,7 +23,7 @@ async function fixture(){
    readClassifiedInput:async(scope:any)=>(await f.call('ai-classified-input',{},scope)).body,
    startAi:async(scope:any,request:any)=>(await f.call('ai-start',{request},scope)).body,
    readAiWork:async(scope:any,runId:string)=>(await f.call('ai-work-read',{runId},scope)).body};
-  return {...f,get db(){return f.db;},policyId,append,controller,env:()=>({DB:f.db,AI_RECEPTION_ENABLED:'true',FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>controller}} as any)};
+  return {...f,get db(){return f.db;},policyId,append,controller,env:()=>({DB:f.db,FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>controller}} as any)};
  }catch(e){await f.close();throw e;}
 }
 test('inbound acknowledgement atomically queues one fixed intake target; lease expiry and restart retain it',{timeout:30000},async t=>{
@@ -103,12 +103,12 @@ test('a failed queue insert rolls back inbound acknowledgement, and retry keeps 
  await f.db.prepare('DROP TRIGGER test_fail_dispatch').run();await f.db.prepare('UPDATE ingest_event SET delivery_due_at=0').run();const [claim]=await claimInboundEvents(f.db,Date.now());assert.equal((await f.call('inbound',{eventId:claim.eventId})).body.outcome,'accepted');await finishInboundEvent(f.db,claim,'accepted',Date.now(),true);
  const before=(await f.db.prepare('SELECT * FROM ai_dispatch').all()).results;await finishInboundEvent(f.db,claim,'accepted',Date.now(),true);assert.deepEqual((await f.db.prepare('SELECT * FROM ai_dispatch').all()).results,before);assert.equal((await m.claimAiDispatches(f.db,Date.now())).length,1);
 });
-test('disabled and overdue dispatches return to humans without starting any model, and reserved command names cannot be occupied',{timeout:30000},async t=>{
- const m=await api();for(const reason of ['disabled','timeout']){
+test('overdue dispatches return to humans without starting any model, and reserved command names cannot be occupied',{timeout:30000},async t=>{
+ const m=await api();for(const reason of ['timeout']){
   const f=await fixture();try{await f.append();const row=(await f.db.prepare('SELECT run_id FROM ai_dispatch').first())!;
    assert.equal((await f.call('execute',{command:{commandId:`ai-dispatch-stop:${row.run_id}`,expectedVersion:1,action:'claim'}})).body.outcome,'conflict');
    if(reason==='timeout')await f.db.prepare('UPDATE ai_dispatch SET created_at=?').bind(Date.now()-300001).run();
-   await m.dispatchAiReceptions({...f.env(),AI_RECEPTION_ENABLED:reason==='disabled'?'false':'true'},{reconcile:async()=>({status:'unavailable'}),execute:async()=>{throw new Error('must not execute');}});
+   await m.dispatchAiReceptions(f.env(),{reconcile:async()=>({status:'unavailable'}),execute:async()=>{throw new Error('must not execute');}});
    const r=JSON.parse((await f.db.prepare("SELECT receipt FROM conversation_control_event WHERE action='ai_dispatch_stop'").first<string>('receipt'))!);assert.equal(r.input.reason,reason);assert.equal((await f.call('read')).body.view.state.reception,'paused');assert.equal((await m.claimAiDispatches(f.db,Date.now()+60001)).length,0);assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);
   }finally{await f.close();}
  }
@@ -124,13 +124,13 @@ test('0040 preserves prior audit rows and guards, rolls back failures and never 
  await assert.rejects(()=>f.db.batch([...statements.map(s=>f.db.prepare(s)),f.db.prepare('SELECT * FROM missing_dispatch_upgrade_table')]));assert.deepEqual(await rows(),before);assert.deepEqual(await guards(),beforeGuards);assert.equal(await f.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name='ai_dispatch'").first('n'),0);
  await f.db.batch(statements.map(s=>f.db.prepare(s)));assert.deepEqual(await rows(),before);assert.deepEqual(await guards(),beforeGuards);assert.equal(await f.db.prepare('SELECT processed_at FROM ingest_event').first('processed_at'),2);assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_dispatch').first('n'),0);assert.equal((await f.db.prepare('PRAGMA foreign_key_check').all()).results.length,0);await assert.rejects(()=>f.db.prepare("UPDATE conversation_control_event SET receipt='{}'").run(),/IMMUTABLE/);
 });
-test('a new input after the global switch is disabled leaves an AI waiting state through the actual delivery consumer',{timeout:30000},async t=>{
+test('a new input is queued for AI by the delivery consumer before any model runs',{timeout:30000},async t=>{
  const m=await api(),f=await fixture();t.after(f.close);const actor={...f.actor(),expectedMemberId:'owner-member'};
  assert.equal((await f.call('ai-listen',{actor,request:{commandId:crypto.randomUUID(),expectedVersion:0,previousRunId:null}})).body.outcome,'accepted');
  const id=crypto.randomUUID(),now=Date.now()+1;await f.db.batch([
   f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES(?,'org','store','conv',?,'Customer','inbound','[\"Вопрос\"]',0,0,?,?,'incremental')").bind(id,id,now,now),
   f.db.prepare("INSERT INTO ingest_event(id,organization_id,store_id,conversation_id,message_id,state,live_observed_at,trace_id,created_at) VALUES(?,'org','store','conv',?,'pending',?,'synthetic',?)").bind(id,id,now,now),
  ]);
- const env={...f.env(),AI_RECEPTION_ENABLED:'false'};await deliverInboundEvents(env);await m.dispatchAiReceptions(env,{execute:async()=>{throw new Error('disabled model must not run');},reconcile:async()=>({status:'unavailable'})});
- const state=(await f.call('read')).body.view.state;assert.equal(state.reception,'paused');assert.equal(state.workStatus,'needs_reply');assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);assert.equal((await m.claimAiDispatches(f.db,Date.now()+60001)).length,0);
+ const env={...f.env(),NVAPI_KEY:undefined,AI_RECEPTION_CONFIG_JSON:undefined};await deliverInboundEvents(env);
+ const state=(await f.call('read')).body.view.state;assert.equal(state.reception,'ai');assert.equal(state.workStatus,'needs_reply');assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);assert.equal((await m.claimAiDispatches(f.db,Date.now()+60001)).length,1);
 });

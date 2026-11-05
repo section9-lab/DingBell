@@ -6,7 +6,8 @@ import { PREVIEW_MODEL,validatePreviewConfig } from './policy.ts';
 export interface TranslationDeploymentEnv { TRANSLATION_ENABLED?:string;TRANSLATION_CONFIG_JSON?:string }
 const model=nvidiaProvider().getModels().find(value=>value.id===PREVIEW_MODEL);
 export function readTranslationDeploymentConfig(env:TranslationDeploymentEnv):TranslationConfig|null{
-  if(env.TRANSLATION_ENABLED!=='true'||!env.TRANSLATION_CONFIG_JSON||!model)return null;
+  if(env.TRANSLATION_ENABLED!=='true'||!model||!env.TRANSLATION_CONFIG_JSON||env.TRANSLATION_CONFIG_JSON.length>32768)return null;
+  // Missing reviewed prices are unavailable. Explicit, reviewed zeros remain valid.
   try{
     const config=freezeTranslationConfig(JSON.parse(env.TRANSLATION_CONFIG_JSON));
     validatePreviewConfig(config,model.contextWindow);return config;

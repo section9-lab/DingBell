@@ -11,10 +11,10 @@ const messageFields={
   isImage:v.boolean(),eventAt:timestamp,
 };
 const previewSchema=v.object({...messageFields,content:v.pipe(v.array(v.pipe(v.string(),v.check(value=>Array.from(value).length<=280))),v.maxLength(1)),previewTruncated:v.boolean()});
-const messageSchema=v.object({...messageFields,sequence:v.pipe(count,v.minValue(1)),content:v.array(v.string()),receivedAt:timestamp,ingestMode:v.picklist(['backfill','incremental']),orderNumber:v.nullable(v.string()),sku:v.nullable(id)});
+const messageSchema=v.object({...messageFields,sequence:v.pipe(count,v.minValue(1)),content:v.array(v.string()),receivedAt:timestamp,ingestMode:v.picklist(['backfill','incremental']),orderNumber:v.nullable(v.string()),sku:v.nullable(id),isRead:v.boolean()});
 const summaryFields={
   id,store:v.object({id,name:v.string(),status:v.picklist(['unverified','verified','partial','attention','paused','disconnected'])}),
-  platformThreadId:id,platformType:v.string(),platformStatus:v.string(),platformCreatedAt:timestamp,importedAt:timestamp,lastMessageAt:v.nullable(timestamp),latestMessage:v.nullable(previewSchema),
+  platformThreadId:id,platformType:v.string(),platformStatus:v.string(),platformCreatedAt:timestamp,importedAt:timestamp,lastMessageAt:v.nullable(timestamp),latestMessage:v.nullable(previewSchema),buyerSenderId:v.nullable(id),buyerOrderNumber:v.nullable(id),
 };
 const queueSchema=v.picklist(['all','mine','unassigned']);
 const stateFilterSchema=v.picklist(['all','needs_reply','waiting_customer','waiting_internal','resolved']);
@@ -22,7 +22,7 @@ const workflowSchema=v.pipe(v.object({version:count,lifecycle:v.picklist(['open'
   v.check(value=>(value.lifecycle==='resolved'?value.workStatus===null:value.workStatus!==null)&&(value.assignedMemberId!==null||value.assigneeName===null)));
 const summarySchema=v.object({...summaryFields,workflow:workflowSchema});
 const detailSchema=v.object({...summaryFields,sync:v.object({enabled:v.boolean(),lastSuccessAt:v.nullable(timestamp),lastError:v.nullable(v.string()),backfillComplete:v.nullable(v.boolean())})});
-const listOptions=v.pipe(v.strictObject({queue:v.optional(queueSchema),state:v.optional(stateFilterSchema),storeId:v.optional(id),searchField:v.optional(v.picklist(['thread','order'])),search:v.optional(v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value=>!!value.trim()))),cursor:v.optional(cursor),limit:v.optional(limit)}),v.check(value=>(value.searchField===undefined)===(value.search===undefined)));
+const listOptions=v.pipe(v.strictObject({queue:v.optional(queueSchema),state:v.optional(stateFilterSchema),storeId:v.optional(id),searchField:v.optional(v.picklist(['thread','order'])),search:v.optional(v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value=>!!value.trim()))),cursor:v.optional(cursor),limit:v.optional(limit)}),v.check(value=>value.searchField===undefined||value.search!==undefined));
 const pageOptions=v.pipe(v.strictObject({cursor:v.optional(cursor),limit:v.optional(limit),anchorId:v.optional(id),direction:v.optional(v.picklist(['older','newer','from']))}),
   v.check(value=>(value.anchorId===undefined)===(value.direction===undefined)&&(value.anchorId===undefined||value.cursor!==undefined)));
 const updatesOptions=v.strictObject({cursor,limit:v.optional(limit)});

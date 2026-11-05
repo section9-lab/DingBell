@@ -15,6 +15,12 @@ function invalid(): never { throw new OzonReadError('invalid_response'); }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value as Record<string, unknown>; }
 function text(value: unknown, maximum = 256): string { if (typeof value !== 'string' || !value || value.length > maximum) invalid(); return value; }
 function id(value: unknown): string { const result = text(value, 40); if (!decimal.test(result)) invalid(); return result; }
+// Sender identities are metadata, not pagination/product IDs. Ozon ChatBot messages
+// may carry an opaque textual user.id; keep it verbatim without granting it authority.
+function optionalSenderId(value:unknown):string|null {
+  if(value===undefined||value===null||value==='')return null;
+  const result=text(value);if(result!==result.trim()||/[\u0000-\u001f\u007f]/.test(result))invalid();return result;
+}
 function optionalId(value: unknown): string | null { return value === undefined || value === null || value === '' ? null : id(value); }
 function optionalText(value: unknown): string | null { return value === undefined || value === null || value === '' ? null : text(value); }
 function timestamp(value: unknown): string { const result = text(value, 64); if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(result) || !Number.isFinite(Date.parse(result))) invalid(); return result; }
@@ -46,7 +52,7 @@ export async function readOzonMessages(credentials: Credentials, options: { chat
   const messages = value.messages.map(item => {
     const row = object(item), user = object(row.user), context = row.context === undefined || row.context === null ? {} : object(row.context);
     if (!Array.isArray(row.data) || row.data.some(part => typeof part !== 'string')) invalid();
-    return { id: id(row.message_id), createdAt: timestamp(row.created_at), senderId: optionalId(user.id), senderType: text(user.type), content: row.data as string[], isImage: boolean(row.is_image), isRead: boolean(row.is_read), orderNumber: optionalText(context.order_number), sku: optionalId(context.sku) };
+    return { id: id(row.message_id), createdAt: timestamp(row.created_at), senderId: optionalSenderId(user.id), senderType: text(user.type), content: row.data as string[], isImage: boolean(row.is_image), isRead: boolean(row.is_read), orderNumber: optionalText(context.order_number), sku: optionalId(context.sku) };
   });
   return { messages, hasNext };
 }

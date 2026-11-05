@@ -11,6 +11,9 @@ import { registerKnowledgeRoutes } from './modules/knowledge/http.ts';
 import { registerMembershipRoutes } from './modules/membership/http.ts';
 import { registerStoreRoutes } from './modules/stores/http.ts';
 import { registerSyncRoutes } from './modules/sync/http.ts';
+import {registerPushRoutes} from './modules/ozon-push/http.ts';
+import {registerRealtimeRoutes} from './modules/realtime/http.ts';
+import { registerReadinessRoutes } from './modules/readiness/http.ts';
 import { registerConversationRoutes } from './modules/conversations/http.ts';
 import { registerConversationControlRoutes } from './modules/conversations/control-http.ts';
 import { registerTranslationRoutes } from './modules/translations/http.ts';
@@ -19,19 +22,18 @@ import { mailConfigured } from './modules/mail/config.ts';
 import type { IdentityDependencies } from './modules/mail/types.ts';
 import type { StoreDependencies } from './modules/stores/bindings.ts';
 import type { TranslationServiceDeps } from './modules/translations/api-types.ts';
-import { registerReplyTestRoutes,type ReplyTestHttpDependencies } from './modules/reply-tests/http.ts';
-import { registerReplyTestBudgetRoutes } from './modules/reply-tests/budget-http.ts';
 import { registerAiBudgetRoutes } from './modules/ai-runs/budget-http.ts';
 import { registerAiReceptionRoutes } from './modules/conversations/ai-http.ts';
-import { registerAiDraftRoutes } from './modules/ai-runs/draft-http.ts';
 import { registerBudgetAuditRoutes } from './modules/budget-audit/http.ts';
 import {registerExportRoutes} from './modules/exports/http.ts';
 import {registerAnalyticsRoutes} from './modules/analytics/http.ts';
 import {registerDataGovernanceRoutes} from './modules/data-governance/http.ts';
 import {registerDegradationRoutes} from './modules/degradation/http.ts';
 import {registerCommerceRoutes} from './modules/commerce/http.ts';
+import {registerAccountingRoutes} from './modules/accounting/http.ts';
+import {registerCompanyModelRoutes,type CompanyModelDependencies} from './modules/company-model/http.ts';
 
-export function createApp(deps: IdentityDependencies & StoreDependencies & TranslationServiceDeps & ReplyTestHttpDependencies = {}) {
+export function createApp(deps: IdentityDependencies & StoreDependencies & TranslationServiceDeps & CompanyModelDependencies = {}) {
   const app = new Hono<ApplicationEnv>();
   app.use('*', async (c, next) => {
     c.set('requestId', crypto.randomUUID());
@@ -55,24 +57,26 @@ export function createApp(deps: IdentityDependencies & StoreDependencies & Trans
   registerInvitationRoutes(app, deps);
   registerMembershipRoutes(app);
   registerCompanySettingsRoutes(app);
+  registerCompanyModelRoutes(app,deps);
   registerReplyPolicyRoutes(app);
   registerKnowledgeRoutes(app);
   registerStoreRoutes(app, deps);
   registerSyncRoutes(app);
+  registerPushRoutes(app);
+  registerRealtimeRoutes(app);
+  registerReadinessRoutes(app);
   registerCommerceRoutes(app);
-  registerConversationRoutes(app);
+  registerConversationRoutes(app, deps);
   registerConversationControlRoutes(app);
   registerTranslationRoutes(app, deps);
-  registerReplyTestRoutes(app, deps);
-  registerReplyTestBudgetRoutes(app);
   registerAiBudgetRoutes(app);
   registerBudgetAuditRoutes(app);
   registerExportRoutes(app);
   registerAnalyticsRoutes(app);
+  registerAccountingRoutes(app);
   registerDataGovernanceRoutes(app);
   registerDegradationRoutes(app);
   registerAiReceptionRoutes(app);
-  registerAiDraftRoutes(app);
   app.notFound(c => apiError(c, 'NOT_FOUND', 'The resource is not available.', 404));
   app.onError((error, c) => {
     if (error instanceof AuditUnavailable) return apiError(c, 'AUDIT_UNAVAILABLE', 'Audit storage is temporarily unavailable.', 503);

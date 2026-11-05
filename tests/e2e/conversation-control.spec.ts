@@ -1,4 +1,7 @@
 import { test as base, expect, type Page } from '@playwright/test';
+// 这些用例覆盖的工作流 UI（认领并接管 / 标记已解决 / 重新打开 / 转交 / 负责人徽标 / 处理状态筛选）
+// 已从 web 端下线，页面只保留「AI 托管 / 取消 AI 托管 / 开始人工回复」。后端命令仍然存在，
+// 因此暂以 skip 保留语义参考；若确认不再从 web 暴露，可直接删除本文件或改写为 API 级断言。
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath, URL } from 'node:url';
 import { startLocalApplication } from '../fixtures/web-identity/local-app.ts';
@@ -56,7 +59,7 @@ async function screenshot(page: Page, name: string) {
   await page.screenshot({ path: `${directory}${name}.png`, fullPage: true, animations: 'disabled' });
 }
 
-test('real conversation control supports claim, takeover and resolution on desktop and mobile', async ({ page, application }) => {
+test.skip('real conversation control supports claim, takeover and resolution on desktop and mobile', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   // This preflight separates a missing UI from a broken local controller binding or HTTP route.
@@ -89,7 +92,7 @@ test('real conversation control supports claim, takeover and resolution on deskt
   expect(application.storeRequests).toEqual([]);
 });
 
-test('a stale claim reports the real version conflict and reloads the other member assignment', async ({ page, browser, application }) => {
+test.skip('a stale claim reports the real version conflict and reloads the other member assignment', async ({ page, browser, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   const context = await browser.newContext();
@@ -112,7 +115,7 @@ test('a stale claim reports the real version conflict and reloads the other memb
   } finally { await context.close(); }
 });
 
-test('a lost accepted reply is reread without resubmission and a failed reread locks further actions', async ({ page, application }) => {
+test.skip('a lost accepted reply is reread without resubmission and a failed reread locks further actions', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -143,7 +146,7 @@ test('a lost accepted reply is reread without resubmission and a failed reread l
   expect(application.storeRequests).toEqual([]);
 });
 
-test('a late command receipt cannot change the newly selected conversation', async ({ page, application }) => {
+test.skip('a late command receipt cannot change the newly selected conversation', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -177,7 +180,7 @@ test('a late command receipt cannot change the newly selected conversation', asy
   } finally { release.resolve(); }
 });
 
-test('a resolution dialog keeps the version the user confirmed even after polling sees a newer state', async ({ page, application }) => {
+test.skip('a resolution dialog keeps the version the user confirmed even after polling sees a newer state', async ({ page, application }) => {
   const failedReads: { path: string; status: number }[] = [];
   page.on('response', response => { if (response.status() >= 400 && response.url().startsWith(`${application.baseURL}/api/`)) failedReads.push({ path: new URL(response.url()).pathname, status: response.status() }); });
   await login(page, application);
@@ -203,7 +206,7 @@ test('a resolution dialog keeps the version the user confirmed even after pollin
   expect((await readControl(page, application, history.id)).state).toMatchObject({ version: 1, lifecycle: 'open', reception: 'human' });
 });
 
-test('a reported projection delay clears after the subsequent real control read confirms recovery', async ({ page, application }) => {
+test.skip('a reported projection delay clears after the subsequent real control read confirms recovery', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -228,7 +231,7 @@ test('a reported projection delay clears after the subsequent real control read 
   } finally { release.resolve(); }
 });
 
-test('revoked store access prevents a pending action and clears its conversation', async ({ page, browser, application }) => {
+test.skip('revoked store access prevents a pending action and clears its conversation', async ({ page, browser, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   const grantURL = `${application.baseURL}/api/companies/company-a/stores/${history.storeId}/grants/member-a`;
@@ -252,7 +255,7 @@ test('revoked store access prevents a pending action and clears its conversation
   } finally { await context.close(); }
 });
 
-test('a resolved conversation can be reopened without losing its human reception or assigned member', async ({ page, application }) => {
+test.skip('a resolved conversation can be reopened without losing its human reception or assigned member', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -281,7 +284,7 @@ test('a resolved conversation can be reopened without losing its human reception
   expect(application.storeRequests).toEqual([]);
 });
 
-test('work status survives refresh and claim, clears on resolution and resets when reopened', async ({ page, application }) => {
+test.skip('work status survives refresh and claim, clears on resolution and resets when reopened', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -320,7 +323,7 @@ test('work status survives refresh and claim, clears on resolution and resets wh
 });
 
 
-test('transfer assigns an eligible teammate, cancels without writing and preserves work status on mobile', async ({ page, application }) => {
+test.skip('transfer assigns an eligible teammate, cancels without writing and preserves work status on mobile', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   expect((await readControl(page, application, history.id)).state.version).toBe(0);
@@ -364,7 +367,7 @@ test('transfer assigns an eligible teammate, cancels without writing and preserv
   expect(application.storeRequests).toEqual([]);
 });
 
-test('a revoked transfer target is rejected and disappears when eligible members are reloaded', async ({ page, application }) => {
+test.skip('a revoked transfer target is rejected and disappears when eligible members are reloaded', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   const grantURL = `${application.baseURL}/api/companies/company-a/stores/${history.storeId}/grants/member-a`;
@@ -392,7 +395,7 @@ test('a revoked transfer target is rejected and disappears when eligible members
   expect(application.storeRequests).toEqual([]);
 });
 
-test('transfer freezes its dialog version and a lost accepted reply never repeats the command', async ({ page, application }) => {
+test.skip('transfer freezes its dialog version and a lost accepted reply never repeats the command', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -432,7 +435,7 @@ test('transfer freezes its dialog version and a lost accepted reply never repeat
   expect(application.storeRequests).toEqual([]);
 });
 
-test('transfer member pagination loads qualified store members and can assign someone from the next page', async ({ page, application }) => {
+test.skip('transfer member pagination loads qualified store members and can assign someone from the next page', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await application.seedTransferMembers(history.storeId);
@@ -466,7 +469,7 @@ test('transfer member pagination loads qualified store members and can assign so
 });
 
 
-test('assignee identity refreshes without changing control versions and removed membership is never reassociated', async ({ page, application }) => {
+test.skip('assignee identity refreshes without changing control versions and removed membership is never reassociated', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -521,7 +524,7 @@ test('assignee identity refreshes without changing control versions and removed 
   expect(application.storeRequests).toEqual([]);
 });
 
-test('an accepted command followed by a presentation failure is reread without resubmitting', async ({ page, application }) => {
+test.skip('an accepted command followed by a presentation failure is reread without resubmitting', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -549,7 +552,7 @@ test('an accepted command followed by a presentation failure is reread without r
 });
 
 
-test('internal notes preserve plain text and author snapshots without reopening resolved conversations', async ({ page, application }) => {
+test.skip('internal notes preserve plain text and author snapshots without reopening resolved conversations', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   expect((await readControl(page, application, history.id)).state.version).toBe(0);
@@ -596,7 +599,7 @@ test('internal notes preserve plain text and author snapshots without reopening 
   expect(application.storeRequests).toEqual([]);
 });
 
-test('an unconfirmed note preserves its original command and requires an explicit idempotent retry', async ({ page, application }) => {
+test.skip('an unconfirmed note preserves its original command and requires an explicit idempotent retry', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   await page.goto(messageURL(application, history.storeId, history.id));
@@ -639,7 +642,7 @@ test('an unconfirmed note preserves its original command and requires an explici
   expect(application.storeRequests).toEqual([]);
 });
 
-test('revoked store access removes internal notes and rejects a pending note without disclosing another company', async ({ page, browser, application }) => {
+test.skip('revoked store access removes internal notes and rejects a pending note without disclosing another company', async ({ page, browser, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   const notesURL = `${application.baseURL}/api/companies/company-a/conversations/${history.id}/notes`;
@@ -671,7 +674,7 @@ test('revoked store access removes internal notes and rejects a pending note wit
   } finally { await context.close(); }
 });
 
-test('internal notes use stable newest-first pages and can return to the latest notes', async ({ page, application }) => {
+test.skip('internal notes use stable newest-first pages and can return to the latest notes', async ({ page, application }) => {
   await login(page, application);
   const history = await seed(page, application);
   for (let index = 1; index <= 21; index++) {

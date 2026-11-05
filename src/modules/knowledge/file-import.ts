@@ -36,7 +36,7 @@ export async function parseKnowledgeFile(form: FormData) {
       if (info.records > knowledgeFileRows + 1) return fail('ROWS'); return record;
     } }); } catch (error) { if (error instanceof KnowledgeFileError) throw error; return fail('CSV'); }
     if (records.length < 2 || JSON.stringify(records[0]) !== '["title","content"]') return fail('CSV');
-    records.slice(1).forEach(([title, content], i) => add({ title, source: { format: 'text', content } }, i + 1));
+    records.slice(1).forEach(([title, content], i) => { add({ title, source: { format: 'text', content } }, i + 1); });
   } else add({ title, source: { format, content } }, 1);
   if (new Set(drafts.map(draft => JSON.stringify(draft))).size !== drafts.length) return fail('DUPLICATE');
   const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');

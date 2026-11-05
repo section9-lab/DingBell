@@ -7,7 +7,7 @@ const storeSchema = v.object({
   status: v.picklist(['unverified', 'verified', 'partial', 'attention', 'paused', 'disconnected']),
   revision, credentialVersion: revision, hasCredentials: v.boolean(), checking: v.boolean(),
   capabilities: v.array(v.object({ code: v.string(), status: v.picklist(['unknown', 'available', 'denied', 'unsupported']), reason: v.string() })),
-  checkedAt: v.nullable(v.string()), expiresAt: v.nullable(v.string()),
+  checkedAt: v.nullable(v.string()), expiresAt: v.nullable(v.string()), outboundEnabled: v.boolean(),
 });
 export type StoreRecord = v.InferOutput<typeof storeSchema>;
 const path = (companyId: string, storeId?: string) => `/api/companies/${encodeURIComponent(companyId)}/stores${storeId ? `/${encodeURIComponent(storeId)}` : ''}`;
@@ -26,6 +26,7 @@ type StoreActions = {
   state: { expectedRevision: number; state: 'paused' | 'unverified' | 'disconnected' };
   credentials: { expectedRevision: number; apiKey: string };
   check: { expectedRevision: number };
+  outbound: { expectedRevision: number; enabled: boolean };
 };
 export function updateStore<A extends keyof StoreActions>(companyId: string, storeId: string, action: A, body: StoreActions[A]) {
   return request(`${path(companyId, storeId)}/${action}`, receipt(storeId), { method: 'POST', body: JSON.stringify(body) });

@@ -1,9 +1,13 @@
 import {defineTool} from '../../platform/core/tool.ts';
 import * as v from 'valibot';
 import {aiRunSchema,type AiRun,type AiHandoff} from './ai-state.ts';
-import {aiAnswerInputSchema,type AiAnswerInput} from '../ai-runs/answer.ts';
+import {replyBodySchema} from './control-state.ts';
 import type {ControlScope} from './control-types.ts';
 import {createHandoffTool} from './handoff-tool.ts';
+const hash=v.pipe(v.string(),v.regex(/^[0-9a-f]{64}$/));
+/** Shared reply input contract: a customer-facing body plus supporting knowledge citations. */
+export const aiAnswerInputSchema=v.strictObject({body:replyBodySchema,citations:v.pipe(v.array(hash),v.minLength(1),v.maxLength(10),v.check(ids=>new Set(ids).size===ids.length))});
+export type AiAnswerInput=v.InferOutput<typeof aiAnswerInputSchema>;
 type Services={prepare:(scope:ControlScope,id:string,input:AiAnswerInput)=>Promise<unknown>;wakeAiReply:(scope:ControlScope,id:string)=>Promise<void>;requestHandoff:(scope:ControlScope,id:string,input:AiHandoff)=>Promise<unknown>};
 const status=v.picklist(['prepared','conflict','unavailable','unconfirmed']);
 const outcome=v.strictObject({status,intentId:v.nullable(v.pipe(v.string(),v.maxLength(256))),canSend:v.literal(false),sent:v.literal(false)});

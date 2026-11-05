@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import {noPushMessageReview} from '../ozon-push/barrier.ts';
 import {aiScopeSchema} from '../conversations/ai-state.ts';
 import {aiWorkSchema,type AiWork} from '../conversations/ai-intake.ts';
 import type {ControlScope} from '../conversations/control-types.ts';
@@ -46,7 +47,8 @@ export const currentPayload=`EXISTS (SELECT 1 FROM conversation_control cc JOIN 
  WHERE cc.controller_id=json_extract(plan.value,'$.run.scope.controllerId') AND cc.organization_id=json_extract(plan.value,'$.run.scope.organizationId')
  AND cc.store_id=json_extract(plan.value,'$.run.scope.storeId') AND cc.conversation_id=json_extract(plan.value,'$.run.scope.conversationId')
  AND cc.lifecycle='open' AND cc.reception='ai' AND cc.control_epoch=json_extract(plan.value,'$.run.controlEpoch') AND cc.assigned_member_id IS NULL AND cc.work_status='needs_reply'
- AND c.message_sequence=json_extract(plan.value,'$.run.admission.inputRevision') AND c.platform_type='BUYER_SELLER' AND c.platform_status='Opened'
+ AND c.message_sequence=json_extract(plan.value,'$.run.admission.inputRevision') AND ${noPushMessageReview('c')}
+ AND NOT EXISTS(SELECT 1 FROM ozon_push_chat_head AS head WHERE head.organization_id=c.organization_id AND head.store_id=c.store_id AND head.conversation_id=c.id AND head.message_id IS NOT json_extract(plan.value,'$.run.admission.messageId')) AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened'
  AND s.status IN ('verified','partial','attention') AND p.enabled=1 AND p.kind='automatic'
  AND ((json_extract(plan.value,'$.run.schemaVersion')=1 AND p.id=json_extract(plan.value,'$.run.admission.policyId') AND p.published_revision=json_extract(plan.value,'$.run.admission.policyRevision'))
   OR (json_extract(plan.value,'$.run.kind')='intake' AND EXISTS (SELECT 1 FROM json_each(plan.value,'$.run.admission.candidates') candidate

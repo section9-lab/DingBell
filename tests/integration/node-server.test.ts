@@ -10,7 +10,7 @@ import { test } from 'node:test';
 
 test('standalone Node artifact serves its UI and restarts after SIGKILL without dependencies', {timeout:30000},async context=>{
  const folder=await mkdtemp(join(tmpdir(),'dingbell-standalone-'));
- await cp(resolve('dist/node/server'),join(folder,'server'),{recursive:true});await cp(resolve('dist/node/client'),join(folder,'client'),{recursive:true});await cp(resolve('migrations'),join(folder,'migrations'),{recursive:true});await writeFile(join(folder,'package.json'),'{"type":"module"}');
+ await cp(resolve(process.env.DINGBELL_TEST_DIST??'dist','node/server'),join(folder,'server'),{recursive:true});await cp(resolve(process.env.DINGBELL_TEST_DIST??'dist','node/client'),join(folder,'client'),{recursive:true});await cp(resolve('migrations'),join(folder,'migrations'),{recursive:true});await writeFile(join(folder,'package.json'),'{"type":"module"}');
  const portServer=createServer();await new Promise<void>(done=>portServer.listen(0,'127.0.0.1',done));const address=portServer.address();assert.ok(address&&typeof address!=='string');const port=address.port;await new Promise<void>(done=>portServer.close(()=>done()));
  const origin='http://127.0.0.1:'+port;let child:ChildProcess|undefined;
  const start=async()=>{

@@ -11,10 +11,7 @@ import { Textarea } from './ui/textarea';
 
 export const knowledgeKinds = { faq: '常见问题', policy: '店铺政策', guide: '使用说明', product: '商品资料' } as const;
 export const knowledgeLanguages = { ru: '俄语', 'zh-CN': '简体中文', en: '英语' } as const;
-export const knowledgeStates = { draft: '待索引', indexing: '索引中', ready: '索引就绪', failed: '索引未完成' } as const;
-export const knowledgeJobStates = { queued: '等待执行', embedding: '准备索引', indexing: '等待索引可见', running: '执行中', waiting: '等待校验', succeeded: '已完成', failed: '执行失败', unknown: '结果待确认', cancelled: '已取消' } as const;
-export const knowledgeJobKinds = { index: '索引', test: '检索测试', publish: '发布' } as const;
-export const knowledgeJobActive = (state?: string) => !!state && ['queued', 'embedding', 'indexing', 'running', 'waiting'].includes(state);
+export const knowledgeStates = { draft: '草稿', ready: '已就绪', failed: '已失败' } as const;
 export function KnowledgeSource({ source }: { source: KnowledgeDraft['source'] }) {
   return source.format === 'product' ? <dl className="flex flex-col gap-2 text-sm">{source.facts.map((fact, index) => <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3"><dt className="break-words text-muted-foreground">{fact.label}</dt><dd className="break-words whitespace-pre-wrap">{fact.value}</dd></div>)}</dl>
     : <p className="break-words whitespace-pre-wrap text-sm leading-6">{source.content}</p>;

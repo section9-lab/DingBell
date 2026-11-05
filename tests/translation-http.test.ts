@@ -142,13 +142,38 @@ test('reply preview admission errors have stable public mappings without creatin
   const f=await fixture();try{
     delete f.env.TRANSLATION_ENABLED;await code(await f.request(null),403,'TRANSLATION_DISABLED');
     f.env.TRANSLATION_ENABLED='true';const config=f.env.TRANSLATION_CONFIG_JSON;
-    delete f.env.TRANSLATION_CONFIG_JSON;await code(await f.request(null),503,'PRICING_UNAVAILABLE');
     f.env.TRANSLATION_CONFIG_JSON='{bad';await code(await f.request(null),503,'PRICING_UNAVAILABLE');
     f.env.TRANSLATION_CONFIG_JSON=config;
     await code(await f.request(null,{runtimeConfigured:false}),503,'RUNTIME_UNAVAILABLE');
     await f.DB.prepare("UPDATE translation_budget_bucket SET enabled=0 WHERE id='http-budget'").run();
     await code(await f.request(null),412,'BUDGET_UNAVAILABLE');
     assert.equal(f.calls.length,0);assert.equal(await f.DB.prepare('SELECT count(*) AS n FROM reply_preview_run').first('n'),0);
+  }finally{await f.close();}
+});
+
+test('reply previews reject missing prices before creating ledgers or calling the provider',{timeout:30_000},async()=>{
+  const f=await fixture();try{
+    delete f.env.TRANSLATION_CONFIG_JSON;
+    await f.DB.prepare('DELETE FROM translation_budget_bucket').run();
+    await code(await f.request(null),503,'PRICING_UNAVAILABLE');
+    assert.equal(f.calls.length,0);
+    assert.equal(await f.DB.prepare('SELECT COUNT(*) AS n FROM reply_preview_run').first('n'),0);
+    assert.equal(await f.DB.prepare('SELECT COUNT(*) AS n FROM translation_budget_bucket').first('n'),0);
+  }finally{await f.close();}
+});
+
+test('reply previews may settle at zero only with explicitly reviewed free pricing',{timeout:30_000},async()=>{
+  const f=await fixture();try{
+    const config=JSON.parse(f.env.TRANSLATION_CONFIG_JSON!);
+    f.env.TRANSLATION_CONFIG_JSON=JSON.stringify({...config,pricing:{...config.pricing,inputMicrosPerMillion:0,outputMicrosPerMillion:0,cacheReadMicrosPerMillion:0,cacheWriteMicrosPerMillion:0}});
+    await f.DB.prepare('DELETE FROM translation_budget_bucket').run();
+    const response=await f.request(null);assert.equal(response.status,200);
+    const payload=await response.json() as any;
+    assert.equal(payload.preview.status,'ready');assert.equal(payload.preview.translation,'Здравствуйте! Размер 26 см.');
+    assert.equal(payload.preview.usageStatus,'settled');
+    const run=await f.DB.prepare('SELECT reserved_micros AS reserved,charged_micros AS charged FROM reply_preview_run').first() as any;
+    assert.deepEqual({reserved:run.reserved,charged:run.charged},{reserved:0,charged:0});
+    assert.equal(await f.DB.prepare("SELECT COUNT(*) AS n FROM translation_budget_bucket WHERE limit_micros=0 AND enabled=1").first('n'),1);
   }finally{await f.close();}
 });
 

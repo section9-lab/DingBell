@@ -6,11 +6,18 @@ export interface MessagePreview {
 }
 export interface MessageView extends Omit<MessagePreview,'previewTruncated'> {
   sequence: number; receivedAt: number; ingestMode: 'backfill' | 'incremental'; orderNumber: string | null; sku: string | null;
+  // Platform is_read fact captured at import; never re-derived or written back by reads.
+  isRead: boolean;
 }
 export interface ConversationSummary {
   id: string; store: { id: string; name: string; status: StoreStatus };
   platformThreadId: string; platformType: string; platformStatus: string;
   platformCreatedAt: number; importedAt: number; lastMessageAt: number | null; latestMessage: MessagePreview | null;
+  // Latest platform sender id observed on an inbound message; the platform exposes no buyer name.
+  buyerSenderId: string | null;
+  // Order number of that same message when it is prefixed with the sender id; Ozon sometimes
+  // reports the order number itself as user.id, so that value is an order, not a buyer.
+  buyerOrderNumber: string | null;
 }
 export interface ConversationDetail extends ConversationSummary {
   sync: { enabled: boolean; lastSuccessAt: number | null; lastError: string | null; backfillComplete: boolean | null };
@@ -27,7 +34,7 @@ export interface ConversationListResult {
   counts: { all: number; mine: number; unassigned: number };
 }
 export interface ConversationListOptions {
-  storeId?: string; search?: { field: 'thread' | 'order'; value: string }; cursor?: string; limit: number;
+  storeId?: string; search?: { field: 'all' | 'thread' | 'order'; value: string }; cursor?: string; limit: number;
   queue?: ConversationQueue; state?: ConversationStateFilter;
 }
 export interface MessageListOptions { cursor?: string; limit: number; anchorId?: string; direction?: 'older' | 'newer' | 'from' }

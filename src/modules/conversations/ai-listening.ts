@@ -25,10 +25,24 @@ export async function readAiListeningBoundary(db:D1Database,scope:ControlScope){
   JOIN conversation c ON c.id=cc.conversation_id AND c.organization_id=cc.organization_id AND c.store_id=cc.store_id
   JOIN store s ON s.id=c.store_id AND s.organization_id=c.organization_id
   WHERE cc.controller_id=? AND cc.organization_id=? AND cc.store_id=? AND cc.conversation_id=?
-  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND c.platform_status='Opened'`).bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId).first<{sequence:number}>();
+  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened'`).bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId).first<{sequence:number}>();
  if(!row)return null;
  const policies=await Promise.all(policyStageSchema.options.map(stage=>selectReplyPolicy(db,scope,stage)));
  return policies.some(policy=>policy?.config.mode==='automatic')?v.parse(counter,row.sequence):null;
+}
+/** Distinguishes a channel blocker from a policy blocker so the operator is told what to change. */
+export type AiReceptionBlocker='channel'|'policy_missing'|'policy_draft_only';
+export async function diagnoseAiReceptionBlocker(db:D1Database,scope:ControlScope):Promise<AiReceptionBlocker|null>{
+ v.parse(aiScopeSchema,scope);
+ const row=await db.prepare(`SELECT 1 AS ok FROM conversation_control cc
+  JOIN conversation c ON c.id=cc.conversation_id AND c.organization_id=cc.organization_id AND c.store_id=cc.store_id
+  JOIN store s ON s.id=c.store_id AND s.organization_id=c.organization_id
+  WHERE cc.controller_id=? AND cc.organization_id=? AND cc.store_id=? AND cc.conversation_id=?
+  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened'`).bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId).first();
+ if(!row)return 'channel';
+ const policies=(await Promise.all(policyStageSchema.options.map(stage=>selectReplyPolicy(db,scope,stage)))).filter((policy):policy is NonNullable<typeof policy>=>policy!==null);
+ if(policies.length===0)return 'policy_missing';
+ return policies.every(policy=>policy.config.mode==='suggest')?'policy_draft_only':null;
 }
 export async function isNewAiInput(db:D1Database,listening:AiListening,messageId:string){
  const {scope}=v.parse(aiListeningSchema,listening);v.parse(id,messageId);

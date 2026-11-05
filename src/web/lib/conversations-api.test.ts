@@ -4,8 +4,8 @@ import { test } from 'node:test';
 import * as api from './conversations-api.ts';
 
 const instant='2026-10-09T00:00:00.000Z';
-const message={id:'msg',sequence:1,platformMessageId:'18446744073709551615',content:['Здравствуйте','<script>literal</script>'],senderId:'9007199254740993',senderType:'Customer',direction:'inbound',isImage:false,eventAt:instant,receivedAt:instant,ingestMode:'backfill',orderNumber:'order-1',sku:'9007199254740993'};
-const conversation={id:'conversation',store:{id:'store',name:'Synthetic',status:'paused'},platformThreadId:'18446744073709551615',platformType:'BUYER_SELLER',platformStatus:'Opened',platformCreatedAt:instant,importedAt:instant,lastMessageAt:instant,latestMessage:{...message,content:[message.content[0]],previewTruncated:true}};
+const message={id:'msg',sequence:1,platformMessageId:'18446744073709551615',content:['Здравствуйте','<script>literal</script>'],senderId:'9007199254740993',senderType:'Customer',direction:'inbound',isImage:false,isRead:false,eventAt:instant,receivedAt:instant,ingestMode:'backfill',orderNumber:'order-1',sku:'9007199254740993'};
+const conversation={id:'conversation',store:{id:'store',name:'Synthetic',status:'paused'},platformThreadId:'18446744073709551615',platformType:'BUYER_SELLER',platformStatus:'Opened',platformCreatedAt:instant,importedAt:instant,lastMessageAt:instant,latestMessage:{...message,content:[message.content[0]],previewTruncated:true},buyerSenderId:'9007199254740993',buyerOrderNumber:null};
 const workflow={version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null};
 const listMetadata={viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2}};
 const pageMetadata={viewerMemberId:'member-viewer',pageCursor:'history-page',updatesCursor:'updates-start',newerCursor:null};
@@ -20,6 +20,10 @@ test('conversation list requests preserve exact identifiers and encode independe
   const url=new URL(calls[0].url,'https://example.invalid');assert.equal(url.pathname,'/api/companies/c%2F1/conversations');
   assert.equal(url.searchParams.get('storeId'),'store');assert.equal(url.searchParams.get('searchField'),'order');assert.equal(url.searchParams.get('search'),'A/B + 1');assert.equal(url.searchParams.get('limit'),'1');
   assert.equal(calls[0].init.cache,'no-store');assert.equal(calls[0].init.credentials,'same-origin');
+  await read('c/1',{search:'A/B + 1'});
+  const combined=new URL(calls[1].url,'https://example.invalid');
+  assert.equal(combined.searchParams.get('search'),'A/B + 1');
+  assert.equal(combined.searchParams.has('searchField'),false);
 });
 
 test('conversation list replies validate company, store, schema, dates and requested page limit',async t=>{
@@ -59,7 +63,7 @@ test('conversation detail and message pages reject a different requested scope o
 test('invalid read options make no request and transport failures are never retried',async t=>{
   const read=method('readConversations'),messages=method('readConversationMessages');let calls=0;
   const mock=t.mock.method(globalThis,'fetch',async()=>{calls++;throw new Error('Synthetic network failure');});
-  for(const options of [{limit:0},{limit:101},{limit:1.5},{search:'orphan'},{searchField:'thread'},{searchField:'email',search:'x'},{unknown:true},{cursor:''}])await assert.rejects(read('company',options),{code:'INVALID_REQUEST'});
+  for(const options of [{limit:0},{limit:101},{limit:1.5},{search:''},{searchField:'thread'},{searchField:'email',search:'x'},{unknown:true},{cursor:''}])await assert.rejects(read('company',options),{code:'INVALID_REQUEST'});
   await assert.rejects(messages('company','conversation',{limit:101}),{code:'INVALID_REQUEST'});assert.equal(calls,0);
   await assert.rejects(read('company'),{code:'NETWORK_ERROR'});assert.equal(calls,1);mock.mock.restore();
 });

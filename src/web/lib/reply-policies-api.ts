@@ -41,6 +41,9 @@ export function readPolicyVersions(companyId:string,id:string,before:number,sign
 export function createReplyPolicy(companyId:string,id:string,config:ReplyPolicyConfig) {
   return request(path(companyId),schema(companyId,id),{method:'POST',body:JSON.stringify({id,config})});
 }
+export function saveReplyPolicy(companyId:string,id:string,expectedVersion:number,config:ReplyPolicyConfig) {
+  return request(`${path(companyId,id)}/save`,schema(companyId,id),{method:'POST',body:JSON.stringify({expectedVersion,config})});
+}
 type Changes={draft:{expectedVersion:number;config:ReplyPolicyConfig};test:{expectedVersion:number};publish:{expectedVersion:number};pause:{expectedVersion:number};restore:{expectedVersion:number;revision:number}};
 export function updateReplyPolicy<A extends keyof Changes>(companyId:string,id:string,action:A,body:Changes[A]) {
   return request(`${path(companyId,id)}/${action}`,schema(companyId,id),{method:'POST',body:JSON.stringify(body)});

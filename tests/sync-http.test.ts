@@ -47,13 +47,24 @@ async function fixture() {
     const created = await app.request(`${env.APP_BASE_URL}/api/companies/company/stores`,{method:'POST',headers:{cookie:cookies.owner!,origin:env.APP_BASE_URL,'content-type':'application/json'},body:JSON.stringify({id:storeId,name:'Synthetic sync store',clientId:'12345',apiKey:'synthetic-sync-platform-key'})},env as never);
     assert.equal(created.status,200);
     const qualify = (available = ['auth','chats_read']) => DB.prepare("UPDATE store SET status='partial',capabilities=?,checked_at=?,expires_at=? WHERE id=?")
-      .bind(JSON.stringify(['auth','products_read','chats_read','orders_fbs_read','reply','proactive_chat'].map(code => ({code,status:available.includes(code)?'available':'unknown',reason:'read_verified'}))),Date.now(),Date.now()+86_400_000,storeId).run();
+      .bind(JSON.stringify(['auth','products_read','chats_read','orders_fbs_read','orders_fbo_read','reply','proactive_chat'].map(code => ({code,status:available.includes(code)?'available':'unknown',reason:'read_verified'}))),Date.now(),Date.now()+86_400_000,storeId).run();
     return { DB,env,request,storeId,wakes,qualify,failWake:()=>{failWake=true;},onWake:(task:()=>Promise<unknown>)=>{wakeTask=task;},close:()=>mf.dispose() };
   } catch (error) {
     await mf.dispose().catch(() => {});
     throw error;
   }
 }
+
+test('FBO sync requires its own capability and manager intent without enabling FBS',{timeout:30_000},async t=>{
+ const f=await fixture();t.after(f.close);const path='/sync/fbo-postings';
+ let response=await f.request(path);assert.equal(response.status,200);let state=await response.json() as any;assert.equal(state.sync.source,'fbo_postings');assert.equal(state.sync.enabled,false);
+ await f.qualify(['auth','orders_fbs_read']);response=await f.request(path,{enabled:true,expectedEpoch:0});assert.equal(response.status,409);assert.equal((await response.json() as any).error.code,'FBO_SYNC_CAPABILITY_REQUIRED');
+ await f.qualify(['auth','orders_fbo_read']);assert.equal((await f.request(path,{enabled:true,expectedEpoch:0},'staff')).status,403);
+ response=await f.request(path,{enabled:true,expectedEpoch:0});assert.equal(response.status,200);state=await response.json() as any;assert.equal(state.sync.source,'fbo_postings');assert.equal(state.sync.epoch,1);assert.equal(state.sync.postingCount,0);assert.ok(state.sync.historyStart);
+ assert.equal(await f.DB.prepare("SELECT COUNT(*) AS n FROM store_sync_source WHERE source='fbs_postings'").first('n'),0);
+ assert.equal((await f.request(path,{enabled:false,expectedEpoch:0})).status,409);assert.equal((await f.request(path,{enabled:false,expectedEpoch:1})).status,200);
+ const audit=(await f.DB.prepare("SELECT action FROM store_audit_event WHERE action LIKE '%fbo_postings%' AND outcome='succeeded'").all<any>()).results;assert.deepEqual(audit.map(row=>row.action),['store.sync.fbo_postings.enable','store.sync.fbo_postings.disable']);
+});
 
 test('sync HTTP fixture cleanup preserves the initialization error even when disposal rejects', {timeout:30_000}, async t => {
   const failure = Object.assign(new Error('synthetic initialization failure'),{code:'EADDRNOTAVAIL'});
@@ -231,7 +242,7 @@ test('FBS synchronization starts only with its own capability and reports an exp
     const empty = (await response.json() as {sync:Record<string,unknown>}).sync;
     assert.deepEqual(empty, {storeId:f.storeId,source:'fbs_postings',enabled:false,epoch:0,dueAt:new Date(0).toISOString(),lastSuccessAt:null,
       blockedUntil:null,lastError:null,failures:0,running:false,postingCount:0,readyCount:0,pendingCount:0,failedCount:0,
-      historyStart:null,windowSince:null,windowTo:null,lastCompletedTo:null});
+      historyStart:null,windowSince:null,windowTo:null,lastCompletedTo:null,history:null});
     await f.qualify(['auth','products_read','chats_read']);
     response = await f.request('/sync/fbs-postings',{enabled:true,expectedEpoch:0});
     assert.equal(response.status,409); assert.equal((await response.json() as {error:{code:string}}).error.code,'FBS_SYNC_CAPABILITY_REQUIRED');

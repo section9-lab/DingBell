@@ -8,9 +8,11 @@ const responses: Record<string, unknown> = {
   '/v3/product/list': { result: { items: [] } },
   '/v3/chat/list': { chats: [], has_next: false },
   '/v4/posting/fbs/list': { postings: [], has_next: false },
+  '/v3/posting/fbo/list': { postings: [], has_next: false },
+  '/v1/posting/fbp/list':{postings:[],cursor:''},
 };
 
-test('only the four bounded read operations are called and roles never enable replies', async () => {
+test('only the six bounded read operations are called and roles never enable replies', async () => {
   const paths: string[] = [];
   const result = await inspectOzonCapabilities(credentials, (async (input, init) => {
     const url = new URL(String(input));
@@ -25,7 +27,7 @@ test('only the four bounded read operations are called and roles never enable re
   assert.deepEqual(paths, Object.keys(responses));
   assert.deepEqual(result.map(item => [item.code, item.status]), [
     ['auth', 'available'], ['products_read', 'available'], ['chats_read', 'available'],
-    ['orders_fbs_read', 'available'], ['reply', 'unknown'], ['proactive_chat', 'unknown'],
+    ['orders_fbs_read', 'available'], ['orders_fbo_read', 'available'], ['orders_fbp_read','available'], ['reply', 'unknown'], ['proactive_chat', 'unknown'],
   ]);
   assert.equal(JSON.stringify(result).includes(credentials.apiKey), false);
 });

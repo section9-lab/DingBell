@@ -183,6 +183,36 @@ test('real D1 synchronization commits an immutable page and its checkpoint under
     await db.prepare("UPDATE sync_cursor SET due_at=2 WHERE store_id=? AND stream='discovery'").bind(id).run();
     assert.equal((await getDueSyncCursor(db,await lease(id)))?.stream,'discovery');
   });
+  await context.test('a chat list that reports a newer message pulls its idle history sweep forward', async () => {
+    const id = await addStore('wake-on-change'); await discover(id);
+    await db.prepare("UPDATE sync_cursor SET completed=1 WHERE store_id=? AND stream='backfill'").bind(id).run();
+    const idle = Date.now() + 300_000;
+    await db.prepare("UPDATE sync_cursor SET cursor='older',due_at=? WHERE store_id=? AND stream='incremental'").bind(idle,id).run();
+    await db.prepare("UPDATE sync_cursor SET due_at=2 WHERE store_id=? AND stream='discovery'").bind(id).run();
+    const claimed = await lease(id), cursor = await getDueSyncCursor(db,claimed); assert.ok(cursor); assert.equal(cursor.stream,'discovery');
+    assert.ok(await commitSyncPage(db,claimed,{cursor,nextCursor:null,nextDueAt:Date.now()+60_000,completed:false,
+      chats:[{platformThreadId:'chat-1',type:'buyer_seller',status:'opened',createdAt:100,lastMessageId:'newest'}],
+      seeds:[{threadId:'chat-1',stream:'incremental',cursor:'newest',dueAt:idle}]}));
+    assert.equal(await db.prepare("SELECT cursor FROM sync_cursor WHERE store_id=? AND stream='incremental'").bind(id).first('cursor'),'older','the seed must not overwrite an established cursor');
+    assert.ok((await db.prepare("SELECT due_at AS dueAt FROM sync_cursor WHERE store_id=? AND stream='incremental'").bind(id).first<{dueAt:number}>())!.dueAt<=Date.now());
+  });
+  await context.test('an unchanged chat list leaves the idle history sweep alone', async () => {
+    const id = await addStore('quiet-when-unchanged'); await discover(id);
+    await db.prepare("UPDATE sync_cursor SET completed=1 WHERE store_id=? AND stream='backfill'").bind(id).run();
+    const idle = Date.now() + 300_000;
+    await db.prepare("UPDATE sync_cursor SET due_at=? WHERE store_id=? AND stream='incremental'").bind(idle,id).run();
+    await db.prepare("UPDATE sync_cursor SET due_at=2 WHERE store_id=? AND stream='discovery'").bind(id).run();
+    const claimed = await lease(id), cursor = await getDueSyncCursor(db,claimed); assert.ok(cursor); assert.equal(cursor.stream,'discovery');
+    assert.ok(await commitSyncPage(db,claimed,{cursor,nextCursor:null,nextDueAt:Date.now()+60_000,completed:false,
+      chats:[{platformThreadId:'chat-1',type:'buyer_seller',status:'opened',createdAt:100,lastMessageId:'18446744073709551615'}],
+      seeds:[{threadId:'chat-1',stream:'incremental',cursor:'18446744073709551615',dueAt:idle}]}));
+    assert.equal((await db.prepare("SELECT due_at AS dueAt FROM sync_cursor WHERE store_id=? AND stream='incremental'").bind(id).first<{dueAt:number}>())!.dueAt,idle);
+  });
+  await context.test('a new thread imports its first page before waiting polls', async () => {
+    const id = await addStore('backfill-first'); await discover(id);
+    await db.prepare("UPDATE sync_cursor SET due_at=0 WHERE store_id=? AND stream IN ('backfill','incremental')").bind(id).run();
+    assert.equal((await getDueSyncCursor(db,await lease(id)))?.stream,'backfill');
+  });
   await context.test('recent cursor loops are rejected across independently claimed pages', async () => {
     const id = await addStore('cursor-loop');
     for (const nextCursor of ['A','B']) {
@@ -293,4 +323,67 @@ test('source permissions and outcomes remain isolated behind one store lease', {
   const chatState=await getStoreSync(db,actor,'store');assert.ok(chatState);
   assert.ok(await setStoreSyncEnabled(db,actor,'store',chatState.epoch,false));
   assert.equal(await db.prepare("SELECT lease_token FROM store_coordinator WHERE store_id='store'").first('lease_token'),'fbs-lease');
+});
+
+test('outbound echoes merge with the platform copy instead of duplicating messages', { timeout: 60_000 }, async context => {
+  const mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("fixture")}}', compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
+  context.after(() => mf.dispose());
+  const db = await mf.getD1Database('DB') as unknown as D1Database;
+  const folder = new URL('../migrations/', import.meta.url);
+  for (const name of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) {
+    for (const statement of readFileSync(new URL(name, folder), 'utf8').split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await db.prepare(statement).run();
+  }
+  const orgId = 'echo-org', actor = { orgId, actorUserId: 'echo-admin', sessionId: 'echo-session' };
+  await db.batch([
+    db.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('echo-org','Echo','echo',1)"),
+    db.prepare("INSERT INTO user (id,name,email,email_verified) VALUES ('echo-admin','Admin','echo@example.invalid',1)"),
+    db.prepare("INSERT INTO member (id,organization_id,user_id,role,created_at) VALUES ('echo-member','echo-org','echo-admin','admin',1)"),
+    db.prepare('INSERT INTO session (id,token,user_id,expires_at,created_at,updated_at) VALUES (?,?,?,?,1,1)').bind(actor.sessionId, actor.sessionId, actor.actorUserId, Date.now() + 3_600_000),
+  ]);
+  await db.prepare(`INSERT INTO store (id,organization_id,name,platform_store_id,status,credential_key_version,credential_nonce,credential_ciphertext,capabilities,checked_at,expires_at,created_at,updated_at)
+    VALUES ('echo','echo-org','Echo','echo','verified','synthetic','synthetic','synthetic',?,1,?,1,1)`)
+    .bind(JSON.stringify([{code:'auth',status:'available',reason:'read_verified'},{code:'chats_read',status:'available',reason:'read_verified'}]), Date.now() + 60_000).run();
+  assert.equal((await setStoreSyncEnabled(db, actor, 'echo', 0, true))?.enabled, true);
+  const lease = async () => {
+    await db.prepare("UPDATE store_sync_source SET due_at=1 WHERE store_id='echo'").run();
+    const claimed = await claimSyncLease(db, { orgId, storeId: 'echo', token: crypto.randomUUID() }); assert.ok(claimed);
+    return claimed;
+  };
+  {
+    const claimed = await lease(); const cursor = await getDueSyncCursor(db, claimed); assert.ok(cursor);
+    assert.ok(await commitSyncPage(db, claimed, { cursor, nextCursor: null, nextDueAt: Date.now() + 60_000, completed: false,
+      chats: [{ platformThreadId: 'chat-1', type: 'buyer_seller', status: 'opened', createdAt: 100, lastMessageId: '18446744073709551615' }],
+      seeds: [{ threadId:'chat-1',stream:'backfill',cursor:null,dueAt:1 },{ threadId:'chat-1',stream:'incremental',cursor:'18446744073709551615',dueAt:Date.now()+60_000 }] }));
+  }
+  // 只保留增量流，避免断言落在回填流上。
+  await db.batch([
+    db.prepare("UPDATE sync_cursor SET due_at=? WHERE stream='backfill'").bind(Date.now() + 3_600_000),
+    db.prepare("UPDATE sync_cursor SET due_at=1 WHERE stream='incremental'"),
+  ]);
+  // 本工作区发送成功后的回显行（与 reply 投影写入完全同构）。
+  await db.prepare(`INSERT INTO message (id, organization_id, store_id, conversation_id, platform_message_id,
+     sender_id, sender_type, direction, content, is_image, is_read, order_number, sku, event_at, received_at, ingest_mode)
+   VALUES ('echo-1', 'echo-org', 'echo', (SELECT id FROM conversation WHERE store_id='echo' AND platform_thread_id='chat-1'),
+     'sent:intent-1', NULL, 'Seller', 'outbound', ?, 0, 0, NULL, NULL, 5000, 6000, 'incremental')`)
+    .bind(JSON.stringify(['Отправлено из DingBell'])).run();
+  const outbound: NormalizedMessage = { platformThreadId:'chat-1', platformMessageId:'900', senderId:null, senderType:'Seller', direction:'outbound',
+    content:['Отправлено из DingBell'], isRead:true, isImage:false, orderNumber:null, sku:null, eventAt:5100 };
+  const inbound: NormalizedMessage = { platformThreadId:'chat-1', platformMessageId:'901', senderId:'customer-1', senderType:'Customer', direction:'inbound',
+    content:['Спасибо!'], isRead:false, isImage:false, orderNumber:null, sku:null, eventAt:5200 };
+  {
+    const claimed = await lease(); const cursor = await getDueSyncCursor(db, claimed); assert.ok(cursor);
+    assert.ok(await commitSyncPage(db, claimed, { cursor, nextCursor: '901', nextDueAt: 1, completed: false, messages: [outbound, inbound] }));
+  }
+  const all = await db.prepare("SELECT id,platform_message_id,is_read FROM message WHERE store_id='echo' ORDER BY event_at").all();
+  const rows = all.results as { id:string;platform_message_id:string;is_read:number }[];
+  assert.deepEqual(rows.map(row => [row.platform_message_id, row.is_read]), [['900',1],['901',0]]);
+  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM message WHERE platform_message_id LIKE 'sent:%'").first('n'), 0);
+  assert.equal(await db.prepare("SELECT state FROM ingest_event WHERE message_id='echo-1'").first('state'), 'observed');
+  assert.equal(await db.prepare("SELECT state FROM ingest_event WHERE message_id=(SELECT id FROM message WHERE platform_message_id='901')").first('state'), 'observed');
+  // 同一条消息再次返回不会产生重复行。
+  {
+    const claimed = await lease(); const cursor = await getDueSyncCursor(db, claimed); assert.ok(cursor);
+    assert.ok(await commitSyncPage(db, claimed, { cursor, nextCursor: '901', nextDueAt: 1, completed: false, messages: [outbound] }));
+  }
+  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM message WHERE store_id='echo'").first('n'), 2);
 });

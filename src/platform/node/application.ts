@@ -3,7 +3,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { resolve, join } from 'node:path';
 import { createApp } from '../../application.ts';
 import type { ApplicationEnv } from '../../http.ts';
-import type { IdentityDependencies } from '../../modules/mail/types.ts';
 import { createConversationController } from '../../modules/conversations/controller-core.ts';
 import { createStoreCoordinator } from '../../modules/sync/coordinator-core.ts';
 import { runScheduled } from '../../scheduled.ts';
@@ -17,7 +16,7 @@ import { sendOzonMessage } from '../../modules/ozon/send.ts';
 import { createWorldDriver } from './world-driver.ts';
 
 export async function createNodeApplication(options: {
-  dataDirectory: string; migrationsDirectory: string; variables?: Record<string, string | undefined>; dependencies?: IdentityDependencies;
+  dataDirectory: string; migrationsDirectory: string; variables?: Record<string, string | undefined>; dependencies?: Parameters<typeof createApp>[0];
   agentDriver?: (authority: AgentAuthority) => AgentDriver;
   providerFetch?: typeof fetch;
   commerceFetch?: typeof fetch;
@@ -41,7 +40,7 @@ export async function createNodeApplication(options: {
     class Controller extends createConversationController(nodeObjectBase) {
       protected override sendReply(credentials:{clientId:string;apiKey:string},input:{chatId:string;body:string}) { return sendOzonMessage(credentials,input,options.commerceFetch??fetch); }
     }
-    const Coordinator = createStoreCoordinator(nodeObjectBase);
+    const Coordinator = createStoreCoordinator(nodeObjectBase,{fetcher:options.commerceFetch});
     env.CONVERSATION_CONTROLLER = objects.namespace('conversation', ctx => new Controller(ctx, env));
     env.STORE_COORDINATOR = objects.namespace('store', ctx => new Coordinator(ctx, env));
     env.AGENT_RUNTIME = agentServices(authority,driver);

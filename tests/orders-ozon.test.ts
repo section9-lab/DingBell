@@ -10,7 +10,7 @@ const credentials = { clientId: '123456', apiKey: 'synthetic-order-api-key' };
 const window = { since: '2026-10-01T00:00:00Z', to: '2026-10-08T00:00:00Z' };
 const product = { sku: '9000000000817031941', offer_id: '0001-Артикул', name: 'Синтетический товар', quantity: 2, price: '1530.0000', currency_code: 'RUB' };
 const posting = { posting_number: '12345-0001-1', order_id: '9000000000817031942', order_number: '12345-0001', status: 'awaiting_packaging', substatus: 'future_status_detail', products: [product], in_process_at: '2026-10-01T12:00:00Z', shipment_date: '2026-10-03T09:00:00Z', delivering_date: null, tracking_number: '' };
-const expected = { postingNumber: posting.posting_number, orderId: posting.order_id, orderNumber: posting.order_number, status: posting.status, products: [{ sku: product.sku, offerId: product.offer_id, name: product.name, quantity: 2, price: '1530.0000', currency: 'RUB' }], inProcessAt: posting.in_process_at, shipmentDate: posting.shipment_date, deliveringDate: null, trackingNumber: null };
+const expected = { postingNumber: posting.posting_number, orderId: posting.order_id, orderNumber: posting.order_number, status: posting.status, products: [{ sku: product.sku, offerId: product.offer_id, name: product.name, quantity: 2, price: '1530.0000', currency: 'RUB' }], inProcessAt: posting.in_process_at, shipmentDate: posting.shipment_date, deliveringDate: null, trackingNumber: null, orderDate: null };
 const response = (body: unknown): typeof fetch => (async () => Response.json(body)) as typeof fetch;
 const fails = (code: string) => (error: unknown) => error instanceof OzonReadError && error.code === code && !JSON.stringify(error).includes(credentials.apiKey);
 
@@ -58,7 +58,7 @@ test('FBS detail requests correlate the exact posting and retain decimal strings
   let calls = 0;
   const result = await readOzonFbsPosting(credentials, { postingNumber: posting.posting_number }, (async (input, init) => {
     calls++; assert.equal(String(input), 'https://api-seller.ozon.ru/v3/posting/fbs/get');
-    assert.deepEqual(JSON.parse(String(init?.body)), { posting_number: posting.posting_number });
+    assert.deepEqual(JSON.parse(String(init?.body)), { posting_number: posting.posting_number,with:{financial_data:true} });
     return Response.json({ result: { ...posting, products: [{ ...product, price: '99999999999999999999999.000000001' }], addressee: { phone: 'not-retained' }, financial_data: { unsupported: true } } });
   }) as typeof fetch);
   assert.equal(calls, 1);
@@ -69,7 +69,18 @@ test('FBS detail requests correlate the exact posting and retain decimal strings
 test('optional business dates and product facts stay unknown instead of being synthesized', async () => {
   const minimal = { posting_number: posting.posting_number, order_id: posting.order_id, order_number: posting.order_number, status: 'new_state', products: [{ sku: product.sku, offer_id: product.offer_id, quantity: 1 }] };
   const result = await readOzonFbsPosting(credentials, { postingNumber: posting.posting_number }, response({ result: minimal }));
-  assert.deepEqual(result, { postingNumber: posting.posting_number, orderId: posting.order_id, orderNumber: posting.order_number, status: 'new_state', products: [{ sku: product.sku, offerId: product.offer_id, quantity: 1, name: null, price: null, currency: null }], inProcessAt: null, shipmentDate: null, deliveringDate: null, trackingNumber: null });
+  assert.deepEqual(result, { postingNumber: posting.posting_number, orderId: posting.order_id, orderNumber: posting.order_number, status: 'new_state', products: [{ sku: product.sku, offerId: product.offer_id, quantity: 1, name: null, price: null, currency: null }], inProcessAt: null, shipmentDate: null, deliveringDate: null, trackingNumber: null, orderDate: null });
+});
+
+test('placement dates are retained only when explicitly reported, never inferred from processing or posting creation', async () => {
+  const orderDate='2026-09-30T20:15:30+03:00';
+  const result=await readOzonFbsPosting(credentials,{postingNumber:posting.posting_number},response({result:{...posting,order_date:orderDate,created_at:'2026-10-01T11:00:00Z'}}));
+  assert.equal(result.orderDate,orderDate);
+  const missing=await readOzonFbsPosting(credentials,{postingNumber:posting.posting_number},response({result:{...posting,created_at:'2026-10-01T11:00:00Z'}}));
+  assert.equal(missing.orderDate,null);assert.equal(missing.inProcessAt,posting.in_process_at);
+  const list=await listOzonFbsPostings(credentials,window,response({postings:[{...posting,order_date:orderDate}],has_next:false}));
+  assert.equal(list.postings[0].orderDate,orderDate);
+  await assert.rejects(readOzonFbsPosting(credentials,{postingNumber:posting.posting_number},response({result:{...posting,order_date:'2026-02-30T00:00:00Z'}})),fails('invalid_response'));
 });
 
 test('invalid windows, cursor and local page budgets never reach Ozon', async () => {

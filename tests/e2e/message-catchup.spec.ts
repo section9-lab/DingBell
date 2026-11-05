@@ -1,8 +1,9 @@
 import { test as base, expect, type Page } from '@playwright/test';
-import { startLocalApplication } from '../fixtures/web-identity/local-app.ts';
-type Application=Awaited<ReturnType<typeof startLocalApplication>>;
+import { startNodeBrowserApplication } from '../fixtures/node-browser.ts';
+import { signOut } from './support/session.ts';
+type Application=Awaited<ReturnType<typeof startNodeBrowserApplication>>;
 const test=base.extend<{application:Application}>({application:async({},use)=>{
-  const app=await startLocalApplication(true,{mail:true,team:'roles',stores:'configured',sync:true,control:true,replies:true});
+  const app=await startNodeBrowserApplication();
   try{await use(app);}finally{await app.close();}
 }});
 const original=(index:number)=>`原始消息 ${String(index).padStart(3,'0')}\nОригинальное сообщение ${String(index).padStart(3,'0')}`;
@@ -52,14 +53,20 @@ test('offline recovery drains a multi-page backlog and locates late history with
   await page.setViewportSize({width:1366,height:900});await page.screenshot({path:test.info().outputPath('catchup-desktop-1366.png')});await page.setViewportSize({width:390,height:844});await page.screenshot({path:test.info().outputPath('catchup-mobile.png')});
 });
 
-test('a scrolled live window pauses delivery and hidden-page polling, then resumes at the saved message',async({page,application:app})=>{
-  const history=await setup(page,app);await page.getByRole('region',{name:'消息记录'}).focus();await page.getByRole('region',{name:'消息记录'}).press('Home');await record(page,20).scrollIntoViewIfNeeded();await expect(record(page,20)).toBeInViewport();
+test('a scrolled live window preserves its anchor through backgrounding and permission refresh',async({page,application:app})=>{
+  // Install before the scroller creates any RAF/timer handles: mixing native and fake
+  // handles mid-animation can cancel the wrong restoration frame.
+  await page.clock.install();const history=await setup(page,app);await page.getByRole('region',{name:'消息记录'}).focus();await page.getByRole('region',{name:'消息记录'}).press('Home');await record(page,20).scrollIntoViewIfNeeded();await expect(record(page,20)).toBeInViewport();
   await history.appendMessage();await expect(page.getByRole('button',{name:'显示新消息',exact:true})).toBeVisible({timeout:12_000});await expect(record(page,56)).toHaveCount(0);await expect(record(page,20)).toBeInViewport();
   const calls:string[]=[];page.on('request',request=>{if(request.url().includes('/message-updates?'))calls.push(request.url());});
-  await page.clock.install();await page.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});window.dispatchEvent(new Event('visibilitychange'));");
+  await page.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});window.dispatchEvent(new Event('visibilitychange'));");
   const before=calls.length;await page.clock.fastForward(12_000);expect(calls.length).toBe(before);
+  // Exercise an actual hidden Activity boundary, not just a cached, same-frame refresh.
+  let resumeIdentity:()=>void=()=>{},identityHeld=false;
+  await page.route('**/api/workspace-bootstrap',async route=>{const response=await route.fetch();identityHeld=true;await new Promise<void>(resolve=>{resumeIdentity=resolve;});await route.fulfill({response});});
   const identityRead=page.waitForResponse(response=>response.url().endsWith('/api/workspace-bootstrap')&&response.status()===200);
-  await page.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});window.dispatchEvent(new Event('visibilitychange'));");await identityRead;
+  await page.evaluate("Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});window.dispatchEvent(new Event('visibilitychange'));");
+  await expect.poll(()=>identityHeld).toBe(true);try{await expect(page.getByRole('region',{name:'消息记录'})).toHaveCount(0);}finally{resumeIdentity();}await identityRead;
   await expect(record(page,20)).toBeInViewport();await expect(page.getByRole('button',{name:'显示新消息',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'显示新消息',exact:true}).click();await expect(record(page,56)).toBeInViewport();
 });
@@ -98,5 +105,5 @@ test('unavailable position storage is visible while current messages and drafts 
   await page.addInitScript(()=>{const write=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key.startsWith('dingbell:conversation-position:'))throw new DOMException('Synthetic quota','QuotaExceededError');return write.call(this,key,value);};});
   const history=await setup(page,app);await expect(page.getByText('阅读位置恢复不可用；当前消息仍可查看，请勿依赖刷新后恢复位置。',{exact:true})).toBeVisible();
   const draft=page.getByRole('textbox',{name:'回复原文',exact:true});await draft.fill('QUOTA-UNSENT-DRAFT');await history.appendMessage();await expect(record(page,56)).toBeAttached({timeout:12_000});await expect(draft).toHaveValue('QUOTA-UNSENT-DRAFT');
-  await page.getByRole('button',{name:'退出登录',exact:true}).click();await expect(page).toHaveURL(`${app.baseURL}/login`);expect(await page.evaluate(()=>Object.keys(sessionStorage).some(key=>key.startsWith('dingbell:conversation-position:')))).toBe(false);
+  await signOut(page);await expect(page).toHaveURL(`${app.baseURL}/login`);expect(await page.evaluate(()=>Object.keys(sessionStorage).some(key=>key.startsWith('dingbell:conversation-position:')))).toBe(false);
 });

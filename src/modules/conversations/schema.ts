@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { store } from '../stores/schema.ts';
 import { storeSyncSource } from '../sync/schema.ts';
-import { aiReplyIntent } from '../ai-runs/schema.ts';
+import { aiExecution } from '../ai-runs/schema.ts';
 
 export const conversation = sqliteTable('conversation', {
   id: text('id').primaryKey(), organizationId: text('organization_id').notNull(), storeId: text('store_id').notNull(),
@@ -155,7 +155,7 @@ export const conversationControlEvent = sqliteTable('conversation_control_event'
 export const sendIntent = sqliteTable('send_intent', {
   controllerId:text('controller_id').notNull(),organizationId:text('organization_id').notNull(),storeId:text('store_id').notNull(),conversationId:text('conversation_id').notNull(),
   id:text('id').notNull(),schemaVersion:integer('schema_version').notNull(),commandId:text('command_id').notNull(),
-  actorUserId:text('actor_user_id'),actorMemberId:text('actor_member_id'),aiRunId:text('ai_run_id').references(():AnySQLiteColumn=>aiReplyIntent.runId,{onDelete:'restrict'}),body:text('body').notNull(),bodyHash:text('body_hash').notNull(),
+  actorUserId:text('actor_user_id'),actorMemberId:text('actor_member_id'),aiRunId:text('ai_run_id').references(():AnySQLiteColumn=>aiExecution.id,{onDelete:'restrict'}),body:text('body').notNull(),bodyHash:text('body_hash').notNull(),
   platformThreadId:text('platform_thread_id').notNull(),credentialVersion:integer('credential_version').notNull(),controlEpoch:integer('control_epoch').notNull(),
   state:text('state').notNull(),revision:integer('revision').notNull(),createdAt:integer('created_at').notNull(),updatedAt:integer('updated_at').notNull(),
   dueAt:integer('due_at'),lastError:text('last_error'),projectedAt:integer('projected_at').notNull(),

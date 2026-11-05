@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -44,7 +44,7 @@ export async function startLocalApplication(configured = true, options: { mail?:
   let replyBehavior: 'success' | 'unavailable' | 'forbidden' | 'hold' = 'success';
   const heldReplies = new Set<() => void>();
   const releaseReplies = () => { for (const release of heldReplies) release(); heldReplies.clear(); };
-  let storeBehavior: 'partial' | 'unavailable' | 'rate-limited' | 'sync' | 'fbs-only' = options.sync ? 'sync' : 'partial';
+  let storeBehavior: 'partial' | 'unavailable' | 'rate-limited' | 'sync' | 'fbs-only' | 'fbo-only' = options.sync ? 'sync' : 'partial';
   const mailboxServer = createHttpServer(async (request, response) => {
     if (request.method !== 'POST' || ![mailboxPath, storePath].includes(request.url ?? '')) { response.writeHead(404).end(); return; }
     try {
@@ -74,6 +74,10 @@ export async function startLocalApplication(configured = true, options: { mail?:
           '/v3/chat/history': { messages: [], has_next: false },
           '/v4/posting/fbs/list': { postings: [], has_next: false },
           '/v3/posting/fbs/get': { result: {} },
+          '/v3/posting/fbo/list': { postings: [], has_next: false },
+          '/v2/posting/fbo/get': { result: {} },
+          '/v1/posting/fbp/list':{postings:[],cursor:''},
+          '/v1/posting/fbp/get':{posting:{}},
         };
         if (remote.method !== 'POST' || !(remote.path in payloads)) { response.writeHead(501).end(); return; }
         const productIds = ['9000000000817031941', '9000000000817031942', '9000000000817031943'];
@@ -85,6 +89,9 @@ export async function startLocalApplication(configured = true, options: { mail?:
             : remote.body?.cursor === 'fbs-page-2' ? { postings: [posting('SYN-POST-1'), posting('SYN-POST-2')], has_next: false }
               : { postings: [posting('SYN-POST-1')], has_next: true, cursor: 'fbs-page-2' };
           payloads['/v3/posting/fbs/get'] = { result: posting(String(remote.body?.posting_number)) };
+          const fboPosting=(id:string)=>({...posting(id),order_id:'9000000000817031946',order_number:'SYN-FBO-ORDER-1'});
+          payloads['/v3/posting/fbo/list']=remote.body?.limit===1?{postings:[fboPosting('SYN-FBO-1')],has_next:false}:remote.body?.cursor==='fbo-page-2'?{postings:[fboPosting('SYN-FBO-2')],has_next:false}:{postings:[fboPosting('SYN-FBO-1')],has_next:true,cursor:'fbo-page-2'};
+          payloads['/v2/posting/fbo/get']={result:fboPosting(String(remote.body?.posting_number))};
           const position = remote.body?.last_id;
           payloads['/v3/product/list'] = { result: remote.body?.limit === 1
             ? { items: [product(productIds[0]!)], last_id: 'catalog-page-2', total: 3 }
@@ -110,7 +117,7 @@ export async function startLocalApplication(configured = true, options: { mail?:
           }
         }
         const status = storeBehavior === 'unavailable' ? 503 : storeBehavior === 'rate-limited' ? 429
-          : storeBehavior === 'partial' && remote.path === '/v3/chat/list' || storeBehavior === 'fbs-only' && ['/v3/chat/list', '/v3/product/list'].includes(remote.path) ? 403 : 200;
+          : storeBehavior === 'partial' && remote.path === '/v3/chat/list' || storeBehavior === 'fbs-only' && ['/v3/chat/list', '/v3/product/list', '/v3/posting/fbo/list','/v1/posting/fbp/list'].includes(remote.path) || storeBehavior==='fbo-only' && ['/v3/chat/list','/v3/product/list','/v4/posting/fbs/list','/v1/posting/fbp/list'].includes(remote.path) ? 403 : 200;
         response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(status === 200 ? payloads[remote.path] : { message: 'synthetic provider response' }));
       }
     } catch { response.writeHead(400).end(); }
@@ -205,10 +212,7 @@ export async function startLocalApplication(configured = true, options: { mail?:
     // Preserve the real application config while isolating its adjacent .dev.vars lookup.
     const workerConfigPath = join(statePath, 'wrangler.jsonc');
     await writeFile(workerConfigPath, await readFile(join(root, 'wrangler.jsonc')), { mode: 0o600 });
-    const child = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), '--config', `${fixture}/vite.config.ts`,
-      '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: root, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...environment, DINGBELL_WEB_IDENTITY_STATE_PATH: statePath,
+    const workerEnvironment = { ...environment, DINGBELL_WEB_IDENTITY_STATE_PATH: statePath,
         DINGBELL_WEB_IDENTITY_SECRET: authSecret,
         DINGBELL_WEB_IDENTITY_BASE_URL: baseURL,
         DINGBELL_TEST_MAILBOX: mailboxURL,
@@ -224,15 +228,32 @@ export async function startLocalApplication(configured = true, options: { mail?:
         DINGBELL_TEST_AI_RECEPTION: options.aiReception ? 'true' : '',
         DINGBELL_WEB_STORE_KEYS: storeKeys,
         DINGBELL_WEB_CONFIG_PATH: workerConfigPath,
-        DINGBELL_WEB_BOOTSTRAP_SECRET: options.mail ? installationSecret : '' },
-    });
-    children.add(child);
+        DINGBELL_WEB_BOOTSTRAP_SECRET: options.mail ? installationSecret : '' };
     let startupOutput = '';
-    for (const stream of [child.stdout!, child.stderr!]) stream.on('data', chunk => {
-      startupOutput = (startupOutput + String(chunk)).slice(-6000);
+    const diagnostics = () => [authSecret, installationSecret, mailboxURL, storeCheckerURL, storeKeys, storeKey,previewToken,knowledgeToken,answerToken].filter(Boolean)
+      .reduce((output, secret) => output.replaceAll(secret, '[synthetic credential]'), startupOutput);
+    const capture = (child: ChildProcess) => {
+      children.add(child);
+      for (const stream of [child.stdout!, child.stderr!]) stream.on('data', chunk => { startupOutput = (startupOutput + String(chunk)).slice(-6000); });
+    };
+    // Exercise the compiled Pi Worker. The legacy Vite module runner cannot load
+    // all current SDK CommonJS branches reliably; that is not a production path.
+    const outputDirectory = join(statePath, 'build');
+    const build = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), 'build', '--config', `${fixture}/vite.config.ts`, '--outDir', outputDirectory], {
+      cwd: root, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: workerEnvironment,
     });
+    capture(build);
+    const [built] = await once(build, 'exit'); await finish(build);
+    assert.equal(built, 0, `synthetic Pi browser build succeeds: ${diagnostics()}`);
+    const configs = (await readdir(outputDirectory, { recursive: true })).filter(name => name.endsWith('/wrangler.json'));
+    assert.equal(configs.length, 1);
+    const child = spawn(process.execPath, [join(root, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--local', '--config', join(outputDirectory, configs[0]!),
+      '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0', '--persist-to', statePath], {
+      cwd: root, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: workerEnvironment,
+    });
+    capture(child);
     let ready = false;
-    // Cold Vite/workerd dependency optimization belongs to fixture setup, not UI timing.
+    // Wait for the isolated compiled workerd instance, never a production endpoint.
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline && child.exitCode === null && child.signalCode === null) {
       try {
@@ -240,8 +261,6 @@ export async function startLocalApplication(configured = true, options: { mail?:
       } catch { /* Wait for workerd. */ }
       await delay(150);
     }
-    const diagnostics = () => [authSecret, installationSecret, mailboxURL, storeCheckerURL, storeKeys, storeKey,previewToken,knowledgeToken,answerToken].filter(Boolean)
-      .reduce((output, secret) => output.replaceAll(secret, '[synthetic credential]'), startupOutput);
     assert.ok(ready, `local application starts before browser interaction${ready ? '' : `: ${diagnostics()}`}`);
     if(options.preview){
       const response=await fetch(`${baseURL}/api/__test/translation`,{headers:{authorization:`Bearer ${previewToken}`},signal:AbortSignal.timeout(3_000)});
@@ -311,12 +330,13 @@ export async function startLocalApplication(configured = true, options: { mail?:
         assert.ok(options.aiReception);assert.match(id,/^[0-9a-f-]{36}$/i);
         await sql(`UPDATE conversation SET platform_status='Opened' WHERE id='${id}' AND organization_id='company-a';`);
       },
-      async seedMessageContext(storeId:string,conversationId:string) {
+      async seedMessageContext(storeId:string,conversationId:string,fulfillment:'fbs'|'fbo'='fbs') {
         assert.match(storeId,/^[0-9a-f-]{36}$/i);assert.match(conversationId,/^[0-9a-f-]{36}$/i);
         await sql(conversationContextSQL('company-a',storeId,'SYNTHETIC-ORDER-001').join(';'));
         const first=crypto.randomUUID(),second=crypto.randomUUID(),presale=crypto.randomUUID(),at=Date.parse('2026-10-09T10:01:00Z');
         await sql(`UPDATE product SET list_observed_at=list_observed_at+${at},facts_observed_at=facts_observed_at+${at} WHERE store_id='${storeId}';
           UPDATE fbs_posting SET list_observed_at=list_observed_at+${at},detail_observed_at=detail_observed_at+${at} WHERE store_id='${storeId}'`);
+        if(fulfillment==='fbo')await sql(`INSERT INTO fbo_posting SELECT * FROM fbs_posting WHERE store_id='${storeId}'; DELETE FROM fbs_posting WHERE store_id='${storeId}'`);
         for(const [id,order,offset]of [[first,"'SYNTHETIC-ORDER-001'",3],[second,"'SYNTHETIC-ORDER-002'",2],[presale,'NULL',1]] as const)await sql(`INSERT INTO message (id,organization_id,store_id,conversation_id,platform_message_id,sender_id,sender_type,direction,content,is_image,is_read,order_number,sku,event_at,received_at,ingest_mode)
           VALUES ('${id}','company-a','${storeId}','${conversationId}','${id}','9100000000000000199','Customer','inbound','["合成消息：请查询订单"]',0,0,${order},'9007199254740993',${at+offset},${at+offset+1000},'incremental')`);
         let appendCount=0;

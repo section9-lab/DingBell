@@ -15,7 +15,7 @@ async function refused(x:Fixture){
 }
 
 test('the internal AI sender entry point exists and rejects an unknown original run',{timeout:30000},async t=>{
- const f=await conversationControlFixture(undefined,{aiEnabled:'true',outboundEnabled:'true',aiOutboundEnabled:'true'});t.after(f.close);
+ const f=await conversationControlFixture(undefined,{outboundEnabled:'true',aiOutboundEnabled:'true'});t.after(f.close);
  const result=await f.call('ai-reply-enqueue',{runId:crypto.randomUUID()});
  assert.equal(result.status,200,'enqueueAiReply must exist as an internal controller entry point');
  assert.notEqual(result.body.outcome,'accepted');assert.deepEqual(f.providerRequests,[]);
@@ -65,13 +65,12 @@ test('AI dispatch remains disabled by default and requires all exact outbound sw
  for(const config of [{aiOutboundEnabled:undefined},{aiOutboundEnabled:'false'},{outboundEnabled:'false'},{aiOutboundEnabled:'TRUE'},{outboundEnabled:'TRUE'}]){
   const x=await aiSendFixture(config);try{await x.ready();await refused(x);}finally{await x.f.close();}
  }
- const x=await aiSendFixture();try{await x.ready();await x.f.restart('false');await refused(x);}finally{await x.f.close();}
 });
 
 test('queued AI sends lose authorization after deployment outbound switches are disabled',{timeout:90000},async()=>{
- for(const flag of ['AI_RECEPTION_ENABLED','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED']){
+ for(const flag of ['AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED']){
   const x=await aiSendFixture();try{await x.ready();await x.holdQueue();await accepted(x);
-   await x.f.restart(flag==='AI_RECEPTION_ENABLED'?'false':undefined,flag==='AI_OUTBOUND_ENABLED'?{aiOutboundEnabled:'false'}:flag==='OUTBOUND_ENABLED'?{outboundEnabled:'false'}:{});
+   await x.f.restart(undefined,flag==='AI_OUTBOUND_ENABLED'?{aiOutboundEnabled:'false'}:flag==='OUTBOUND_ENABLED'?{outboundEnabled:'false'}:{});
    await x.f.call('repair');await waitAiSend(async()=>(await x.reply()).status==='skipped');assert.deepEqual(x.f.providerRequests,[]);
   }finally{await x.f.close();}
  }

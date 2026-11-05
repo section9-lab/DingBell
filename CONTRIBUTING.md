@@ -4,10 +4,11 @@ DingBell is licensed under [MIT](LICENSE). Contributions are provided under the 
 
 ## Development setup
 
-Use Node.js 24.14.0 (see `.node-version`). From a clean checkout:
+Use the validated Node.js 24 line (currently 24.22.x; the minimum is recorded in `package.json`). From a clean checkout:
 
 ```sh
 npm ci
+npm run setup:runtimes
 cp .dev.vars.example .dev.vars
 # Set a new BETTER_AUTH_SECRET and APP_BASE_URL only in .dev.vars.
 npm run db:migrate:local
@@ -30,15 +31,12 @@ Never commit `.dev`, `.dev.vars`, provider keys, Cloudflare credentials, custome
 ## Required checks
 
 ```sh
-npm run check:types
-npm test
-npm run build
-node --test tests/integration/build.test.ts
-npm run db:check
-npm run check:release
+npm run check
+npx playwright install chromium
+npm run test:web:portable
 ```
 
-Run affected native integration suites and `npm run test:web` when changing Cloudflare runtime or browser behavior. Local synthetic tests do not establish real Ozon delivery, model quality, supplier billing or cloud capacity.
+`check` includes platform typechecks, full unit/module tests, native portable builds/execution tests, build-isolation checks and release/license checks. Run additional affected native suites when changing their contracts. Historical `test:web` scenarios must be migrated to current contracts, not silently deleted or represented as passing portable release checks. See [hardening boundaries](docs/16-production-hardening.md). Local synthetic tests do not establish real Ozon delivery, model quality, supplier billing or cloud capacity.
 
 ## Pull requests
 

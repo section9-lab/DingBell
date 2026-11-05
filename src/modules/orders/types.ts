@@ -1,5 +1,5 @@
 export interface FbsListWork {
-  kind:'list'; storeId:string; epoch:number; generation:number; revision:number;
+  kind:'list'; lane?:'live'|'history'; storeId:string; epoch:number; generation:number; revision:number;
   since:string; to:string; cursor:string|null; recentCursors:string[]; dueAt:number;
 }
 export interface FbsDetailsWork {

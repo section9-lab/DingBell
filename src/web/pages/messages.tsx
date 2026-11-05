@@ -4,12 +4,12 @@ import { Link, useSearchParams } from 'react-router';
 import { RefreshCw, Search, ChevronLeft, ChevronRight, Download, History, MessageCircle } from 'lucide-react';
 import { ApiError, type Company } from '../lib/api';
 import { readStores } from '../lib/stores-api';
-import { readConversations, readConversation } from '../lib/conversations-api';
+import { storesInfiniteQueryKey } from '../lib/query-keys';
+import { readConversations, readConversation, type ConversationSummary } from '../lib/conversations-api';
 import { cn } from '../lib/utils';
 import { ErrorNotice } from '../components/identity-shared';
 import { ConversationAside, ConversationHeader, MessageEmpty, MessageTimeline } from '../components/message-thread';
 import { ConversationControlPanel } from '../components/conversation-control-panel';
-import { ReplyTestPanel } from '../components/reply-test-panel';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Field, FieldGroup, FieldLabel } from '../components/ui/field';
@@ -33,7 +33,20 @@ import { NavigationSelection } from '../components/motion';
 import { useCompanySettings } from '../components/company-settings-provider';
 
 const queues = [{ value: 'all', label: '全部', aria: '全部会话' }, { value: 'mine', label: '我负责', aria: '我负责' }, { value: 'unassigned', label: '未分配', aria: '未分配' }] as const;
-const states = [{ value: 'all', label: '全部状态' }, { value: 'needs_reply', label: '待回复' }, { value: 'waiting_customer', label: '等待消费者' }, { value: 'waiting_internal', label: '等待内部' }, { value: 'resolved', label: '已解决' }] as const;
+const states = [{ value: 'all', label: '全部状态' }, { value: 'needs_reply', label: '待商家回复' }, { value: 'waiting_customer', label: '待用户回复' }, { value: 'waiting_internal', label: '待内部处理' }, { value: 'resolved', label: '已解决' }] as const;
+
+// The platform exposes no buyer name. Show the same identifiers the platform does: an order
+// number when the reported sender id is really an order, otherwise the full sender id.
+function buyerLabel(item: Pick<ConversationSummary, 'buyerSenderId' | 'buyerOrderNumber' | 'platformThreadId'>) {
+  if (item.buyerOrderNumber) return `订单 ${item.buyerOrderNumber}`;
+  if (item.buyerSenderId) return `买家 ${item.buyerSenderId}`;
+  return `会话 ${item.platformThreadId}`;
+}
+function buyerTitle(item: Pick<ConversationSummary, 'buyerSenderId' | 'buyerOrderNumber' | 'platformThreadId'>) {
+  if (item.buyerOrderNumber) return `订单号 ${item.buyerOrderNumber}`;
+  if (item.buyerSenderId) return `买家平台 ID ${item.buyerSenderId}`;
+  return `平台会话 ID ${item.platformThreadId}`;
+}
 
 function Reading({ text }: { text: string }) {
   return <p role="status" className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground"><Spinner aria-hidden="true" />{text}</p>;
@@ -46,12 +59,10 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
   const selected = params.get('conversation') ?? '';
   const storeId = params.get('store') ?? '';
   const search = params.get('search') ?? '';
-  const searchField = params.get('field') === 'order' ? 'order' : 'thread';
   const queue = queues.find(item => item.value === params.get('queue'))?.value ?? 'all';
   const state = states.find(item => item.value === params.get('state'))?.value ?? 'all';
-  const listScope = JSON.stringify([company.id, storeId, searchField, search, queue, state]);
+  const listScope = JSON.stringify([company.id, storeId, search, queue, state]);
   const [draft, setDraft] = useState(search);
-  const [draftField, setDraftField] = useState<'thread' | 'order'>(searchField);
   const [companyActivityOpen,setCompanyActivityOpen]=useState(false);
   const [exporting,setExporting]=useState(false);
   const [exportResult,setExportResult]=useState<{text:string;error?:ApiError}|null>(null);
@@ -68,20 +79,19 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
   const cursor = listPages.at(-1);
   // Each visible page is bounded. Old pages leave the cache when no longer used.
   const stores = useInfiniteQuery({
-    queryKey: ['message-stores', company.id], initialPageParam: 0,
+    queryKey: storesInfiniteQueryKey(company.id), initialPageParam: 0,
     queryFn: ({ pageParam, signal }) => readStores(company.id, pageParam, signal),
     getNextPageParam: page => page.nextOffset ?? undefined, gcTime: 0, retry: false,
-    refetchInterval: 10_000,
   });
   const conversations = useQuery({
-    queryKey: ['conversations', company.id, storeId, searchField, search, queue, state, cursor, revision],
-    queryFn: ({ signal }) => readConversations(company.id, { ...(storeId ? { storeId } : {}), ...(search ? { searchField, search } : {}), queue, state, cursor, limit: 50 }, signal),
-    gcTime: 0, retry: false, refetchInterval: 10_000,
+    queryKey: ['conversations', company.id, storeId, search, queue, state, cursor, revision],
+    queryFn: ({ signal }) => readConversations(company.id, { ...(storeId ? { storeId } : {}), ...(search ? { search } : {}), queue, state, cursor, limit: 50 }, signal),
+    gcTime: 0, retry: false,
   });
   const detail = useQuery({
     queryKey: ['conversation', company.id, selected, revision],
     queryFn: ({ signal }) => readConversation(company.id, selected, signal), enabled: !!selected,
-    gcTime: 0, retry: false, refetchInterval: 10_000,
+    gcTime: 0, retry: false,
   });
   const history = useConversationMessages(userId, company.id, selected);
   const denied = [stores.error, conversations.error, detail.error, history.error, controlDenied].find(error => error instanceof ApiError && ['NOT_FOUND', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(error.code));
@@ -92,7 +102,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
     setParams({}, { replace: true });
     void refresh(denied);
   }, [denied, refresh, setParams, userId, company.id, selected]);
-  useEffect(() => { setDraft(search); setDraftField(searchField); }, [search, searchField]);
+  useEffect(() => { setDraft(search); }, [search]);
   // List pagination is scoped during render, before a changed filter can start a request.
   useEffect(() => {
     if (!selected && returnFocus.current) {
@@ -106,7 +116,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
     if (id) next.set('conversation', id); else next.delete('conversation');
     setParams(next);
   }
-  function changeFilter(changes: Partial<Record<'store' | 'field' | 'search' | 'queue' | 'state', string>>) {
+  function changeFilter(changes: Partial<Record<'store' | 'search' | 'queue' | 'state', string>>) {
     setListPages([]);
     // BrowserRouter updates history before a transition renders. Preserve the latest filters, not an old handler's closure.
     const next = new URLSearchParams(window.location.search);
@@ -115,11 +125,11 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
       if (!value || (key === 'queue' || key === 'state') && value === 'all') next.delete(key);
       else next.set(key, value);
     }
-    if (!next.get('search')) next.delete('field');
+    next.delete('field');
     setParams(next);
   }
   function reload() { setListPages([]); setRevision(value => value + 1); if (selected) history.refresh(); }
-  async function exportCsv(scope:'all'|'page'|'selected',kind:'conversations'|'messages') {const ids=scope==='page'?conversationPage?.conversations.map(item=>item.id):scope==='selected'&&selected?[selected]:undefined;if(scope!=='all'&&!ids?.length)return;setExporting(true);setExportResult(null);try{const result=await exportConversationCsv(company.id,{kind,scope,filters:{...(storeId?{storeId}:{}),queue,state,...(search?{searchField,search}:{})},...(ids?{conversationIds:ids}:{})});downloadConversationCsv(result);setExportResult({text:`已生成 ${result.rowCount} 行${kind==='conversations'?'会话汇总':'消息明细'}，快照 ${messageDate(result.snapshotAt)}。`});}catch(error){setExportResult({text:'导出失败。',error:error instanceof ApiError?error:new ApiError('EXPORT_UNAVAILABLE')});}finally{setExporting(false);}}
+  async function exportCsv(scope:'all'|'page'|'selected',kind:'conversations'|'messages') {const ids=scope==='page'?conversationPage?.conversations.map(item=>item.id):scope==='selected'&&selected?[selected]:undefined;if(scope!=='all'&&!ids?.length)return;setExporting(true);setExportResult(null);try{const result=await exportConversationCsv(company.id,{kind,scope,filters:{...(storeId?{storeId}:{}),queue,state,...(search?{search}:{})},...(ids?{conversationIds:ids}:{})});downloadConversationCsv(result);setExportResult({text:`已生成 ${result.rowCount} 行${kind==='conversations'?'会话汇总':'消息明细'}，快照 ${messageDate(result.snapshotAt)}。`});}catch(error){setExportResult({text:'导出失败。',error:error instanceof ApiError?error:new ApiError('EXPORT_UNAVAILABLE')});}finally{setExporting(false);}}
   if (denied) return <ErrorNotice error={denied} />;
   const conversationPage = conversations.isError ? undefined : conversations.data;
   const conversation = !detail.isError ? detail.data?.conversation : undefined;
@@ -136,7 +146,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
     </div>
     <ConversationWorkspace selected={!!selected} list={
       <aside aria-label="会话列表" className={cn('h-full w-full min-w-0 flex-col bg-sidebar/40 lg:flex', selected ? 'hidden' : 'flex')}>
-        <form className="shrink-0 border-b bg-background p-3" onSubmit={event => { event.preventDefault(); changeFilter({ field: draftField, search: draft.trim() }); }}>
+        <form className="shrink-0 border-b bg-background p-3" onSubmit={event => { event.preventDefault(); changeFilter({ search: draft.trim() }); }}>
           <FieldGroup className="grid grid-cols-2 gap-2">
             <Field className="col-span-2"><FieldLabel className="sr-only">会话队列</FieldLabel><ToggleGroup aria-label="会话队列" variant="outline" size="sm" spacing={0} className="w-full" value={[queue]} onValueChange={values => {
               const next = queues.find(item => item.value === values[0]);
@@ -154,13 +164,12 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
               {availableStores.map(store => <NativeSelectOption key={store.id} value={store.id}>{store.name}</NativeSelectOption>)}
             </NativeSelect></Field>
             {stores.hasNextPage && <Button type="button" variant="ghost" size="sm" disabled={stores.isFetchingNextPage} onClick={() => void stores.fetchNextPage()}>加载更多店铺</Button>}
-            <Field className="col-span-2"><FieldLabel htmlFor="message-search-field" className="sr-only">查找方式</FieldLabel><NativeSelect id="message-search-field" className="w-full" value={draftField} onChange={event => setDraftField(event.target.value as 'thread' | 'order')}><NativeSelectOption value="thread">平台会话 ID</NativeSelectOption><NativeSelectOption value="order">订单号</NativeSelectOption></NativeSelect></Field>
-            <Field className="col-span-2"><FieldLabel htmlFor="message-search" className="sr-only">精确标识</FieldLabel><div className="flex gap-2"><Input id="message-search" autoComplete="off" placeholder="输入完整标识" maxLength={256} value={draft} onChange={event => setDraft(event.target.value)} /><Button type="submit" variant="outline" size="icon" aria-label="查找"><Search /></Button></div></Field>
+            <Field className="col-span-2"><FieldLabel htmlFor="message-search" className="sr-only">平台会话 ID 或订单号</FieldLabel><div className="flex gap-2"><Input id="message-search" autoComplete="off" placeholder="输入完整平台会话 ID 或订单号" maxLength={256} value={draft} onChange={event => setDraft(event.target.value)} /><Button type="submit" variant="outline" size="icon" aria-label="查找"><Search /></Button></div></Field>
           </FieldGroup>
           {search && <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => changeFilter({ search: '' })}>清除搜索</Button>}
           <p className="mt-2 text-xs leading-5 text-muted-foreground">当前筛选统计 · 标识仅精确匹配</p>
         </form>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto gap-1 p-2" tabIndex={0} aria-label="会话条目">
+        <div role="region" className="flex min-h-0 flex-1 flex-col overflow-y-auto gap-1 p-2" tabIndex={0} aria-label="会话条目">
           {conversations.isPending ? <Reading text="正在读取会话…" /> : conversations.isError ? <div className="p-2"><ErrorNotice error={conversations.error} />{conversations.error instanceof ApiError && conversations.error.code === 'INVALID_REQUEST' && <Button variant="outline" className="mt-3" onClick={reload}>返回第一页会话</Button>}</div> : !conversations.data?.conversations.length ? <MessageEmpty title={storeId || search || queue !== 'all' || state !== 'all' ? '没有匹配的会话' : '暂无已导入会话'} description={storeId || search || queue !== 'all' || state !== 'all' ? '检查标识，或更换队列、状态与店铺筛选。' : '在店铺管理启用会话同步后，已导入的记录会显示在这里。'} /> : conversations.data.conversations.map(item => {
             const latestSender = item.latestMessage?.direction === 'outbound' ? '商家' : item.latestMessage?.direction === 'inbound' ? '买家' : '消息';
             const preview = item.latestMessage ? item.latestMessage.isImage ? '图片消息' : item.latestMessage.content.join(' ') + (item.latestMessage.previewTruncated ? '…' : '') : null;
@@ -169,9 +178,9 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
               <NavigationSelection active={selected === item.id} />
               <span className="flex size-8 shrink-0 self-start items-center justify-center rounded-lg border bg-background text-muted-foreground" aria-hidden="true"><MessageCircle className="size-4" /></span>
               <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{item.store.name}</span><time className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums" dateTime={item.lastMessageAt ?? undefined} title={messageDate(item.lastMessageAt)}>{item.lastMessageAt ? listDate.format(new Date(item.lastMessageAt)) : '—'}</time></span>
+                <span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium" title={buyerTitle(item)}>{buyerLabel(item)}</span><time className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums" dateTime={item.lastMessageAt ?? undefined} title={messageDate(item.lastMessageAt)}>{item.lastMessageAt ? listDate.format(new Date(item.lastMessageAt)) : '—'}</time></span>
                 <span className="line-clamp-2 whitespace-normal break-words text-xs leading-5 font-normal text-muted-foreground [overflow-wrap:anywhere]">{preview===null?<span className="text-muted-foreground">消息尚未导入</span>:<><span className="text-muted-foreground">{latestSender}：</span>{preview}</>}</span>
-                <span className="flex flex-wrap items-center gap-1"><Badge variant="outline">{states.find(value => value.value === (item.workflow.lifecycle === 'resolved' ? 'resolved' : item.workflow.workStatus))?.label}</Badge>{item.workflow.assignedMemberId === conversationPage?.viewerMemberId ? <Badge variant="secondary">我负责</Badge> : item.workflow.assignedMemberId === null ? <span className="text-xs text-muted-foreground">未分配</span> : null}</span>
+                <span className="flex flex-wrap items-center gap-1"><Badge variant="outline">{states.find(value => value.value === (item.workflow.lifecycle === 'resolved' ? 'resolved' : item.workflow.workStatus))?.label}</Badge>{item.workflow.assignedMemberId === conversationPage?.viewerMemberId ? <Badge variant="secondary">我负责</Badge> : item.workflow.assignedMemberId === null ? <span className="text-xs text-muted-foreground">未分配</span> : null}<span aria-hidden="true" className="text-xs text-muted-foreground">·</span><span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{item.store.name}</span></span>
                 <span className="sr-only">{assignment}</span>
               </div>
             </Button>;
@@ -183,12 +192,9 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
         {!selected ? <MessageEmpty title="选择一个会话" description="从左侧选择会话，查看平台原文和同步范围。" /> : conversationError ? <div className="p-4"><ErrorNotice error={conversationError} /><Button variant="outline" className="mt-3" onClick={() => choose('')}>返回会话列表</Button></div> : <>
           {conversation && <ConversationHeader key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} back={() => choose('')} />}
           {!conversation && loading && <Reading text="正在读取会话…" />}
-          {conversation && <ConversationControlPanel key={`${company.id}:${selected}`} userId={userId} companyId={company.id} conversationId={selected}
-            conversationLabel={`${conversation.store.name} · 买家咨询`} messages={messages} onDenied={setControlDenied}>
-          <div className="flex min-h-0 flex-1">{loading ? <Reading text="正在读取消息…" /> : <MessageTimeline messages={messages} pageKey={history.pageKey} earlier={history.earlier} anchorId={history.anchorId} view={history.view} onPosition={history.position} />}</div>
-          <div className="flex shrink-0 flex-wrap items-center gap-1 border-t px-3 py-1.5" aria-label="消息导航">
-            {['owner','admin'].includes(company.role)&&conversationPage?.viewerMemberId&&<ReplyTestPanel key={`${company.id}:${conversationPage.viewerMemberId}:${selected}`} scope={{userId,companyId:company.id,memberId:conversationPage.viewerMemberId,conversationId:selected}} storeId={conversation.store.id}
-              message={!loading&&!history.earlier&&!history.hasNew&&!history.catchingUp?messages.at(-1)??null:null} onDenied={setControlDenied} />}
+          {conversation && <ConversationControlPanel key={`${company.id}:${selected}`} userId={userId} companyId={company.id} conversationId={selected} storeId={conversation.store.id} onDenied={setControlDenied}>
+          <div className="flex min-h-0 flex-1">{loading ? <Reading text="正在读取消息…" /> : <MessageTimeline companyId={company.id} conversationId={selected} messages={messages} pageKey={history.pageKey} earlier={history.earlier} anchorId={history.anchorId} view={history.view} onPosition={history.position} />}</div>
+          <div role="group" className="flex shrink-0 flex-wrap items-center gap-1 border-t px-3 py-1.5" aria-label="消息导航">
             <Button variant="ghost" size="sm" disabled={!history.hasOlder || history.navigating} onClick={history.older}>查看更早消息</Button>
             <Button variant="ghost" size="sm" disabled={!history.hasNewer || history.navigating} onClick={history.newer}>返回较新消息</Button>
             {history.hasEarlierUpdate && <Button variant="outline" size="sm" disabled={history.navigating} onClick={history.earlierUpdate}>查看较早更新</Button>}

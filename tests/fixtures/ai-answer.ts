@@ -4,10 +4,10 @@ import {createPolicy,changePolicy} from '../../src/modules/reply-policies/storag
 import {ensureControlDirectory} from '../../src/modules/conversations/control-storage.ts';
 import {changeAiBudget,reserveAiExecution} from '../../src/modules/ai-runs/storage.ts';
 import {prepareKnowledge} from '../../src/modules/knowledge/content.ts';
-import {writeKnowledge,publishKnowledge} from '../../src/modules/knowledge/storage.ts';
-import {knowledgeProfile} from '../../src/modules/knowledge/vectorize.ts';
+import {writeKnowledge} from '../../src/modules/knowledge/storage.ts';
+import {approveTextKnowledge} from '../../src/modules/knowledge/text-profile.ts';
 import type {AiRunReader} from '../../src/modules/ai-runs/storage.ts';
-export async function aiAnswerFixture(promptVersion='support-answer-v1',config:{outboundEnabled?:string;aiEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}){
+export async function aiAnswerFixture(promptVersion='support-reply-v1',config:{outboundEnabled?:string;aiEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}){
  const f=await conversationControlFixture(undefined,{aiEnabled:'true',...config}),actor={...f.actor(),expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
@@ -19,16 +19,16 @@ export async function aiAnswerFixture(promptVersion='support-answer-v1',config:{
   const read:AiRunReader=async(s,id)=>(await f.call('ai-read',{runId:id},s)).body,budgetId=crypto.randomUUID(),startsAt=Math.floor(Date.now()/86400000)*86400000;
   assert.equal((await changeAiBudget(f.db,actor,{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:1000000,maxRuns:10})).outcome,'applied');
   assert.equal((await changeAiBudget(f.db,actor,{id:crypto.randomUUID(),action:'set_enabled',budgetId,expectedRevision:0,enabled:true})).outcome,'applied');
-  const config={model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion,maxInputTokens:100,maxOutputTokens:10,
+  const config={model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion,maxInputTokens:100,maxOutputTokens:10,
    pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}},maxGenerations:3};
   assert.equal((await reserveAiExecution(f.db,read,scope,request.runId,budgetId,config)).outcome,'reserved');
   const documentId=crypto.randomUUID(),ks={kind:'guide' as const,storeId:'store',productRef:null,language:'ru' as const},prepared=await prepareKnowledge('org',documentId,1,ks,{title:'Width',source:{format:'text',content:'Ширина — 26 см.'}});
   assert.ok(await writeKnowledge(f.db,actor,documentId,ks,prepared,0,crypto.randomUUID()));
-  await f.db.prepare("UPDATE knowledge_revision SET status='ready',index_profile=?,mutation_id='draft',tested_at=1,published_profile=?,published_mutation_id='published',published_at=2 WHERE document_id=?").bind(knowledgeProfile.id,knowledgeProfile.id,documentId).run();assert.ok(await publishKnowledge(f.db,actor,documentId,1));
-  // Seed the persisted, immutable retrieval receipt; separate knowledge tests exercise the external embedding/vector adapters.
+  assert.ok(await approveTextKnowledge(f.db,actor,documentId,1));
+  // Seed the persisted, immutable retrieval receipt as text evidence.
   const chunk=prepared.chunks[0],evidence={runId:run.request.runId,scope:{storeId:'store',productRef:null,language:'ru'},questionHash:await (await import('../../src/modules/knowledge/content.ts')).knowledgeHash(run.admission.question),chunks:[{documentId,revision:1,chunkId:chunk.id,bodyHash:chunk.bodyHash,body:chunk.body,title:prepared.title,contentHash:prepared.contentHash,score:.8}]};
-  await f.db.prepare('INSERT INTO ai_knowledge_query(run_id,config,scope,question_hash,reserved_micros,created_at,vectors,evidence) VALUES(?,?,?,?,0,1,?,?)').bind(run.request.runId,JSON.stringify({profile:knowledgeProfile.id,priceVersion:'synthetic-zero',maxInputTokens:60000,inputMicrosPerMillion:0}),JSON.stringify(evidence.scope),evidence.questionHash,JSON.stringify(Array(1024).fill(0)),JSON.stringify(evidence)).run();
-  const env={DB:f.db,AI_RECEPTION_ENABLED:'true'},input={body:'Ширина этой модели — 26 см.',citations:[chunk.id]};
+  await f.db.prepare('INSERT INTO ai_knowledge_evidence(run_id,organization_id,scope,profile,question_hash,chunks,created_at,updated_at) VALUES(?,?,?,?,?,?,1,1)').bind(run.request.runId,'org',JSON.stringify(evidence.scope),'text-grep-2400-v1',evidence.questionHash,JSON.stringify(evidence.chunks)).run();
+  const env={DB:f.db},input={body:'Ширина этой модели — 26 см.',citations:[chunk.id]};
   return {f,actor,scope,run,read,env,input,evidence,documentId};
  }catch(e){await f.close();throw e;}
 }

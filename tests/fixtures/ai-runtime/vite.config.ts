@@ -3,8 +3,7 @@ import { defineConfig } from 'vite';
 import { createApplicationConfig } from '../../../vite.config.ts';
 export default defineConfig(({command})=>{
   const config=createApplicationConfig(command,{envDir:fileURLToPath(new URL('.',import.meta.url)),cloudflare:{configPath:process.env.DINGBELL_SUPPORT_CONFIG!,persistState:{path:process.env.DINGBELL_SUPPORT_STATE!},remoteBindings:false,inspectorPort:false},configureWorker(config){
-    config.secrets={required:[]};config.vars={AI_RECEPTION_ENABLED:process.env.DINGBELL_SUPPORT_ENABLED==='false'?'false':'true',
-      OUTBOUND_ENABLED:process.env.DINGBELL_SUPPORT_OUTBOUND??'false',AI_OUTBOUND_ENABLED:process.env.DINGBELL_SUPPORT_AI_OUTBOUND??'false',
+    config.secrets={required:[]};config.vars={OUTBOUND_ENABLED:process.env.DINGBELL_SUPPORT_OUTBOUND??'false',AI_OUTBOUND_ENABLED:process.env.DINGBELL_SUPPORT_AI_OUTBOUND??'false',
       STORE_CREDENTIAL_ACTIVE_KEY:'synthetic',STORE_CREDENTIAL_KEYS:JSON.stringify({synthetic:btoa('s'.repeat(32))}),
       NVAPI_KEY:'synthetic-never-real',TEST_GATE:process.env.DINGBELL_SUPPORT_GATE!,TEST_TOKEN:process.env.DINGBELL_SUPPORT_TOKEN!};
     config.d1_databases![0].database_id='support-local';config.d1_databases![0].database_name='support-local';

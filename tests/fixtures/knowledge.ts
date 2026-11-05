@@ -43,5 +43,5 @@ export async function knowledgeFixture(lastMigration?:string) {
   const upload=(suffix:string,body:FormData,actor='owner',company='company',origin=env.APP_BASE_URL)=>app.request(`${env.APP_BASE_URL}/api/companies/${company}/knowledge${suffix}`,{
     method:'POST',headers:{cookie:cookies[actor]??'',origin},body,
   },env);
-  return {sqlite,db:env.DB,env,request,upload,before:(value:typeof beforeStatement)=>{beforeStatement=value;},after:(value:typeof afterStatement)=>{afterStatement=value;},close:()=>sqlite.close()};
+  return {sqlite,db:env.DB,env,app,cookies,request,upload,before:(value:typeof beforeStatement)=>{beforeStatement=value;},after:(value:typeof afterStatement)=>{afterStatement=value;},close:()=>sqlite.close()};
 }

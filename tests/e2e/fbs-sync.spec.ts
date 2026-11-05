@@ -20,23 +20,35 @@ const url = (app: Application, id: string) => `${app.baseURL}/api/companies/comp
 async function state(page: Page, app: Application, id: string): Promise<State> {
   const response = await page.request.get(url(app, id)); expect(response.status()).toBe(200); return (await response.json()).sync;
 }
-async function createStore(page: Page, app: Application) {
+async function createStore(page: Page, app: Application, mode='FBS') {
   const id = crypto.randomUUID();
   expect((await page.request.post(`${app.baseURL}/api/companies/company-a/stores`, { headers: { origin: app.baseURL }, data: { id, name: 'FBS 包裹同步测试店', clientId: '930001', apiKey: crypto.randomUUID() } })).ok()).toBe(true);
   await page.goto(`${app.baseURL}/workspace/stores?store=${id}`);
-  await expect(page.getByRole('heading', { name: 'FBS 包裹同步', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '启用 FBS 包裹同步', exact: true })).toBeDisabled();
+  await expect(page.getByRole('heading', { name: `${mode} 包裹同步`, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: `启用 ${mode} 包裹同步`, exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '检查只读能力', exact: true }).click();
-  await expect(page.getByRole('button', { name: '启用 FBS 包裹同步', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: `启用 ${mode} 包裹同步`, exact: true })).toBeEnabled();
   return id;
 }
 async function toggle(page: Page, enabled: boolean, source = 'FBS 包裹') {
-  const label = `${enabled ? '启用' : '停止'}${source === 'FBS 包裹' ? ' ' : ''}${source}同步`;
+  const label = `${enabled ? '启用' : '停止'}${source.endsWith('包裹') ? ' ' : ''}${source}同步`;
   await page.getByRole('button', { name: label, exact: true }).click();
   const dialog = page.getByRole('dialog', { name: label, exact: true });
   await dialog.getByRole('button', { name: enabled ? '确认启用' : '确认停止', exact: true }).click();
   await expect(dialog).toBeHidden();
 }
+
+test('FBO-only permission enables independent imports and order-center detail links',async({page,application})=>{
+ application.setStoreBehavior('fbo-only');await login(page,application);const id=await createStore(page,application,'FBO');
+ await expect(page.getByRole('button',{name:'启用 FBS 包裹同步',exact:true})).toBeDisabled();await toggle(page,true,'FBO 包裹');
+ const endpoint=url(application,id).replace('/fbs-postings','/fbo-postings');
+ await expect.poll(async()=>{const s=(await(await page.request.get(endpoint)).json()).sync;return [s.postingCount,s.readyCount,!!s.lastCompletedTo];},{timeout:30_000}).toEqual([2,2,true]);
+ await page.goto(`${application.baseURL}/workspace/orders?store=${id}&fulfillment=fbo`);await expect(page.getByRole('heading',{name:'订单中心',exact:true})).toBeVisible();await expect(page.getByRole('status',{name:'订单统计',exact:true})).toContainText('1 个订单 · 2 个包裹');
+ await page.getByRole('row').filter({hasText:'包裹 SYN-FBO-1'}).getByRole('button',{name:'查看详情',exact:true}).click();await expect(page).toHaveURL(/type=fbo/);await expect(page.getByRole('heading',{name:'包裹商品',exact:true})).toBeVisible();
+ await page.goto(`${application.baseURL}/workspace/stores?store=${id}`);await toggle(page,false,'FBO 包裹');
+ expect((await(await page.request.get(endpoint)).json()).sync).toMatchObject({enabled:false,postingCount:2,readyCount:2});
+ expect((await state(page,application,id)).enabled).toBe(false);
+});
 
 test('FBS alone imports split postings through a fixed window and preserves progress when stopped', async ({ page, application }) => {
   application.setStoreBehavior('fbs-only');

@@ -12,12 +12,12 @@ import {executeAiRun,readExecutedAiRun,aiRunReader,reconcileConversationAi} from
 import workerEvents from '../../../src/cloudflare.ts';
 import {createSupportRuntime} from '../../../src/modules/ai-runs/runtime.ts';
 import {prepareKnowledge} from '../../../src/modules/knowledge/content.ts';
-import {writeKnowledge,publishKnowledge} from '../../../src/modules/knowledge/storage.ts';
-import {knowledgeManifest,indexKnowledge,knowledgeProfile} from '../../../src/modules/knowledge/vectorize.ts';
+import {writeKnowledge} from '../../../src/modules/knowledge/storage.ts';
+import {approveTextKnowledge} from '../../../src/modules/knowledge/text-profile.ts';
 import {encryptCredentials} from '../../../src/modules/stores/credentials.ts';
 const actor={orgId:'org',actorUserId:'owner',sessionId:'owner-session',expectedMemberId:'owner-member'};
 const policyId='12345678-1234-4234-8234-123456789abc';
-const config=parseSupportConfiguration({model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:2048,
+const config=parseSupportConfiguration({model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:2048,
  pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}},maxGenerations:3}).config;
 const app=new Hono<{Bindings:Record<string,any>}>();
 app.get('/api/health',c=>c.json({service:'support-runtime-fixture'}));
@@ -31,14 +31,9 @@ app.post('/test/reply-store',async c=>{
 app.post('/test/sql',async c=>{const body=await c.req.json<any>(),db=c.env.DB as D1Database;return c.json(body.batch?await db.batch(body.batch.map((sql:string)=>db.prepare(sql))):await db.prepare(body.sql).bind(...body.params??[]).all());});
 app.post('/test/knowledge-source',async c=>{
  const db=c.env.DB as D1Database,id=crypto.randomUUID(),scope={kind:'guide' as const,storeId:'store',productRef:null,language:'ru' as const};
- await db.prepare('CREATE TABLE IF NOT EXISTS synthetic_knowledge_calls(id INTEGER PRIMARY KEY,kind TEXT,payload TEXT)').run();
- await db.prepare('CREATE TABLE IF NOT EXISTS synthetic_knowledge_vectors(id TEXT PRIMARY KEY,vector TEXT)').run();
  const prepared=await prepareKnowledge('org',id,1,scope,{title:'Synthetic dimensions',source:{format:'text',content:'Ширина — 26 см.'}});
  if(!await writeKnowledge(db,actor,id,scope,prepared,0,crypto.randomUUID()))throw new Error('synthetic knowledge seed');
- const index={async upsert(vectors:VectorizeVector[]){await db.batch(vectors.map(vector=>db.prepare('INSERT INTO synthetic_knowledge_vectors(id,vector) VALUES(?,?)').bind(vector.id,JSON.stringify(vector))));return {mutationId:'synthetic'};}} as unknown as Vectorize;
- await indexKnowledge(index,await knowledgeManifest('org',id,1,scope,prepared),prepared.chunks.map(()=>Array.from({length:1024},(_,i)=>i===0?1:0)),true);
- await db.prepare("UPDATE knowledge_revision SET status='ready',index_profile=?,mutation_id='draft',tested_at=1,published_profile=?,published_mutation_id='published',published_at=2 WHERE document_id=?").bind(knowledgeProfile.id,knowledgeProfile.id,id).run();
- if(!await publishKnowledge(db,actor,id,1))throw new Error('synthetic knowledge publication');return c.json({id,chunkId:prepared.chunks[0].id});
+ if(!await approveTextKnowledge(db,actor,id,1))throw new Error('synthetic knowledge publication');return c.json({id,chunkId:prepared.chunks[0].id});
 });
 app.post('/test/setup',async c=>{
  const p={kind:'automatic' as const,name:'Support',storeIds:['store'],priority:50,stages:['presale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
@@ -81,7 +76,7 @@ app.post('/test/:operation',async c=>{
   const controller=getConversationController(c.env,scope.controllerId),next=await controller.readClassifiedInput(scope);if(!next)return c.json(null);
   const result=await controller.startAi(scope,next.request);return c.json({result,scope,runId:next.request.runId});
  }
- if(operation==='cron'){await c.env.DB.batch([c.env.DB.prepare('UPDATE conversation_control SET repair_due_at=0'),c.env.DB.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE repair_due_at IS NOT NULL'),c.env.DB.prepare('UPDATE ai_dispatch SET due_at=0 WHERE due_at IS NOT NULL')]);await workerEvents.scheduled({} as ScheduledController,{...c.env,AI_RECEPTION_CONFIG_JSON:JSON.stringify(body.knowledge||body.answer||body.reply?{...config,model:{...config.model,promptVersion:body.reply?'support-reply-v1':body.answer?'support-answer-v1':'support-knowledge-v1'}}:config)});return c.json({ok:true});}
+ if(operation==='cron'){await c.env.DB.batch([c.env.DB.prepare('UPDATE conversation_control SET repair_due_at=0'),c.env.DB.prepare('UPDATE ai_execution SET repair_due_at=0 WHERE repair_due_at IS NOT NULL'),c.env.DB.prepare('UPDATE ai_dispatch SET due_at=0 WHERE due_at IS NOT NULL')]);await workerEvents.scheduled({} as ScheduledController,{...c.env,AI_RECEPTION_CONFIG_JSON:JSON.stringify(body.knowledge||body.reply?{...config,model:{...config.model,promptVersion:body.reply?'support-reply-v1':'support-knowledge-v1'}}:config)});return c.json({ok:true});}
  if(operation==='reconcile')return c.json(await reconcileConversationAi(c.env,scope,{runtime}));
  if(operation==='execute')return c.json(await executeAiRun({...c.env,AI_RECEPTION_CONFIG_JSON:JSON.stringify(config)},scope,runId,{runtime}));
  if(operation==='read')return c.json(await readExecutedAiRun(c.env,scope,runId,{runtime}));

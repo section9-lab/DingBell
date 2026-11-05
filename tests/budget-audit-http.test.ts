@@ -10,13 +10,12 @@ async function fixture(){
       {method:options.method??'GET',headers:{cookie:f.cookies[options.user??'owner']??'','X-DingBell-Member-Id':options.member??'owner-member'}},f.env);
   return {...f,request};
 }
-test('budget audit route returns only scoped totals and never exposes the deployment-wide query allowance',{timeout:30000},async t=>{
+test('budget audit route returns only scoped totals and never exposes supplier configuration',{timeout:30000},async t=>{
   const f=await fixture();t.after(f.close);
-  await f.DB.prepare("INSERT INTO reply_test_query_usage(day,reserved_micros,queries) VALUES('2026-10-11',987654,77)").run();
   const response=await f.request();assert.equal(response.status,200,await response.clone().text());assert.equal(response.headers.get('cache-control'),'no-store');
   const data=await response.json() as any;assert.equal(data.status,'balanced');assert.equal(data.viewerMemberId,'owner-member');assert.equal(data.companyId,'company');
-  assert.equal(data.canRelease,false);assert.equal(data.supplierCostsVerified,false);assert.equal(JSON.stringify(data).includes('987654'),false);
-  assert.equal((await f.request({kind:'reply-test-query'})).status,400);assert.equal((await f.request({method:'POST'})).status,404);
+  assert.equal(data.canRelease,false);assert.equal(data.supplierCostsVerified,false);
+  assert.equal((await f.request({kind:'unknown'})).status,400);assert.equal((await f.request({method:'POST'})).status,404);
 });
 test('company reconciliation summary is manager-only, bounded and includes translation alerts without content',{timeout:30000},async t=>{
   const f=await fixture();t.after(f.close);await f.DB.prepare("INSERT INTO translation_budget_bucket(id,organization_id,starts_at,ends_at,limit_micros) VALUES('translation-budget','company',1,2,100)").run();

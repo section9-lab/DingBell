@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import type {SyncScope} from '../sync/types.ts';
 import {aiScopeSchema} from '../conversations/ai-state.ts';
 import {getConversationController} from '../conversations/control-bindings.ts';
 import {executeAiRun,reconcileConversationAi,type SupportBindings} from './execution.ts';
@@ -6,12 +7,12 @@ const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256)),uuid=v.pipe(v.string
 const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8640000000000000-300000));
 const claimSchema=v.strictObject({scope:aiScopeSchema,eventId:id,runId:uuid,token:uuid,inputSequence:v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(Number.MAX_SAFE_INTEGER)),createdAt:time});
 export type AiDispatchClaim=v.InferOutput<typeof claimSchema>;
-export async function claimAiDispatches(db:D1Database,now:number,limit=50):Promise<AiDispatchClaim[]>{
+export async function claimAiDispatches(db:D1Database,now:number,limit=50,scope?:SyncScope):Promise<AiDispatchClaim[]>{
  v.parse(time,now);v.parse(v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(50)),limit);const token=crypto.randomUUID();
  const rows=await db.prepare(`UPDATE ai_dispatch SET due_at=?,token=? WHERE controller_id IN
-  (SELECT controller_id FROM ai_dispatch WHERE due_at<=? ORDER BY due_at,controller_id LIMIT ?)
+  (SELECT controller_id FROM ai_dispatch WHERE due_at<=? ${scope?'AND organization_id=? AND store_id=?':''} ORDER BY due_at,controller_id LIMIT ?)
   RETURNING controller_id AS controllerId,organization_id AS organizationId,store_id AS storeId,conversation_id AS conversationId,event_id AS eventId,run_id AS runId,input_sequence AS inputSequence,created_at AS createdAt`)
-  .bind(now+60000,token,now,limit).all<{controllerId:string;organizationId:string;storeId:string;conversationId:string;eventId:string;runId:string;inputSequence:number;createdAt:number}>();
+  .bind(now+60000,token,now,...(scope?[scope.orgId,scope.storeId]:[]),limit).all<{controllerId:string;organizationId:string;storeId:string;conversationId:string;eventId:string;runId:string;inputSequence:number;createdAt:number}>();
  return rows.results.map(({controllerId,organizationId,storeId,conversationId,...work})=>v.parse(claimSchema,{scope:{organizationId,storeId,conversationId,controllerId},...work,token}));
 }
 export async function finishAiDispatch(db:D1Database,value:AiDispatchClaim,done:boolean,now:number){
@@ -32,7 +33,6 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
   }
   return stop(result.status==='unavailable'?'unavailable':'runtime_failure',id);
  };
- if(env.AI_RECEPTION_ENABLED!=='true')return stop('disabled',null);
  if(Date.now()-c.createdAt>=300000)return stop('timeout',null);
  const repaired=await reconcile(env,c.scope);if(repaired.status==='unconfirmed')return false;
  const admitted=await controller.admitAiDispatch(c.scope,{eventId:c.eventId,runId:c.runId});
@@ -51,8 +51,8 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
  if(result.status==='pending'||result.status==='unconfirmed')return false;
  return stop(result.status==='unavailable'?'unavailable':'runtime_failure');
 }
-export async function dispatchAiReceptions(env:SupportBindings,deps:Dependencies={}){
- if(!env.DB||!env.CONVERSATION_CONTROLLER)return;const claims=await claimAiDispatches(env.DB,Date.now());
+export async function dispatchAiReceptions(env:SupportBindings,deps:Dependencies={},scopeFilter?:SyncScope){
+ if(!env.DB||!env.CONVERSATION_CONTROLLER)return;const claims=await claimAiDispatches(env.DB,Date.now(),50,scopeFilter);
  for(let offset=0;offset<claims.length;offset+=5)await Promise.allSettled(claims.slice(offset,offset+5).map(async claim=>{
   let timer:ReturnType<typeof setTimeout>|undefined;
   try{await Promise.race([(async()=>{const done=await dispatchOne(env,claim,deps);await finishAiDispatch(env.DB!,claim,done,Date.now());})(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('AI_DISPATCH_TIMEOUT')),3000);})]);}

@@ -42,8 +42,8 @@ async function boundedJSON(response: Response, aborted: Promise<never>): Promise
   } finally { void reader.cancel().catch(() => {}); }
 }
 
-export async function readOzonJSON(credentials: Credentials, path: '/v3/chat/list' | '/v3/chat/history' | '/v3/product/list' | '/v3/product/info/list' | '/v4/posting/fbs/list' | '/v3/posting/fbs/get', body: string, fetcher: typeof fetch, signal?: AbortSignal): Promise<Record<string, unknown>> {
-  if (!['/v3/chat/list', '/v3/chat/history', '/v3/product/list', '/v3/product/info/list', '/v4/posting/fbs/list', '/v3/posting/fbs/get'].includes(path)) throw new OzonReadError('invalid_request');
+export async function readOzonJSON(credentials: Credentials, path: '/v3/chat/list' | '/v3/chat/history' | '/v3/product/list' | '/v3/product/info/list' | '/v4/posting/fbs/list' | '/v3/posting/fbs/get' | '/v3/posting/fbo/list' | '/v2/posting/fbo/get' | '/v1/posting/fbp/list' | '/v1/posting/fbp/get', body: string, fetcher: typeof fetch, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  if (!['/v3/chat/list', '/v3/chat/history', '/v3/product/list', '/v3/product/info/list', '/v4/posting/fbs/list', '/v3/posting/fbs/get', '/v3/posting/fbo/list', '/v2/posting/fbo/get', '/v1/posting/fbp/list', '/v1/posting/fbp/get'].includes(path)) throw new OzonReadError('invalid_request');
   if (!/^[0-9]{1,32}$/.test(credentials.clientId) || !/^[\x21-\x7e]{1,4096}$/.test(credentials.apiKey)) throw new OzonReadError('invalid_request');
   if (signal?.aborted) throw new OzonReadError('aborted');
   const controller = new AbortController();

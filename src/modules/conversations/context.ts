@@ -10,16 +10,21 @@ interface ProductRow {
 }
 interface OrderProductRow {orderId:string;sku:string;offerId:string;name:string|null;productId:string|null;primaryImage:string|null}
 interface PostingRow {
-  postingNumber:string;orderId:string;status:string|null;trackingNumber:string|null;productCount:number|null;
+  fulfillmentType:'fbs'|'fbo'|'fbp';statusIsCode?:number|null;postingNumber:string;orderId:string;status:string|null;trackingNumber:string|null;productCount:number|null;
   source:'list'|'details'|null;observedAt:number|null;listObservedAt:number|null;detailObservedAt:number|null;
 }
 const time=(value:number|null)=>value===null?null:new Date(value).toISOString();
-function safeImage(value:string|null){if(value===null||!value||value.length>2048)return null;try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&!url.hash&&/(^|\.)ozone\.ru$/i.test(url.hostname)?value:null;}catch{return null;}}
+export function safeImage(value:string|null){if(value===null||!value||value.length>2048)return null;try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&!url.hash&&/(^|\.)ozone\.ru$/i.test(url.hostname)?value:null;}catch{return null;}}
 function identifier(value:string){if(!value.trim()||value.length>256||/[\u0000-\u001f\u007f]/.test(value))throw new RangeError('Invalid identifier.');}
 
 /** References come only from stored platform metadata; callers cannot supply an order number or SKU. */
 export async function readMessageContext(db:D1Database,actor:StoreActor,conversationId:string,messageId:string,afterPosting?:string){
-  identifier(conversationId);identifier(messageId);if(afterPosting!==undefined)identifier(afterPosting);
+  identifier(conversationId);identifier(messageId);
+  let afterNumber='',afterType='';
+  if(afterPosting!==undefined){
+    const match=/^(fbs|fbo|fbp):(.*)$/s.exec(afterPosting);
+    afterNumber=match?match[2]:afterPosting;afterType=match?match[1]:'fbs';identifier(afterNumber);
+  }
   const source=()=>db.prepare(`SELECT store.id AS storeId,member.id AS viewerMemberId,message.id AS messageId,
       message.platform_message_id AS platformMessageId,message.order_number AS orderNumber,message.sku,
       message.event_at AS eventAt,message.received_at AS receivedAt
@@ -44,22 +49,22 @@ export async function readMessageContext(db:D1Database,actor:StoreActor,conversa
   if(orderNumber!==null){
     // D1 batch is a transaction: ambiguity and the bounded page observe the same order snapshot.
     const results=await db.batch([
-      db.prepare(`SELECT DISTINCT order_id AS orderId FROM fbs_posting WHERE organization_id=? AND store_id=? AND order_number=? ORDER BY order_id LIMIT 2`).bind(actor.orgId,storeId,orderNumber),
+      db.prepare(`SELECT DISTINCT order_id AS orderId FROM commerce_posting WHERE organization_id=? AND store_id=? AND order_number=? ORDER BY order_id LIMIT 2`).bind(actor.orgId,storeId,orderNumber),
       db.prepare(`WITH snapshots AS (
         SELECT *,CASE WHEN detail_facts IS NOT NULL AND (list_facts IS NULL OR detail_observed_at>=list_observed_at) THEN 'details'
           WHEN list_facts IS NOT NULL THEN 'list' ELSE NULL END AS source
-        FROM fbs_posting WHERE organization_id=? AND store_id=? AND order_number=? AND posting_number>? ORDER BY posting_number LIMIT 11
+        FROM commerce_posting WHERE organization_id=? AND store_id=? AND order_number=? AND (posting_number>? OR (posting_number=? AND fulfillment_type>?)) ORDER BY posting_number,fulfillment_type LIMIT 11
       ), selected AS (SELECT *,CASE source WHEN 'details' THEN detail_facts ELSE list_facts END AS facts,
         CASE source WHEN 'details' THEN detail_observed_at ELSE list_observed_at END AS observedAt FROM snapshots)
-      SELECT posting_number AS postingNumber,order_id AS orderId,source,observedAt,list_observed_at AS listObservedAt,detail_observed_at AS detailObservedAt,
-        json_extract(facts,'$.status') AS status,json_extract(facts,'$.trackingNumber') AS trackingNumber,
+      SELECT fulfillment_type AS fulfillmentType,posting_number AS postingNumber,order_id AS orderId,source,observedAt,list_observed_at AS listObservedAt,detail_observed_at AS detailObservedAt,
+        json_extract(facts,'$.status') AS status,json_extract(facts,'$.statusIsCode') AS statusIsCode,json_extract(facts,'$.trackingNumber') AS trackingNumber,
         CASE WHEN json_type(facts,'$.products')='array' THEN json_array_length(facts,'$.products') ELSE NULL END AS productCount
-      FROM selected ORDER BY posting_number`).bind(actor.orgId,storeId,orderNumber,afterPosting??''),
+      FROM selected ORDER BY posting_number,fulfillment_type`).bind(actor.orgId,storeId,orderNumber,afterNumber,afterNumber,afterType),
       db.prepare(`WITH snapshots AS (
         SELECT *,CASE WHEN detail_facts IS NOT NULL AND (list_facts IS NULL OR detail_observed_at>=list_observed_at) THEN detail_facts ELSE list_facts END AS facts
-        FROM fbs_posting WHERE organization_id=? AND store_id=? AND order_number=?
+        FROM commerce_posting WHERE organization_id=? AND store_id=? AND order_number=?
       ), candidates AS (
-        SELECT snapshots.order_id AS orderId,snapshots.posting_number AS postingNumber,item.key AS position,
+        SELECT snapshots.fulfillment_type AS fulfillmentType,snapshots.order_id AS orderId,snapshots.posting_number AS postingNumber,item.key AS position,
           json_extract(item.value,'$.sku') AS sku,json_extract(item.value,'$.offerId') AS offerId,json_extract(item.value,'$.name') AS sourceName
         FROM snapshots JOIN json_each(snapshots.facts,'$.products') item WHERE snapshots.facts IS NOT NULL
       ) SELECT candidates.orderId,candidates.sku,candidates.offerId,
@@ -68,8 +73,8 @@ export async function readMessageContext(db:D1Database,actor:StoreActor,conversa
         CASE WHEN COUNT(DISTINCT product.id)=1 THEN MAX(json_extract(product.facts,'$.primaryImage')) END AS primaryImage
       FROM candidates LEFT JOIN product_sku alias ON alias.organization_id=? AND alias.store_id=? AND alias.sku=candidates.sku
       LEFT JOIN product ON product.organization_id=alias.organization_id AND product.store_id=alias.store_id AND product.id=alias.product_id
-      GROUP BY candidates.orderId,candidates.postingNumber,candidates.position,candidates.sku,candidates.offerId,candidates.sourceName
-      ORDER BY candidates.orderId,candidates.postingNumber,candidates.position LIMIT 1`).bind(actor.orgId,storeId,orderNumber,actor.orgId,storeId),
+      GROUP BY candidates.fulfillmentType,candidates.orderId,candidates.postingNumber,candidates.position,candidates.sku,candidates.offerId,candidates.sourceName
+      ORDER BY candidates.orderId,candidates.postingNumber,candidates.fulfillmentType,candidates.position LIMIT 1`).bind(actor.orgId,storeId,orderNumber,actor.orgId,storeId),
     ]);
     identities=results[0]!.results as unknown as typeof identities;postings=results[1]!.results as unknown as typeof postings;orderProducts=results[2]!.results as unknown as typeof orderProducts;
   }
@@ -80,6 +85,6 @@ export async function readMessageContext(db:D1Database,actor:StoreActor,conversa
     source:{kind:'ozon_message_context' as const,messageId:before.messageId,platformMessageId:before.platformMessageId,orderNumber,sku,eventAt:time(before.eventAt),receivedAt:time(before.receivedAt)},
     product,order:{state:orderNumber===null?'not_provided':identities.length===0?'not_imported':matched?'matched':'ambiguous',orderId:matched?identities[0].orderId:null,
       previewProduct:orderProduct?{...orderProduct,primaryImage:safeImage(orderProduct.primaryImage)}:null,
-      postings:page.map(row=>({...row,observedAt:time(row.observedAt),listObservedAt:time(row.listObservedAt),detailObservedAt:time(row.detailObservedAt)})),
-      nextPosting:matched&&postings.length>10?page.at(-1)!.postingNumber:null}};
+      postings:page.map(({statusIsCode,...row})=>({...row,...(row.fulfillmentType==='fbp'?{statusIsCode:!!statusIsCode}:{}),observedAt:time(row.observedAt),listObservedAt:time(row.listObservedAt),detailObservedAt:time(row.detailObservedAt)})),
+      nextPosting:matched&&postings.length>10?`${page.at(-1)!.fulfillmentType}:${page.at(-1)!.postingNumber}`:null}};
 }

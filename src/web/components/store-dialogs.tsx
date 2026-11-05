@@ -32,16 +32,19 @@ export function StorePlatformDialog({ pending, close, select }: { pending: boole
 
 export function StoreCredentialsDialog({ companyId, store, pending, close, change }: DialogProps & { store?: StoreRecord }) {
   const [newId] = useState(() => crypto.randomUUID());
+  const reconnecting=store?.status==='disconnected';
+  const [invalidSubmission,setInvalidSubmission]=useState(false);
   const { register, handleSubmit, formState: { errors } } = useForm<{ name: string; clientId: string; apiKey: string }>();
   return <Dialog open onOpenChange={open => { if (!open && !pending) close(); }}>
     <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
       <DialogHeader>
-        <DialogTitle>{store ? '更新店铺凭证' : '添加 Ozon 店铺'}</DialogTitle>
+        <DialogTitle>{reconnecting?'重新连接 Ozon 店铺':store ? '更新店铺凭证' : '添加 Ozon 店铺'}</DialogTitle>
         <DialogDescription>{store ? `${store.name} · Client ID ${store.platformStoreId}` : '每个 Ozon 卖家账号作为一家店铺接入。保存后可单独检查只读能力。'}</DialogDescription>
       </DialogHeader>
-      <form noValidate aria-busy={pending} className="flex flex-col gap-5" onSubmit={handleSubmit(values => change(() => store
+      <form noValidate aria-busy={pending} className="flex flex-col gap-5" onSubmit={handleSubmit(values => {setInvalidSubmission(false);return change(() => store
         ? updateStore(companyId, store.id, 'credentials', { expectedRevision: store.revision, apiKey: values.apiKey.trim() })
-        : createStore(companyId, { id: newId, name: values.name.trim(), clientId: values.clientId.trim(), apiKey: values.apiKey.trim() }), store?.id ?? newId))}>
+        : createStore(companyId, { id: newId, name: values.name.trim(), clientId: values.clientId.trim(), apiKey: values.apiKey.trim() }), store?.id ?? newId);},()=>setInvalidSubmission(true))}>
+        {invalidSubmission&&<p role="alert" className="text-sm text-destructive">尚未保存：请修正标出的字段，信息还没有发送到服务器。</p>}
         <FieldGroup>
           {!store && <>
             <AccountField id="store-name" label="店铺名称" autoComplete="off" disabled={pending} error={errors.name?.message}
@@ -49,14 +52,14 @@ export function StoreCredentialsDialog({ companyId, store, pending, close, chang
             <AccountField id="store-client-id" label="Client ID" autoComplete="off" inputMode="numeric" disabled={pending} error={errors.clientId?.message}
               {...register('clientId', { required: '请输入 Ozon Client ID。', pattern: { value: /^[0-9]{1,32}$/, message: '请输入 1 至 32 位数字的 Client ID。' } })} />
           </>}
-          <AccountField id="store-api-key" label="API Key" type="password" autoComplete="off" disabled={pending} error={errors.apiKey?.message}
-            hint="在 Ozon 卖家后台创建。密钥仅加密保存在服务端，保存后不会回显。无需 Client Secret。"
-            {...register('apiKey', { required: '请输入 API Key。', maxLength: { value: 4096, message: '密钥长度超过限制。' }, pattern: { value: /^[\x21-\x7e]+$/, message: '密钥只能包含英文字符、数字和符号，不能含空白。' } })} />
+          <AccountField id="store-api-key" label="API Key" type="password" autoComplete="off" placeholder={store?.hasCredentials?'已加密保存；仅更换 Key 时填写':'输入 Ozon Seller API Key'} disabled={pending} error={errors.apiKey?.message}
+            hint={store?.hasCredentials?'当前 Key 已在服务器加密保存，刷新或重启后会继续使用。这里留空是为了不回显密钥，不代表未保存；不更换 Key 时无需再次保存。':'请填写 Ozon 卖家后台的 Seller API Key，不是 AI 模型 Key。密钥仅加密保存在服务端，保存后不会回显。无需 Client Secret。'}
+            {...register('apiKey', { setValueAs:(value:unknown)=>typeof value==='string'?value.trim():value,required: '请输入 API Key。', maxLength: { value: 4096, message: '密钥长度超过限制。' }, pattern: { value: /^[\x21-\x7e]+$/, message: '密钥只能包含英文字符、数字和符号，不能含空白。' } })} />
         </FieldGroup>
-        {store && <p className="text-sm leading-6 text-muted-foreground">保存新凭证会清除旧能力检查结果，需要重新检查。Client ID 保持不变；其他卖家账号请添加为新店铺。</p>}
+        {store && <p className="text-sm leading-6 text-muted-foreground">{reconnecting?'断开时旧 Key 已被删除，请重新输入。保存后将在原店铺上恢复为待验证状态，保留已有商品、订单、会话、成员授权和同步进度。请再检查只读能力并手动启用各项同步，不会自动发送消息。':'保存新凭证会清除旧能力检查结果，需要重新检查。'}Client ID 保持不变；其他卖家账号请添加为新店铺。</p>}
         <DialogFooter>
           <Button type="button" variant="outline" disabled={pending} onClick={close}>取消</Button>
-          <Button type="submit" disabled={pending}>{pending && <Spinner aria-hidden="true" />}{store ? '保存新凭证' : '保存店铺'}</Button>
+          <Button type="submit" disabled={pending}>{pending && <Spinner aria-hidden="true" />}{reconnecting?'保存并重新连接':store ? '保存新凭证' : '保存店铺'}</Button>
         </DialogFooter>
       </form>
     </DialogContent>
@@ -66,11 +69,11 @@ export function StoreCredentialsDialog({ companyId, store, pending, close, chang
 export function StoreStateDialog({ companyId, store, state, pending, close, change }: DialogProps & {
   store: StoreRecord; state: 'paused' | 'unverified' | 'disconnected';
 }) {
-  const labels = { paused: '暂停连接', unverified: '恢复连接', disconnected: '断开连接' };
+  const labels = { paused: '暂停连接', unverified: '恢复连接', disconnected: '删除凭证' };
   const descriptions = {
-    paused: '暂停后不能继续检查平台能力，已保存凭证和店铺记录会保留。恢复后需要重新检查。',
-    unverified: '恢复为待验证状态，请再检查只读能力。此操作不会启动消息同步或 AI 回复。',
-    disconnected: '断开将删除已保存的凭证和能力结果，店铺与历史操作记录会保留。重新连接需要再次输入 API Key。',
+    paused: '暂停后停止平台读取和同步，API Key 仍加密保存在服务器。下次点击「恢复连接」即可复用，无需再次输入。已有店铺和业务记录会保留。',
+    unverified: '将复用此前加密保存的 API Key，无需重新输入。恢复为待验证状态后，请检查只读能力并手动启用需要的同步；不会自动开启 AI 回复。',
+    disconnected: '这是删除凭证操作，不是临时暂停：会从 DingBell 清除已保存的 API Key 并停止连接。下次必须重新输入 Key；店铺和历史记录保留。只想暂时不用，请取消并选择「暂停连接」。',
   };
   return <Dialog open onOpenChange={open => { if (!open && !pending) close(); }}>
     <DialogContent showCloseButton={false}>

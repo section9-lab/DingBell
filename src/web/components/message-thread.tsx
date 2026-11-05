@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowLeft, ArrowDown, Info, MessagesSquare, ImageOff } from 'lucide-react';
+import { ArrowLeft, ArrowDown, Info, MessagesSquare } from 'lucide-react';
+import { Link } from 'react-router';
+import { conversationSyncNotice } from '../lib/conversation-sync-notice';
 import type { ConversationDetail, ConversationMessage } from '../lib/conversations-api';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
@@ -7,11 +9,12 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTr
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from './ui/empty';
 import { Message, MessageContent, MessageHeader, MessageFooter } from './ui/message';
 import { Bubble, BubbleContent } from './ui/bubble';
-import { Marker, MarkerContent, MarkerIcon } from './ui/marker';
+import { Marker, MarkerContent } from './ui/marker';
 import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem, MessageScrollerButton, useMessageScroller, useMessageScrollerScrollable, useMessageScrollerVisibility } from './ui/message-scroller';
 
 import { useCompanySettings } from './company-settings-provider';
 import { MessageContext, type MessageContextScope } from './message-context';
+import { MessageImages } from './message-images';
 
 export function MessageEmpty({ title, description }: { title: string; description: string }) {
   return <Empty><EmptyHeader><EmptyMedia variant="icon"><MessagesSquare /></EmptyMedia><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader></Empty>;
@@ -21,11 +24,12 @@ type ContextProps = MessageContextScope & { conversation: ConversationDetail; me
 function ConversationContext({ conversation, messages, ...scope }: ContextProps) {
   const { date: messageDate, timeZone } = useCompanySettings();
   const { sync, store } = conversation;
+  const notice = conversationSyncNotice(store.status,sync);
   return <div className="flex flex-col gap-5 p-5 text-sm">
     <MessageContext {...scope} conversationId={conversation.id} storeId={store.id} messages={messages} />
     <Separator />
     <div className="flex flex-col gap-2"><h3 className="font-medium">会话来源</h3><p>{store.name} · Ozon</p>
-      {(store.status === 'disconnected' || store.status === 'paused' || !sync.enabled || sync.lastError) && <p className="text-xs text-destructive">{store.status === 'disconnected' ? '店铺已断开，当前显示已导入历史。' : store.status === 'paused' ? '店铺同步已暂停。' : sync.lastError ? '上次同步失败，当前已停止，请在店铺管理中重试。' : !sync.enabled ? '会话同步尚未启用。' : '同步遇到异常，请在店铺管理查看。'}</p>}
+      {notice && <div className={`flex flex-col gap-2 text-xs ${notice.stopped?'text-destructive':'text-muted-foreground'}`}><p role="status">{notice.message}</p><Link className="w-fit underline underline-offset-4" to={`/workspace/stores?store=${encodeURIComponent(store.id)}`}>查看同步设置</Link></div>}
     </div>
     <details className="rounded-md border px-3 py-2 text-xs">
       <summary className="cursor-pointer text-muted-foreground">技术与同步信息</summary>
@@ -36,6 +40,7 @@ function ConversationContext({ conversation, messages, ...scope }: ContextProps)
         <div><dt className="text-muted-foreground">首次导入时间</dt><dd className="mt-1">{messageDate(conversation.importedAt)}</dd></div>
         <div><dt className="text-muted-foreground">历史读取</dt><dd className="mt-1">{sync.backfillComplete === true ? '已完成' : sync.backfillComplete === false ? '仍在读取' : '范围尚未确认'}</dd></div>
         <div><dt className="text-muted-foreground">最近成功读取</dt><dd className="mt-1">{messageDate(sync.lastSuccessAt)}</dd></div>
+        {sync.lastError&&<div><dt className="text-muted-foreground">最近同步异常</dt><dd className="mt-1 break-all">{sync.lastError==='invalid_response'?'平台消息格式校验失败（invalid_response）':sync.lastError}</dd></div>}
       </dl>
       <p className="mt-3 text-muted-foreground">时间按公司时区 {timeZone} 显示。</p>
     </details>
@@ -56,7 +61,7 @@ function ReadingPosition({ anchorId, view, onPosition }: TimelinePosition) {
   return null;
 }
 
-export function MessageTimeline({ messages, pageKey, earlier, anchorId, view, onPosition }: { messages: ConversationMessage[]; pageKey: string; earlier: boolean } & TimelinePosition) {
+export function MessageTimeline({ companyId, conversationId, messages, pageKey, earlier, anchorId, view, onPosition }: { companyId: string; conversationId: string; messages: ConversationMessage[]; pageKey: string; earlier: boolean } & TimelinePosition) {
   const { date: messageDate } = useCompanySettings();
   if (!messages.length) return <MessageEmpty title="暂无已导入消息" description="会话已发现，消息历史可能仍在读取。稍后刷新查看。" />;
   return <MessageScrollerProvider key={pageKey} autoScroll={!earlier} defaultScrollPosition={earlier ? 'start' : 'end'}>
@@ -68,16 +73,18 @@ export function MessageTimeline({ messages, pageKey, earlier, anchorId, view, on
           {messages.map(message => {
             const outbound = message.direction === 'outbound';
             const sender = outbound ? '商家' : message.direction === 'inbound' ? '买家' : '未知发送者';
-            return <MessageScrollerItem key={message.id} messageId={message.id}>
+            // This window is bounded to 100 rows. Fully lay it out: content-visibility's
+            // intrinsic-size cache resets across Activity hide/show and moves the reader.
+            return <MessageScrollerItem key={message.id} messageId={message.id} className="[content-visibility:visible]">
               <Message align={outbound ? 'end' : 'start'}>
                 <MessageContent>
                   <MessageHeader className="text-xs text-muted-foreground">{sender}</MessageHeader>
                   <Bubble variant={outbound ? 'secondary' : 'outline'} align={outbound ? 'end' : 'start'}>
                     <BubbleContent>
-                      {message.isImage ? <Marker><MarkerIcon><ImageOff /></MarkerIcon><MarkerContent>图片消息暂不展示</MarkerContent></Marker> : message.content.length ? <p dir="auto" className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content.join('\n')}</p> : <p>此消息没有可显示的文本。</p>}
+                      {message.isImage ? <MessageImages companyId={companyId} conversationId={conversationId} messageId={message.id} content={message.content} /> : message.content.length ? <p dir="auto" className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content.join('\n')}</p> : <p>此消息没有可显示的文本。</p>}
                     </BubbleContent>
                   </Bubble>
-                  <MessageFooter><time dateTime={message.eventAt} title={`导入时间：${messageDate(message.receivedAt)}；${message.ingestMode === 'backfill' ? '历史导入' : '增量导入'}`}>平台时间 {messageDate(message.eventAt)}</time></MessageFooter>
+                  <MessageFooter><time dateTime={message.eventAt} title={`导入时间：${messageDate(message.receivedAt)}；${message.ingestMode === 'backfill' ? '历史导入' : '增量导入'}`}>平台时间 {messageDate(message.eventAt)}</time><span aria-hidden="true" className="px-1.5">·</span><span title="平台返回的 is_read 标记，只表示平台侧这条消息的已读状态，不代表本系统内的阅读记录" className={message.isRead ? undefined : 'text-foreground'}>{message.isRead ? '平台已读' : '平台未读'}</span></MessageFooter>
                 </MessageContent>
               </Message>
             </MessageScrollerItem>;

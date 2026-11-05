@@ -5,8 +5,8 @@ import {encryptCredentials} from '../../src/modules/stores/credentials.ts';
 import {prepareAiReply} from '../../src/modules/ai-runs/reply-intent.ts';
 import {bindAiExecutionReceipt,claimAiGeneration,closeAiExecution,settleAiGeneration} from '../../src/modules/ai-runs/storage.ts';
 
-export async function aiSendFixture(config:{aiEnabled?:string;outboundEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}){
- const x=await aiAnswerFixture('support-reply-v1',{aiEnabled:'true',outboundEnabled:'true',aiOutboundEnabled:'true',...config});
+export async function aiSendFixture(config:{outboundEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}){
+ const x=await aiAnswerFixture('support-reply-v1',{outboundEnabled:'true',aiOutboundEnabled:'true',...config});
  try{
   const key=await encryptCredentials(x.f.credentialEnv,{orgId:'org',storeId:'store',platformStoreId:'1',credentialVersion:1},{apiKey:'synthetic-api-key'});
   await x.f.db.prepare("UPDATE store SET outbound_enabled=1,credential_key_version=?,credential_nonce=?,credential_ciphertext=?,capabilities=?,checked_at=?,expires_at=? WHERE id='store'")

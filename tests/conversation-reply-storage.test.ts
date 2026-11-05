@@ -32,7 +32,7 @@ function snapshot(revision=1,state:ReplySnapshot['intent']['state']='queued'):Re
 test('reply preflight uses current exact original membership without a browser session and returns the default closed gate',{timeout:30_000},async()=>{
   const f=await fixture();try{
     const access=await readReplyDispatchContext(f.db,scope,'staff','staff-member');assert.ok(access);
-    assert.equal(access.outboundEnabled,false);assert.equal(access.replyAvailable,true);assert.equal(access.platformThreadId,'18446744073709551615');assert.equal(access.store.credentialVersion,1);assert.equal(access.store.credentialCiphertext,'cipher');
+    assert.equal(access.outboundEnabled,false);assert.equal(access.replyAvailable,false);assert.equal(access.platformThreadId,'18446744073709551615');assert.equal(access.store.credentialVersion,1);assert.equal(access.store.credentialCiphertext,'cipher');
     assert.ok(await readReplyDispatchContext(f.db,scope,'owner','owner-member'));
     assert.equal(await readReplyDispatchContext(f.db,scope,'unverified','unverified-member'),null);
     assert.equal(await readReplyDispatchContext(f.db,scope,'staff','owner-member'),null);
@@ -53,6 +53,8 @@ test('reply preflight reports fresh capability and store gates from the final SQ
     assert.equal(paused.outboundEnabled,true);assert.equal(paused.store.status,'paused');assert.equal(paused.store.credentialVersion,2);assert.equal(paused.replyAvailable,false);
     await f.db.prepare("UPDATE store SET expires_at=?,capabilities=? WHERE id='store'").bind(Date.now()+120_000,JSON.stringify([{code:'reply',status:'available'}])).run();
     assert.equal((await readReplyDispatchContext(f.db,scope,'staff','staff-member'))?.replyAvailable,false);
+    await f.db.prepare("UPDATE store SET capabilities=? WHERE id='store'").bind(JSON.stringify([{code:'auth',status:'available'},{code:'reply',status:'unknown'}])).run();
+    assert.equal((await readReplyDispatchContext(f.db,scope,'staff','staff-member'))?.replyAvailable,true,'an explicit outbound authorization plus verified credentials is enough to send');
     await f.db.prepare("UPDATE user SET email_verified=0 WHERE id='staff'").run();
     assert.equal(await readReplyDispatchContext(f.db,scope,'staff','staff-member'),null);
     await assert.rejects(readReplyDispatchContext(f.db,scope,'','staff-member'),/INVALID_REPLY/);

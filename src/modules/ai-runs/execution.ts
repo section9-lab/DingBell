@@ -6,7 +6,8 @@ import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGenera
 import {selectAiBudget} from './budget.ts';
 import type {SupportInspection} from './ledger.ts';
 import type {AiKnowledgeBindings} from './knowledge.ts';
-export interface SupportBindings extends ControlBindings,AiKnowledgeBindings {NVAPI_KEY?:string;AI_RECEPTION_CONFIG_JSON?:string;FLUE_SUPPORT_AGENT?:DurableObjectNamespace<Agent>;AGENT_RUNTIME?:import('../../platform/agents/bindings.ts').PortableAgents}
+import type {CompanyModelBindings} from '../company-model/security.ts';
+export interface SupportBindings extends ControlBindings,AiKnowledgeBindings,CompanyModelBindings {NVAPI_KEY?:string;AI_RECEPTION_CONFIG_JSON?:string;FLUE_SUPPORT_AGENT?:DurableObjectNamespace<Agent>;AGENT_RUNTIME?:import('../../platform/agents/bindings.ts').PortableAgents}
 export interface SupportRuntime {
  lookup(run:AiExecution):Promise<{uid?:string}|null>;prepare(run:AiExecution):Promise<void>;inspect(run:AiExecution):Promise<SupportInspection|null>;
  dispatch(run:AiExecution):Promise<TranslationReceipt>;read(run:AiExecution):Promise<'completed'|'failed'|'aborted'|'pending'>;close(run:AiExecution):Promise<void>;
@@ -38,11 +39,11 @@ async function observe(env:SupportBindings,run:AiExecution,runtime:SupportRuntim
 export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:string,deps:Dependencies={}){
  if(!env.DB)return view('unavailable');let run=await readAiExecution(env.DB,scope,id);
  if(!run){
-  if(env.AI_RECEPTION_ENABLED!=='true'||!env.NVAPI_KEY?.trim()||(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)||!env.CONVERSATION_CONTROLLER)return view('unavailable');
-  let cost;
+  if((!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)||!env.CONVERSATION_CONTROLLER)return view('unavailable');
+  let cost: Awaited<ReturnType<typeof import('../company-model/runtime.ts')['resolveSupportConfiguration']>>;
   try{
-   const raw=env.AI_RECEPTION_CONFIG_JSON;if(!raw||raw.length>32768)return view('unavailable');
-   cost=(await import('./configuration.ts')).parseSupportConfiguration(JSON.parse(raw));
+   cost=await (await import('../company-model/runtime.ts')).resolveSupportConfiguration(env,scope.organizationId);
+   if(!cost)return view('unavailable');
   }catch{return view('unavailable');}
   if(cost.config.model.promptVersion==='support-reply-v1'&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
   const work=await aiRunReader(env)(scope,id);if(!work)return view('unavailable');
@@ -51,7 +52,7 @@ export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:str
   const reserved=await reserveAiExecution(env.DB,aiRunReader(env),scope,id,budget,cost.config);
   if(!reserved.run)return view('unavailable');run=reserved.run;
  }
- if(run.config.model.promptVersion==='support-reply-v1'&&(env.AI_RECEPTION_ENABLED!=='true'||env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
+ if(run.config.model.promptVersion==='support-reply-v1'&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
  const runtime=await native(env,deps);if(run.receipt||run.closure)return observe(env,run,runtime);
  try{
   const instance=await runtime.lookup(run),state=await runtime.inspect(run);
@@ -62,9 +63,8 @@ export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:str
    if(!instance&&(state.receipt||state.generations.length))return view('unconfirmed');
   }else{
    if(instance||run.generations.length)return view('unconfirmed');
-   if(env.AI_RECEPTION_ENABLED!=='true')return view('unavailable');await runtime.prepare(run);
+   await runtime.prepare(run);
   }
-  if(!instance&&env.AI_RECEPTION_ENABLED!=='true')return view('unavailable');
   const receipt=await runtime.dispatch(run);await bindAiExecutionReceipt(env.DB,scope,id,receipt);
  }catch{return view('unconfirmed');}
  return observe(env,(await readAiExecution(env.DB,scope,id))!,runtime);

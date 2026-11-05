@@ -4,8 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { hashPassword } from 'better-auth/crypto';
-import { Drive, Sandbox } from '../../deploy/vercel/node_modules/@vercel/sandbox/dist/index.js';
-import { getAuth } from '../../deploy/vercel/node_modules/@vercel/sandbox/dist/auth/index.js';
+import { Drive, Sandbox, getAuth } from '../../deploy/vercel/sandbox-dependencies.ts';
 
 if(!process.argv.includes('--isolated-cloud'))throw new Error('Pass --isolated-cloud to create and remove a synthetic-only full application.');
 const option=(key:string)=>process.argv[process.argv.indexOf(key)+1];

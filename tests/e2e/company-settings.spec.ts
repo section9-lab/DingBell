@@ -46,7 +46,7 @@ test('concurrent editors preserve the unsaved choice and require review before r
   await expect(other.getByLabel('公司时区',{exact:true})).toHaveValue('UTC');
   await other.getByLabel('公司时区',{exact:true}).selectOption('Asia/Singapore'); await other.getByRole('button',{name:'保存设置',exact:true}).click();
   await expect(other.getByRole('status').filter({hasText:'设置已保存'})).toBeVisible();
-  await save.click(); await expect(page.getByRole('alert')).toContainText('设置已被其他人修改');
+  await save.click(); await expect(page.getByRole('alert').filter({hasText:'设置已被其他人修改'})).toBeVisible();
   await expect(zone).toHaveValue('Europe/Moscow'); await expect(save).toBeDisabled();
   await page.getByRole('button',{name:'读取最新设置',exact:true}).click();
   await expect(page.getByText('当前保存：Asia/Singapore · 版本 1',{exact:true})).toBeVisible();
@@ -66,7 +66,7 @@ test('uncertain saves require reconciliation, while members can only read settin
     if(route.request().method()==='POST') {writes++; await route.fetch(); await route.fulfill({status:503,json:{error:{code:'OPERATION_UNCONFIRMED'}}});}
     else await route.continue();
   });
-  await save.click(); await expect(page.getByRole('alert')).toContainText('保存结果尚未确认'); await expect(save).toBeDisabled();
+  await save.click(); await expect(page.getByRole('alert').filter({hasText:'保存结果尚未确认'})).toBeVisible(); await expect(save).toBeDisabled();
   expect(writes).toBe(1); await page.unrouteAll({behavior:'wait'});
   await page.getByRole('button',{name:'读取最新设置',exact:true}).click();
   await expect(page.getByText('当前保存：America/New_York · 版本 1',{exact:true})).toBeVisible();

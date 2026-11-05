@@ -8,7 +8,7 @@ import { member } from '../identity/schema.ts';
 import type { StoreDependencies } from './bindings.ts';
 import { credentialConfig, CredentialError, decryptCredentials, encryptCredentials } from './credentials.ts';
 import { capabilityCodes, inspectOzonCapabilities, unknownCapabilities, type StoreCapability } from './ozon.ts';
-import { beginStoreCheck, changeStoreGrant, changeStoreState, findStore, finishStoreCheck, insertStore, listStoreGrants, listStores, rotateStoreCredentials, type StoreActor, type StoreRecord } from './storage.ts';
+import { beginStoreCheck, changeStoreGrant, changeStoreOutbound, changeStoreState, findStore, finishStoreCheck, insertStore, listStoreGrants, listStores, rotateStoreCredentials, type StoreActor, type StoreRecord } from './storage.ts';
 
 const apiKey = v.pipe(v.string(), v.minLength(1), v.maxLength(4096), v.regex(/^[\x21-\x7e]+$/));
 const revision = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(Number.MAX_SAFE_INTEGER));
@@ -19,6 +19,7 @@ const createBody = v.strictObject({
 const revisionBody = v.strictObject({ expectedRevision: revision });
 const credentialBody = v.strictObject({ expectedRevision: revision, apiKey });
 const stateBody = v.strictObject({ expectedRevision: revision, state: v.picklist(['paused', 'unverified', 'disconnected']) });
+const outboundBody = v.strictObject({ expectedRevision: revision, enabled: v.boolean() });
 const grantBody = v.strictObject({ expectedGranted: v.boolean(), granted: v.boolean() });
 const capabilitySchema = v.array(v.strictObject({ code: v.picklist(capabilityCodes), status: v.picklist(['unknown', 'available', 'denied', 'unsupported']), reason: v.string() }));
 const base = '/api/companies/:companyId/stores';
@@ -43,7 +44,13 @@ export function storeDTO(row: StoreRecord, now = Date.now()) {
   let capabilities: StoreCapability[] = unknownCapabilities(expired ? 'expired' : 'unverified');
   if (!expired && row.capabilities !== null) {
     const parsed = v.safeParse(capabilitySchema, (() => { try { return JSON.parse(row.capabilities); } catch { return null; } })());
-    if (parsed.success && parsed.output.length === capabilityCodes.length && capabilityCodes.every((code, index) => parsed.output[index]?.code === code)) capabilities = parsed.output;
+    if (parsed.success) {
+      const layouts=[capabilityCodes,capabilityCodes.filter(code=>code!=='orders_fbp_read'),capabilityCodes.filter(code=>code!=='orders_fbp_read'&&code!=='orders_fbo_read')];
+      if(layouts.some(codes=>parsed.output.length===codes.length&&codes.every((code,index)=>parsed.output[index]?.code===code))) {
+        // Preserve old verified capabilities; new fulfillment modes need their own check.
+        capabilities=capabilities.map(item=>parsed.output.find(value=>value.code===item.code)??item);
+      }
+    }
   }
   return {
     id: row.id, name: row.name, platform: row.platform, platformStoreId: row.platformStoreId,
@@ -51,6 +58,7 @@ export function storeDTO(row: StoreRecord, now = Date.now()) {
     revision: row.revision, credentialVersion: row.credentialVersion, hasCredentials: row.credentialCiphertext !== null,
     capabilities, checkedAt: row.checkedAt === null ? null : new Date(row.checkedAt).toISOString(),
     expiresAt: row.expiresAt === null ? null : new Date(row.expiresAt).toISOString(),
+    outboundEnabled: row.outboundEnabled === 1,
     checking: row.checkToken !== null && row.checkUntil !== null && row.checkUntil > now,
   };
 }
@@ -129,6 +137,16 @@ export function registerStoreRoutes(app: Hono<ApplicationEnv>, deps: StoreDepend
     if (parsed.output.state !== 'disconnected' && !row.credentialCiphertext) return apiError(c, 'STORE_CREDENTIALS_REQUIRED', 'Connect credentials before changing this store state.', 409);
     const action = { paused: 'store.pause', unverified: 'store.resume', disconnected: 'store.disconnect' }[parsed.output.state];
     return audit(c, action, row.id, async () => currentDTO(c, await changeStoreState(c.env.DB!, actorFor(c), row.id, parsed.output.expectedRevision, parsed.output.state)), row.revision);
+  });
+
+  app.post(`${base}/:storeId/outbound`, configured, limitedBody, signedIn, async c => {
+    const row = await authorize(c, true, c.req.param('storeId')); if (row instanceof Response) return row; if (!row) return notFound(c);
+    const parsed = v.safeParse(outboundBody, await c.req.json().catch(() => null)); if (!parsed.success) return invalid(c);
+    if (row.revision !== parsed.output.expectedRevision) return changed(c);
+    if (row.status === 'paused' || row.status === 'disconnected') return apiError(c, 'STORE_PAUSED', 'Resume the store before changing outbound sending.', 409);
+    if (parsed.output.enabled && !row.credentialCiphertext) return apiError(c, 'STORE_CREDENTIALS_REQUIRED', 'Connect credentials before enabling outbound sending.', 409);
+    const action = parsed.output.enabled ? 'store.outbound.enable' : 'store.outbound.disable';
+    return audit(c, action, row.id, async () => currentDTO(c, await changeStoreOutbound(c.env.DB!, actorFor(c), { id: row.id, expectedRevision: row.revision, enabled: parsed.output.enabled })), row.revision);
   });
 
   app.post(`${base}/:storeId/check`, configured, limitedBody, signedIn, async c => {

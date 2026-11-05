@@ -11,7 +11,7 @@ export async function selectReplyPolicy(db:D1Database,scope:ControlScope,stage:P
   JOIN reply_policy p ON p.organization_id=c.organization_id AND p.enabled=1 AND p.kind='automatic'
   JOIN policy_version pv ON pv.organization_id=p.organization_id AND pv.policy_id=p.id AND pv.revision=p.published_revision AND pv.schema_version=1
   WHERE cc.controller_id=? AND cc.organization_id=? AND cc.store_id=? AND cc.conversation_id=?
-  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND c.platform_status='Opened'
+  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened'
   AND EXISTS (SELECT 1 FROM json_each(pv.config,'$.storeIds') WHERE value=c.store_id)
   AND EXISTS (SELECT 1 FROM json_each(pv.config,'$.stages') WHERE value=?)
   ORDER BY json_extract(pv.config,'$.priority') DESC,p.id LIMIT 2`).bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId,stage).all<{id:string;revision:number;config:string}>()).results;

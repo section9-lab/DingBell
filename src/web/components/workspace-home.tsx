@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen, History, Inbox, PackageSearch, ShoppingBag, SlidersHorizontal, Store } from 'lucide-react';
+import { ArrowRight, BookOpen, Calculator, History, Inbox, PackageSearch, ShoppingBag, SlidersHorizontal, Store } from 'lucide-react';
 import { Link } from 'react-router';
 import type { Company } from '../lib/api';
 import { Badge } from './ui/badge';
@@ -15,7 +15,8 @@ const preparation = [
 const shortcuts = [
   { title: '消息中心', description: '查看咨询与跟进进度', to: '/workspace/messages', icon: Inbox },
   { title: '商品资料', description: '查询已导入的商品', to: '/workspace/products', icon: PackageSearch },
-  { title: 'FBS 订单', description: '核对订单与包裹', to: '/workspace/orders', icon: ShoppingBag },
+  { title: '订单中心', description: '核对 FBS / FBO / FBP 订单与包裹', to: '/workspace/orders', icon: ShoppingBag },
+  { title: '核算中心', description: '查看成本、商品贡献与预估收益', to: '/workspace/accounting', icon: Calculator },
   { title: '会话日志', description: '查看操作与送达记录', to: '/workspace/activity', icon: History },
 ];
 
@@ -50,7 +51,7 @@ export function WorkspaceHome({ company }: { company: Company }) {
           </Card>
         </li>)}
       </ol>
-      <p className="text-xs leading-5 text-muted-foreground">知识需完成索引和检索测试后再发布；自动接待与发送需另行配置并启用。</p>
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-muted-foreground">知识需完成索引和检索测试后再发布；自动接待与发送需另行配置并启用。</p><Button variant="outline" size="sm" render={<Link to="/workspace/capabilities" />}>查看能力与数据<ArrowRight data-icon="inline-end" /></Button></div>
     </section>
 
     <section aria-labelledby="workspace-shortcuts" className="flex flex-col gap-4">

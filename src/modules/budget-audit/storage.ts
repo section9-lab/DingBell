@@ -18,16 +18,10 @@ const ledgers={
     COALESCE(sum(g.charged_micros),0) AS spent,1 AS admitted,0 AS embedding,0 AS correlated,
     CASE WHEN count(g.run_id)<>r.generations OR COALESCE(max(g.sequence),0)<>r.generations THEN 1 ELSE 0 END AS invalid
     FROM selected b JOIN ai_execution r ON r.budget_id=b.id AND r.organization_id=b.organization_id
-    LEFT JOIN ai_generation g ON g.run_id=r.id GROUP BY r.id
-    UNION ALL SELECT CASE WHEN q.charged_micros IS NULL THEN q.reserved_micros ELSE 0 END,COALESCE(q.charged_micros,0),0,
-      CASE WHEN q.charged_micros IS NULL THEN q.reserved_micros ELSE 0 END,
-      CASE WHEN q.gateway_log_id IS NOT NULL AND q.charged_micros IS NULL THEN q.reserved_micros ELSE 0 END,
-      CASE WHEN (q.charged_micros IS NULL)<>(q.gateway_usage IS NULL) OR (q.charged_micros IS NULL)<>(q.settled_at IS NULL) THEN 1 ELSE 0 END FROM selected b
-    JOIN ai_execution r ON r.budget_id=b.id AND r.organization_id=b.organization_id JOIN ai_knowledge_query q ON q.run_id=r.id`},
+    LEFT JOIN ai_generation g ON g.run_id=r.id GROUP BY r.id`},
   translation:{budget:'translation_budget_bucket',counts:false,entries:runEntries('reply_preview_run')},
-  'reply-test':{budget:'reply_test_budget',counts:true,entries:runEntries('reply_test_run')},
 } as const;
-function runEntries(table:'reply_preview_run'|'reply_test_run'){
+function runEntries(table:'reply_preview_run'){
   return `SELECT CASE WHEN r.settlement='held' THEN r.reserved_micros ELSE 0 END AS reserved,
     COALESCE(r.charged_micros,0) AS spent,1 AS admitted,0 AS embedding,0 AS correlated,0 AS invalid
     FROM selected b JOIN ${table} r ON r.budget_id=b.id AND r.organization_id=b.organization_id`;
@@ -92,20 +86,4 @@ export async function readCompanyBudgetReconciliationSummary(db:D1Database,actor
  const row=(summaryResult.results as SummaryRow[])[0];if(!row)return null;const all=itemsResult.results as AlertRow[];
  return v.parse(companyBudgetReconciliationSummarySchema,{companyId:actor.orgId,viewerMemberId:viewer.memberId,at:row.at,
   totals:{tracked:row.tracked,pending:row.pending,balanced:row.balanced,mismatch:row.mismatch,unavailable:row.unavailable,alerting:row.alerting},items:all.slice(0,50),truncated:all.length>50});
-}
-
-/** Deployment-operator boundary. This aggregate spans companies and must never enter a company-facing route. */
-export async function readQueryAllowanceAudit(db:D1Database,day:string){
-  v.parse(v.pipe(v.string(),v.regex(/^\d{4}-\d{2}-\d{2}$/)),day);
-  const date=new Date(day+'T00:00:00.000Z');if(!Number.isFinite(date.getTime())||date.toISOString().slice(0,10)!==day)throw new Error('INVALID_QUERY_DAY');
-  const row=await db.prepare(`SELECT
-    CAST(COALESCE((SELECT reserved_micros FROM reply_test_query_usage WHERE day=?),0) AS TEXT) AS reserved,
-    CAST(COALESCE((SELECT queries FROM reply_test_query_usage WHERE day=?),0) AS TEXT) AS queries,
-    CAST(COALESCE(sum(reserved_micros),0) AS TEXT) AS expectedReserved,CAST(count(*) AS TEXT) AS expectedQueries
-    FROM reply_test_query WHERE quota_day=?`).bind(day,day,day).first<{reserved:string;queries:string;expectedReserved:string;expectedQueries:string}>();
-  if(!row)throw new Error('QUERY_AUDIT_UNAVAILABLE');
-  const difference={reservedMicros:delta(row.reserved,row.expectedReserved),queries:delta(row.queries,row.expectedQueries)};
-  return {day,status:Object.values(difference).every(value=>value==='0')?'balanced' as const:'mismatch' as const,
-    recorded:{reservedMicros:row.reserved,queries:row.queries},expected:{reservedMicros:row.expectedReserved,queries:row.expectedQueries},difference,
-    canRelease:false as const,supplierCostsVerified:false as const};
 }

@@ -9,7 +9,7 @@ import { services } from '../src/modules/identity/services.ts';
 
 const readResponses: Record<string, unknown> = {
   '/v1/roles': { roles: [] }, '/v3/product/list': { result: { items: [] } },
-  '/v3/chat/list': { chats: [] }, '/v4/posting/fbs/list': { postings: [] },
+  '/v3/chat/list': { chats: [] }, '/v4/posting/fbs/list': { postings: [] }, '/v3/posting/fbo/list': { postings: [] },'/v1/posting/fbp/list':{postings:[],cursor:''},
 };
 const syntheticKey = 'synthetic-private-ozon-api-key';
 const newStore = (id = crypto.randomUUID(), clientId = '123456') => ({ id, name: 'Synthetic shop', clientId, apiKey: syntheticKey });
@@ -122,13 +122,23 @@ test('store access is tenant scoped, explicit for staff, and revoked by removing
   } finally { f.close(); }
 });
 
+test('legacy FBS capability evidence stays valid without inventing FBO permission',async()=>{
+ const f=await fixture();try{
+  const id=await f.create();const legacy=['auth','products_read','chats_read','orders_fbs_read','reply','proactive_chat'].map(code=>({code,status:code==='reply'||code==='proactive_chat'?'unknown':'available',reason:'read_verified'}));
+  f.sqlite.prepare("UPDATE store SET status='verified',capabilities=?,expires_at=? WHERE id=?").run(JSON.stringify(legacy),Date.now()+3600000,id);
+  const result=await(await f.request(`/${id}`)).json() as any;
+  assert.equal(result.store.capabilities.find((item:any)=>item.code==='orders_fbs_read').status,'available');
+  assert.equal(result.store.capabilities.find((item:any)=>item.code==='orders_fbo_read').status,'unknown');
+ }finally{f.close();}
+});
+
 test('read checks produce limited evidence, obey a cooldown and expire without enabling message sends', async () => {
   const f = await fixture();
   try {
     const id = await f.create();
     const response = await f.request(`/${id}/check`, { expectedRevision: 1 }); assert.equal(response.status, 200);
     const { store } = await response.json() as { store: { revision: number; capabilities: { code: string; status: string }[] } };
-    assert.equal(store.revision, 2); assert.equal(f.calls.length, 4);
+    assert.equal(store.revision, 2); assert.equal(f.calls.length, 6);
     assert.equal(store.capabilities.find(item => item.code === 'reply')?.status, 'unknown');
     assert.equal((await f.request(`/${id}/check`, { expectedRevision: 2 })).status, 429);
     f.sqlite.prepare('UPDATE store SET expires_at=1 WHERE id=?').run(id);
@@ -153,6 +163,32 @@ test('rotating, pausing, resuming and disconnecting use revision checks and clea
     assert.equal(f.sqlite.prepare('SELECT credential_ciphertext FROM store').get()?.credential_ciphertext, null);
     assert.deepEqual(f.sqlite.prepare("SELECT action FROM store_audit_event WHERE outcome='succeeded' ORDER BY rowid").all().map(row => row.action), ['store.create', 'store.credentials.rotate', 'store.pause', 'store.resume', 'store.disconnect']);
   } finally { f.close(); }
+});
+
+test('disconnected stores reconnect in place with a new key, retaining history and grants without restarting sync',async()=>{
+ const f=await fixture();try{
+  const id=await f.create(),replacement='synthetic-reconnect-key';
+  f.sqlite.prepare("INSERT INTO store_coordinator(store_id,organization_id) VALUES(?,'company')").run(id);
+  for(const source of ['chat','products','fbs_postings','fbo_postings'])f.sqlite.prepare("INSERT INTO store_sync_source(store_id,organization_id,source,enabled,epoch,due_at,updated_at) VALUES(?,'company',?,1,1,1,1)").run(id,source);
+  f.sqlite.prepare("INSERT INTO fbs_posting(posting_number,organization_id,store_id,order_id,order_number,detail_epoch,detail_generation,detail_due_at) VALUES('retained-parcel','company',?,'123','retained-order',1,1,1)").run(id);
+  f.sqlite.prepare("INSERT INTO fbs_sync_window(store_id,organization_id,epoch,history_start,since,\"to\",cursor,due_at) VALUES(?,'company',1,0,1,10,'retained-fbs-cursor',1)").run(id);
+  f.sqlite.prepare("INSERT INTO sync_cursor(organization_id,store_id,stream,thread_id,cursor,due_at) VALUES('company',?,'discovery','','retained-chat-cursor',1)").run(id);
+  f.sqlite.prepare("INSERT INTO store_grant(organization_id,store_id,member_id,created_at) VALUES('company',?,'staff-member',1)").run(id);
+  assert.equal((await f.request(`/${id}/state`,{expectedRevision:1,state:'disconnected'})).status,200);
+  assert.equal((await f.request(`/${id}/state`,{expectedRevision:2,state:'unverified'})).status,409);
+  assert.equal((await f.request(`/${id}/credentials`,{expectedRevision:2,apiKey:replacement},'staff')).status,403);
+  const response=await f.request(`/${id}/credentials`,{expectedRevision:2,apiKey:replacement});assert.equal(response.status,200);
+  const result=await response.json() as any;assert.equal(result.store.id,id);assert.equal(result.store.platformStoreId,'123456');assert.equal(result.store.status,'unverified');assert.equal(result.store.hasCredentials,true);assert.equal(result.store.revision,3);assert.equal(result.store.credentialVersion,3);assert.ok(result.store.capabilities.every((item:any)=>item.status==='unknown'));
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM store').get()!.n,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM fbs_posting WHERE store_id=?').get(id)!.n,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM store_grant WHERE store_id=?').get(id)!.n,1);
+  assert.equal(f.sqlite.prepare('SELECT SUM(enabled) AS n FROM store_sync_source WHERE store_id=?').get(id)!.n,0);
+  assert.equal(f.sqlite.prepare('SELECT cursor FROM fbs_sync_window WHERE store_id=?').get(id)!.cursor,'retained-fbs-cursor');assert.equal(f.sqlite.prepare('SELECT cursor FROM sync_cursor WHERE store_id=?').get(id)!.cursor,'retained-chat-cursor');
+  assert.equal(JSON.stringify(result).includes(replacement),false);assert.equal(JSON.stringify(f.sqlite.prepare('SELECT * FROM store').all()).includes(replacement),false);assert.deepEqual(f.calls,[]);
+  assert.equal((await f.request(`/${id}/credentials`,{expectedRevision:2,apiKey:replacement})).status,409);assert.equal(f.sqlite.prepare('SELECT credential_version FROM store WHERE id=?').get(id)!.credential_version,3);
+  assert.equal((await f.request(`/${id}/check`,{expectedRevision:3})).status,200);assert.equal(f.calls.length,6);
+  const checked=await(await f.request(`/${id}`)).json() as any;assert.equal(checked.store.capabilities.find((item:any)=>item.code==='orders_fbo_read').status,'available');
+  assert.equal(f.sqlite.prepare('SELECT SUM(enabled) AS n FROM store_sync_source WHERE store_id=?').get(id)!.n,0);
+  assert.equal((await f.request(`/${id}`,undefined,'staff')).status,200);
+ }finally{f.close();}
 });
 
 test('a check finishing after rotation or manager revocation cannot commit its obsolete result', async () => {
@@ -232,5 +268,27 @@ test('request validation and audit failures cannot silently perform or misreport
     const response = await f.request('', newStore()); assert.equal(response.status, 503);
     assert.equal((await response.json() as { error: { code: string } }).error.code, 'OPERATION_UNCONFIRMED');
     assert.equal(f.sqlite.prepare('SELECT count(*) AS total FROM store').get()?.total, 1);
+  } finally { f.close(); }
+});
+
+test('outbound sending needs an explicit human authorization and never follows a read-only check', async () => {
+  const f = await fixture();
+  try {
+    const id = await f.create();
+    const read = async () => (await (await f.request(`/${id}`)).json() as { store: { outboundEnabled: boolean; revision: number } }).store;
+    const before = await read();
+    assert.equal(before.outboundEnabled, false);
+    assert.equal((await f.request(`/${id}/check`, { expectedRevision: before.revision })).status, 200);
+    const checked = await read();
+    assert.equal(checked.outboundEnabled, false);
+    assert.equal((await f.request(`/${id}/outbound`, { expectedRevision: before.revision, enabled: true })).status, 409);
+    const enabled = await f.request(`/${id}/outbound`, { expectedRevision: checked.revision, enabled: true });
+    assert.equal(enabled.status, 200);
+    assert.equal((await enabled.json() as { store: { outboundEnabled: boolean } }).store.outboundEnabled, true);
+    assert.equal(f.sqlite.prepare("SELECT count(*) AS total FROM store_audit_event WHERE action='store.outbound.enable' AND outcome='succeeded'").get()?.total, 1);
+    assert.equal((await f.request(`/${id}/outbound`, { expectedRevision: checked.revision + 1, enabled: false }, 'staff')).status, 403);
+    const disabled = await f.request(`/${id}/outbound`, { expectedRevision: checked.revision + 1, enabled: false });
+    assert.equal(disabled.status, 200);
+    assert.equal((await disabled.json() as { store: { outboundEnabled: boolean } }).store.outboundEnabled, false);
   } finally { f.close(); }
 });

@@ -4,10 +4,10 @@ import {conversationControlFixture} from './fixtures/conversation-control.ts';
 import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.ts';
 import {changeAiBudget,readAiExecution} from '../src/modules/ai-runs/storage.ts';
 import {executeAiRun,type SupportRuntime} from '../src/modules/ai-runs/execution.ts';
-const config={maxGenerations:2,model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:2048,
+const config={maxGenerations:2,model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:2048,
  pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}}};
 async function fixture(){
- const f=await conversationControlFixture(undefined,{aiEnabled:'true'}),actor={...f.actor(),expectedMemberId:'owner-member'};
+ const f=await conversationControlFixture(undefined,{}),actor={...f.actor(),expectedMemberId:'owner-member'};
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
   await f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('question','org','store','conv','1','Customer','inbound','[\"Мне нужен человек.\"]',0,0,1,1,'incremental')").run();
@@ -21,7 +21,7 @@ async function fixture(){
    assert.equal((await changeAiBudget(f.db,actor,{id:crypto.randomUUID(),action:'set_enabled',budgetId:id,expectedRevision:0,enabled:true})).outcome,'applied');return id;
   };
   const request=(policyId:string)=>({runId:crypto.randomUUID(),expectedVersion:0,messageId:'question',policyId,stage:'presale',language:'ru'});
-  const env={DB:f.db,AI_RECEPTION_ENABLED:'true',NVAPI_KEY:'synthetic-only',FLUE_SUPPORT_AGENT:{} as any,AI_RECEPTION_CONFIG_JSON:JSON.stringify(config),
+  const env={DB:f.db,NVAPI_KEY:'synthetic-only',FLUE_SUPPORT_AGENT:{} as any,AI_RECEPTION_CONFIG_JSON:JSON.stringify(config),
    CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>({readAiWork:async(scope:any,runId:string)=>(await f.call('ai-work-read',{runId},scope)).body})} as any};
   return {...f,actor,policy,budget,request,env};
  }catch(error){await f.close();throw error;}
@@ -46,12 +46,17 @@ test('publishing a higher priority policy affects new runs without rewriting an 
  const f=await fixture();t.after(f.close);const low=await f.policy(20),request=f.request(low.id),started=await f.call('ai-start',{request});assert.equal(started.body.outcome,'accepted');
  await f.policy(80);assert.deepEqual((await f.call('ai-read',{runId:request.runId})).body,started.body.receipt.run);assert.deepEqual((await f.call('ai-start',{request})).body.receipt,started.body.receipt);
 });
-test('budget selection respects current scope, full-run amount, enablement and quota even at explicit zero price',{timeout:30000},async t=>{
- const f=await fixture();t.after(f.close);const m=await budgets();assert.equal(await m.selectAiBudget(f.db,f.scope,528384),null);
- const id=await f.budget();assert.equal(await m.selectAiBudget(f.db,f.scope,528384),id);assert.equal(await m.selectAiBudget(f.db,f.scope,528385),null);assert.equal(await m.selectAiBudget(f.db,{...f.scope,storeId:'other'},0),null);
+test('budget selection is read-only and never bypasses missing, paused or exhausted limits',{timeout:30000},async t=>{
+ const f=await fixture();t.after(f.close);const m=await budgets();
+ assert.equal(await m.selectAiBudget(f.db,f.scope,528384),null);
+ assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_budget').first('n'),0);
+ const id=await f.budget();assert.equal(await m.selectAiBudget(f.db,f.scope,528384),id);
+ assert.equal(await m.selectAiBudget(f.db,f.scope,528385),null);
+ assert.equal(await m.selectAiBudget(f.db,{...f.scope,storeId:'other'},0),null);
  await f.db.prepare('UPDATE ai_budget SET reserved_micros=1 WHERE id=?').bind(id).run();assert.equal(await m.selectAiBudget(f.db,f.scope,528384),null);
  await f.db.prepare('UPDATE ai_budget SET enabled=0 WHERE id=?').bind(id).run();assert.equal(await m.selectAiBudget(f.db,f.scope,0),null);
  await f.db.prepare('UPDATE ai_budget SET enabled=1,admitted_runs=max_runs WHERE id=?').bind(id).run();assert.equal(await m.selectAiBudget(f.db,f.scope,0),null);
+ assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_budget').first('n'),1);
  await assert.rejects(()=>m.selectAiBudget(f.db,f.scope,-1));await assert.rejects(()=>m.selectAiBudget(f.db,f.scope,1.5));
 });
 test('execution chooses server prices and budget once before touching the native runtime',{timeout:30000},async t=>{
@@ -59,13 +64,13 @@ test('execution chooses server prices and budget once before touching the native
  const prepared:any[]=[];const runtime={lookup:async()=>null,inspect:async()=>null,prepare:async(run:any)=>{prepared.push(run);throw new Error('stop before any synthetic provider call');}} as unknown as SupportRuntime;
  const result=await executeAiRun(f.env,f.scope,request.runId,{runtime});assert.equal(result.status,'unconfirmed');assert.equal(prepared.length,1);
  const run=(await readAiExecution(f.db,f.scope,request.runId))!;assert.equal(run.budgetId,id);assert.deepEqual(run.config,config);assert.equal(run.reservedMicros,528384);
- await f.db.prepare('UPDATE ai_budget SET enabled=0 WHERE id=?').bind(id).run();await executeAiRun({...f.env,AI_RECEPTION_ENABLED:'false',AI_RECEPTION_CONFIG_JSON:'invalid'},f.scope,request.runId,{runtime});
+ await f.db.prepare('UPDATE ai_budget SET enabled=0 WHERE id=?').bind(id).run();await executeAiRun({...f.env,DB:undefined},f.scope,request.runId,{runtime});
  assert.deepEqual(await readAiExecution(f.db,f.scope,request.runId),run);assert.equal(prepared.length,1);assert.equal(await f.db.prepare('SELECT admitted_runs FROM ai_budget WHERE id=?').bind(id).first('admitted_runs'),1);
 });
-test('disabled, missing, malformed or insufficient server configuration never reserves funds or touches runtime',{timeout:30000},async t=>{
- const f=await fixture();t.after(f.close);const p=await f.policy(),id=await f.budget(528383),request=f.request(p.id);assert.equal((await f.call('ai-start',{request})).body.outcome,'accepted');
+test('disabled, missing or malformed server configuration never reserves funds or touches runtime',{timeout:30000},async t=>{
+ const f=await fixture();t.after(f.close);const p=await f.policy(),id=await f.budget(),request=f.request(p.id);assert.equal((await f.call('ai-start',{request})).body.outcome,'accepted');
  let touched=0;const runtime={lookup:async()=>{touched++;throw new Error('unexpected native call');}} as unknown as SupportRuntime;
- for(const patch of [{},{AI_RECEPTION_ENABLED:'false'},{NVAPI_KEY:''},{AI_RECEPTION_CONFIG_JSON:undefined},{AI_RECEPTION_CONFIG_JSON:'bad'},{FLUE_SUPPORT_AGENT:undefined}]){
+ for(const patch of [{NVAPI_KEY:''},{AI_RECEPTION_CONFIG_JSON:undefined},{AI_RECEPTION_CONFIG_JSON:'bad'},{FLUE_SUPPORT_AGENT:undefined}]){
   assert.equal((await executeAiRun({...f.env,...patch},f.scope,request.runId,{runtime})).status,'unavailable');
  }
  assert.equal(touched,0);assert.equal(await readAiExecution(f.db,f.scope,request.runId),null);assert.equal(await f.db.prepare('SELECT admitted_runs FROM ai_budget WHERE id=?').bind(id).first('admitted_runs'),0);
@@ -74,6 +79,11 @@ test('an ambiguous highest priority fails closed rather than choosing by policy 
  const f=await fixture();t.after(f.close);const first=await f.policy(80);assert.ok(await changePolicy(f.db,f.actor,first.id,3,{action:'pause'},crypto.randomUUID()));
  const second=await f.policy(80);await f.db.prepare('UPDATE reply_policy SET enabled=1 WHERE id=?').bind(first.id).run();
  assert.equal(await(await matching()).selectReplyPolicy(f.db,f.scope,'presale'),null);assert.equal((await f.call('ai-start',{request:f.request(second.id)})).body.outcome,'unavailable');
+});
+test('platform bot or outbound copies never block reply admission',{timeout:30000},async t=>{
+ const f=await fixture();t.after(f.close);const p=await f.policy();
+ await f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('bot','org','store','conv','2','ChatBot','unknown','[\"Автоответ магазина\"]',0,0,2,2,'incremental')").run();
+ assert.equal((await f.call('ai-start',{request:f.request(p.id)})).body.outcome,'accepted');
 });
 test('concurrent execution admission consumes one server-selected budget reservation',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);const p=await f.policy(),id=await f.budget(),request=f.request(p.id);assert.equal((await f.call('ai-start',{request})).body.outcome,'accepted');

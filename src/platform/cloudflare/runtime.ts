@@ -15,16 +15,11 @@ export function withRuntime(env: CloudflareEnv): CloudflareEnv {
     dispatch: run => object('translation',run.id).translationDispatch(run),
     read: (id,receipt) => object('translation',id).translationRead(id,receipt),
   };
-  const replyTest: PortableAgents['replyTest'] = {
-    lookup: id => object('reply-test',id).replyTestLookup(id), inspect: id => object('reply-test',id).replyTestInspect(id),
-    prepare: (scope,id) => object('reply-test',id).replyTestPrepare(scope,id), close: (scope,id) => object('reply-test',id).replyTestClose(scope,id),
-    dispatch: run => object('reply-test',run.id).replyTestDispatch(run), read: (id,receipt) => object('reply-test',id).replyTestRead(id,receipt),
-  };
   const support: PortableAgents['support'] = {
     lookup: run => object('support',run.id).supportLookup(run), inspect: run => object('support',run.id).supportInspect(run),
     prepare: run => object('support',run.id).supportPrepare(run), dispatch: run => object('support',run.id).supportDispatch(run),
     recover: run => object('support',run.id).supportRecover(run), cancel: run => object('support',run.id).supportCancel(run),
     read: run => object('support',run.id).supportRead(run), abort: run => object('support',run.id).supportAbort(run), close: run => object('support',run.id).supportClose(run),
   };
-  return { ...env, AGENT_RUNTIME: { translation, replyTest, support } };
+  return { ...env, AGENT_RUNTIME: { translation, support } };
 }

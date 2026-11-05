@@ -5,7 +5,7 @@ import { hashPassword } from 'better-auth/crypto';
 import { createApp } from '../../src/application.ts';
 import { services } from '../../src/modules/identity/services.ts';
 
-export async function conversationsFixture() {
+export async function conversationsFixture(deps: Parameters<typeof createApp>[0] = {}) {
   const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("synthetic conversations")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
   try {
     const DB=await mf.getD1Database('DB') as unknown as D1Database;
@@ -33,7 +33,7 @@ export async function conversationsFixture() {
       DB.prepare("INSERT INTO conversation (id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,last_message_at,imported_at) VALUES ('conv-a','company','store-a','18446744073709551615','BUYER_SELLER','Opened',100,300,400),('conv-b','company','store-b','other-thread','BUYER_SELLER','Opened',100,200,400),('conv-empty','company','store-a','empty-thread','BUYER_SELLER','Opened',100,NULL,400),('conv-c','other-company','store-c','private-thread','BUYER_SELLER','Opened',100,500,600)"),
       DB.prepare("INSERT INTO message (id,organization_id,store_id,conversation_id,platform_message_id,sender_id,sender_type,direction,content,is_image,is_read,order_number,sku,event_at,received_at,ingest_mode) VALUES ('msg-a1','company','store-a','conv-a','18446744073709551614','9007199254740993','Customer','inbound','[\"Здравствуйте\",\"<script>not HTML</script>\"]',0,0,'order-1','9007199254740993',200,400,'backfill'),('msg-a2','company','store-a','conv-a','18446744073709551615',NULL,'Seller','outbound','[\"Ответ\"]',0,1,NULL,NULL,300,400,'incremental'),('msg-b','company','store-b','conv-b','secret-message',NULL,'Customer','inbound','[\"Secret store B\"]',0,0,'private-order',NULL,200,400,'backfill')"),
     ]);
-    const app=createApp();
+    const app=createApp(deps);
     const request=(suffix='',actor='owner',company='company',method='GET')=>app.request(`${env.APP_BASE_URL}/api/companies/${company}/conversations${suffix}`,{method,headers:{cookie:cookies[actor]??''}},env as never);
     return {DB,env,app,cookies,request,close:()=>mf.dispose()};
   } catch (error) {

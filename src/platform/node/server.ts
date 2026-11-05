@@ -14,8 +14,11 @@ async function boundedBody(request:Request):Promise<Uint8Array<ArrayBuffer>|Resp
  const body=new Uint8Array(bytes);let offset=0;for(const part of parts){body.set(part,offset);offset+=part.byteLength;}return body;
 }
 const unavailable=()=>Response.json({error:{code:'SERVICE_UNAVAILABLE'}},{status:503,headers:{'cache-control':'no-store'}});
-export async function serveNode(options:{dataDirectory:string;migrationsDirectory:string;assetsDirectory:string;port:number;hostname:string;variables:Record<string,string|undefined>}){
- const app=await createNodeApplication(options),assets=resolve(options.assetsDirectory);
+export async function serveNode(options:{dataDirectory:string;migrationsDirectory:string;assetsDirectory:string;port:number;hostname:string;variables:Record<string,string|undefined>;dependencies?:Parameters<typeof createNodeApplication>[0]['dependencies'];commerceFetch?:typeof fetch}){
+ const assets=resolve(options.assetsDirectory),entryPath=resolve(assets,'index.html');
+ // Pin the entry document to this process. A rebuild must not serve a new UI
+ // against the old backend before the replacement server is ready.
+ const entry=await readFile(entryPath),app=await createNodeApplication(options);
  const listener=getRequestListener(async request=>{
   const incoming=new URL(request.url),url=new URL(incoming.pathname+incoming.search,options.variables.APP_BASE_URL??`http://127.0.0.1:${options.port}`);
   const expected=options.variables.DINGBELL_GATEWAY_SECRET,supplied=request.headers.get('x-dingbell-gateway')??'';
@@ -41,7 +44,7 @@ export async function serveNode(options:{dataDirectory:string;migrationsDirector
   let path:string;try{path=resolve(assets,'.'+decodeURIComponent(url.pathname));}catch{return new Response(null,{status:400});}
   if(path!==assets&&!path.startsWith(assets+sep))return new Response(null,{status:404});
   try{if(!(await stat(path)).isFile())path=resolve(assets,'index.html');}catch{if(extname(path))return new Response(null,{status:404});path=resolve(assets,'index.html');}
-  return new Response(await readFile(path),{headers:{'content-type':contentTypes[extname(path)]??'application/octet-stream','cache-control':path.includes(`${sep}assets${sep}`)?'public, max-age=31536000, immutable':'no-cache','x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});
+  return new Response(path===entryPath?entry:await readFile(path),{headers:{'content-type':contentTypes[extname(path)]??'application/octet-stream','cache-control':path.includes(`${sep}assets${sep}`)?'public, max-age=31536000, immutable':'no-cache','x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});
  },{overrideGlobalObjects:false,errorHandler:unavailable});
  const server=createServer(listener);server.requestTimeout=60000;server.headersTimeout=20000;
  const ticker=setInterval(()=>{app.tick().catch(()=>undefined);},1000);ticker.unref();

@@ -4,6 +4,7 @@ import {Link} from 'react-router';
 import {RefreshCw} from 'lucide-react';
 import {ApiError,type Company} from '../lib/api';
 import {readStores} from '../lib/stores-api';
+import {storesQueryKey} from '../lib/query-keys';
 import {readConversations} from '../lib/conversations-api';
 import {readCompanyConversationActivity,type CompanyConversationActivityOptions} from '../lib/company-conversation-activity-api';
 import {useCompanySettings} from '../components/company-settings-provider';
@@ -24,7 +25,7 @@ const initial:Filters={storeId:'',category:'all',action:'',lifecycle:'',receptio
 const denied=(error:unknown):error is ApiError=>error instanceof ApiError&&['UNAUTHENTICATED','FORBIDDEN','NOT_FOUND'].includes(error.code);
 export function ActivityPage({company,refresh}:{company:Company;refresh:(notice?:unknown)=>Promise<void>}){
   const {date}=useCompanySettings(),[filters,setFilters]=useState<Filters>(initial),reported=useRef(false);
-  const stores=useQuery({queryKey:['activity-stores',company.id],queryFn:({signal})=>readStores(company.id,0,signal),retry:false});
+  const stores=useQuery({queryKey:storesQueryKey(company.id),queryFn:({signal})=>readStores(company.id,0,signal),retry:false});
   const conversations=useQuery({queryKey:['activity-conversation-count',company.id],queryFn:({signal})=>readConversations(company.id,{limit:1,queue:'all',state:'all'},signal),retry:false,refetchInterval:10_000});
   const options:CompanyConversationActivityOptions={limit:25,channel:'private',...(filters.storeId?{storeId:filters.storeId}:{}),...(filters.category!=='all'?{category:filters.category}:{}),...(filters.action?{action:filters.action}:{}),...(filters.lifecycle?{lifecycle:filters.lifecycle}:{}),...(filters.reception?{reception:filters.reception}:{}),...(/^\d+$/.test(filters.from)&&Number.isSafeInteger(Number(filters.from))?{from:Number(filters.from)}:{}),...(/^\d+$/.test(filters.to)&&Number.isSafeInteger(Number(filters.to))?{to:Number(filters.to)}:{})};
   const key=JSON.stringify(options),query=useInfiniteQuery({queryKey:['company-conversation-activity-page',company.id,key],queryFn:({pageParam,signal})=>readCompanyConversationActivity(company.id,{...options,...(pageParam?{cursor:pageParam}:{})},signal),initialPageParam:null as string|null,getNextPageParam:page=>page.nextCursor??undefined,retry:false,gcTime:0,refetchInterval:10_000});

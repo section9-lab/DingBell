@@ -9,6 +9,7 @@ export interface StoreRecord {
   credentialKeyVersion: string | null; credentialNonce: string | null; credentialCiphertext: string | null;
   capabilities: string | null; checkedAt: number | null; expiresAt: number | null;
   checkToken: string | null; checkUntil: number | null; nextCheckAt: number | null;
+  outboundEnabled: number;
 }
 
 export const storeColumns = `store.id, store.organization_id AS organizationId, store.name, store.platform,
@@ -16,7 +17,7 @@ export const storeColumns = `store.id, store.organization_id AS organizationId, 
   store.credential_key_version AS credentialKeyVersion, store.credential_nonce AS credentialNonce,
   store.credential_ciphertext AS credentialCiphertext, store.capabilities,
   store.checked_at AS checkedAt, store.expires_at AS expiresAt, store.check_token AS checkToken,
-  store.check_until AS checkUntil, store.next_check_at AS nextCheckAt`;
+  store.check_until AS checkUntil, store.next_check_at AS nextCheckAt, store.outbound_enabled AS outboundEnabled`;
 const nowSQL = "CAST(unixepoch('subsecond') * 1000 AS INTEGER)";
 
 // All final writes include current authorization. A preflight membership lookup
@@ -82,7 +83,7 @@ export function beginStoreCheck(db: D1Database, actor: StoreActor, id: string, r
 }
 
 export function finishStoreCheck(db: D1Database, actor: StoreActor, input: { id: string; revision: number; credentialVersion: number; token: string }, capabilities: StoreCapability[]) {
-  const reads = capabilities.slice(0, 4);
+  const reads = capabilities.filter(item=>['auth','products_read','chats_read','orders_fbs_read','orders_fbo_read','orders_fbp_read'].includes(item.code));
   const status = reads.every(item => item.status === 'available') ? 'verified'
     : reads[0]?.status === 'available' ? 'partial' : 'attention';
   return db.prepare(`UPDATE store SET capabilities=?,status=?,checked_at=${nowSQL},expires_at=${nowSQL}+86400000,
@@ -92,6 +93,14 @@ export function finishStoreCheck(db: D1Database, actor: StoreActor, input: { id:
     RETURNING ${storeColumns}`)
     .bind(JSON.stringify(capabilities), status, input.id, actor.orgId, input.revision, input.credentialVersion, input.token,
       ...actorParameters(actor)).first<StoreRecord>();
+}
+
+/** Explicit human authorization for outbound chat; read-only checks never grant it. */
+export function changeStoreOutbound(db: D1Database, actor: StoreActor, input: { id: string; expectedRevision: number; enabled: boolean }) {
+  return db.prepare(`UPDATE store SET outbound_enabled=?,revision=revision+1,updated_at=${nowSQL}
+    WHERE id=? AND organization_id=? AND revision=? AND status NOT IN ('paused','disconnected') AND ${storeAccess('store.organization_id')}
+    RETURNING ${storeColumns}`)
+    .bind(input.enabled ? 1 : 0, input.id, actor.orgId, input.expectedRevision, ...actorParameters(actor)).first<StoreRecord>();
 }
 
 export async function listStoreGrants(db: D1Database, actor: StoreActor, id: string, offset: number) {

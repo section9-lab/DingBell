@@ -3,8 +3,8 @@ import {test} from 'node:test';
 import * as v from 'valibot';
 import type {AiRun} from '../src/modules/conversations/ai-state.ts';
 import {aiAnswerFixture} from './fixtures/ai-answer.ts';
-import {reviewAiKnowledgeEvidence} from '../src/modules/ai-runs/knowledge.ts';
-async function api(){const m=await import('../src/modules/conversations/reply-tool.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.createReplyTool,'function','An automatic reply must use a scoped preparation tool, never submit_answer or direct send');return m!;}
+import {reviewAiTextEvidence} from '../src/modules/ai-runs/text-knowledge.ts';
+async function api(){const m=await import('../src/modules/conversations/reply-tool.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.createReplyTool,'function','An automatic reply must use a scoped preparation tool, never a direct send');return m!;}
 function run():AiRun{return {schemaVersion:1,scope:{organizationId:'org',storeId:'store',conversationId:'conv',controllerId:'controller'},request:{runId:crypto.randomUUID(),expectedVersion:0,messageId:'message',policyId:'policy',stage:'presale',language:'ru'},
  admission:{messageId:'message',inputRevision:1,question:'Какая ширина?',policyId:'policy',policyRevision:1,policyConfig:{kind:'automatic',name:'Support',storeIds:['store'],priority:50,stages:['presale'],mode:'automatic',language:'customer',tone:'concise',instructions:''},stage:'presale',language:'ru'},controlEpoch:1,startedAt:1,deadlineAt:60001};}
 const data={body:'Ширина — 26 см.',citations:['a'.repeat(64)]};
@@ -49,6 +49,6 @@ test('preparation exceptions fail closed and an aborted tool performs no writes 
 });
 test('the reply prompt can review original published evidence only while all three switches remain enabled',{timeout:30000},async t=>{
  const x=await aiAnswerFixture('support-reply-v1');t.after(x.f.close);const env={...x.env,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'},id=x.run.request.runId;
- assert.deepEqual(await reviewAiKnowledgeEvidence(env,x.read,x.scope,id,x.evidence),x.evidence);
- for(const flag of ['AI_RECEPTION_ENABLED','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED'])assert.equal(await reviewAiKnowledgeEvidence({...env,[flag]:'false'},x.read,x.scope,id,x.evidence),null,flag);
+ assert.deepEqual(await reviewAiTextEvidence(env,x.read,x.scope,id,x.evidence),x.evidence);
+ for(const flag of ['AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED'])assert.equal(await reviewAiTextEvidence({...env,[flag]:'false'},x.read,x.scope,id,x.evidence),null,flag);
 });

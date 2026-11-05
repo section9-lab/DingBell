@@ -11,6 +11,7 @@ test('conversation reads expose only authorized imported facts with exact IDs an
     assert.deepEqual(result.conversations.map((item:any)=>item.id),['conv-a','conv-b','conv-empty']);
     const item=result.conversations[0];assert.equal(item.store.name,'可见店铺');assert.equal(item.store.status,'paused');assert.equal(item.platformThreadId,'18446744073709551615');
     assert.equal(item.platformCreatedAt,new Date(100).toISOString());assert.equal(item.latestMessage.platformMessageId,'18446744073709551615');
+    assert.equal(item.buyerSenderId,'9007199254740993');assert.equal(item.buyerOrderNumber,null);assert.equal(result.conversations[2].buyerSenderId,null);assert.equal(result.conversations[2].buyerOrderNumber,null);
     assert.equal('customerName'in item,false);assert.equal('credentialCiphertext'in item.store,false);
     assert.deepEqual(item.workflow,{version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null});
     const detail=await (await f.request('/conv-a')).json() as any;assert.equal(detail.companyId,'company');assert.equal(detail.conversation.id,'conv-a');assert.equal(detail.conversation.sync.enabled,false);
@@ -18,7 +19,8 @@ test('conversation reads expose only authorized imported facts with exact IDs an
     const messages=await (await f.request('/conv-a/messages')).json() as any;assert.equal(messages.companyId,'company');assert.equal(messages.conversationId,'conv-a');
     assert.deepEqual(messages.messages.map((item:any)=>item.id),['msg-a1','msg-a2']);assert.equal(messages.messages[0].platformMessageId,'18446744073709551614');
     assert.equal(messages.messages[0].senderId,'9007199254740993');assert.deepEqual(messages.messages[0].content,['Здравствуйте','<script>not HTML</script>']);
-    assert.equal(messages.messages[0].orderNumber,'order-1');assert.equal(messages.messages[0].eventAt,new Date(200).toISOString());assert.equal('isRead'in messages.messages[0],false);
+    assert.equal(messages.messages[0].orderNumber,'order-1');assert.equal(messages.messages[0].eventAt,new Date(200).toISOString());
+    assert.equal(messages.messages[0].isRead,false);assert.equal(messages.messages[1].isRead,true);assert.equal('previewTruncated'in messages.messages[0],false);
     assert.deepEqual((await (await f.request('/conv-empty/messages')).json() as any).messages,[]);
     assert.equal((await f.request('/conv-a','owner','company','POST')).status,404);
   }finally{await f.close();}
@@ -142,7 +144,7 @@ test('conversations enforce current company membership, store grants and session
 test('strict conversation queries reject unknown, duplicate, malformed and scoped pagination inputs', {timeout:30_000},async()=>{
   const f=await conversationsFixture();
   try {
-    for(const suffix of ['?unknown=1','?limit=1&limit=2','?limit=0','?limit=101','?limit=1.2','?limit=01','?limit=','?search=x','?searchField=thread','?searchField=unknown&search=x','?searchField=thread&search=','?storeId=','?cursor=not-a-cursor','/conv-a?limit=1','/conv-a/messages?storeId=store-a','/conv-a/messages?cursor=','/conv-a/messages?limit=1&limit=2']) {
+    for(const suffix of ['?unknown=1','?limit=1&limit=2','?limit=0','?limit=101','?limit=1.2','?limit=01','?limit=','?search=','?searchField=thread','?searchField=unknown&search=x','?searchField=thread&search=','?storeId=','?cursor=not-a-cursor','/conv-a?limit=1','/conv-a/messages?storeId=store-a','/conv-a/messages?cursor=','/conv-a/messages?limit=1&limit=2']) {
       const response=await f.request(suffix);assert.equal(response.status,400,suffix);assert.equal((await response.json() as any).error.code,'INVALID_REQUEST');
     }
     const first=await (await f.request('?limit=1')).json() as any;assert.equal(first.conversations.length,1);assert.ok(first.nextCursor);
@@ -153,6 +155,11 @@ test('strict conversation queries reject unknown, duplicate, malformed and scope
     assert.equal((await f.request(`/conv-b/messages?cursor=${encodeURIComponent(message.nextCursor)}`)).status,400);
     const exact=await (await f.request('?searchField=thread&search=18446744073709551615')).json() as any;assert.deepEqual(exact.conversations.map((item:any)=>item.id),['conv-a']);
     const order=await (await f.request('?searchField=order&search=order-1')).json() as any;assert.deepEqual(order.conversations.map((item:any)=>item.id),['conv-a']);
+    for(const search of ['18446744073709551615','order-1']){
+      const combined=await (await f.request(`?search=${search}`)).json() as any;
+      assert.deepEqual(combined.conversations.map((item:any)=>item.id),['conv-a']);
+      assert.deepEqual(combined.counts,{all:1,mine:0,unassigned:1});
+    }
     assert.deepEqual((await (await f.request('?searchField=order&search=order')).json() as any).conversations,[]);
   }finally{await f.close();}
 });

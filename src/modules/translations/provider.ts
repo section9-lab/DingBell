@@ -5,6 +5,8 @@ import { PreviewLedger } from './ledger.ts';
 import { previewFetch } from './transport.ts';
 import { sendPreviewRequest } from './provider-fetch.ts';
 import { claimTranslationProviderRequest } from './storage.ts';
+import { translationApiKey } from './company-key.ts';
+import type { TranslationBindings } from './bindings.ts';
 import { PREVIEW_MODEL,previewInstance,validatePreviewRun } from './policy.ts';
 
 export function currentPreviewLedger(){return new PreviewLedger(getCloudflareContext().storage.sql);}
@@ -18,8 +20,8 @@ function active(){
 }
 export function previewProvider():Provider<'openai-completions'>{
   return {...base,getModels:()=>[previewModel!],auth:{apiKey:{name:'NVIDIA translation secret',async resolve({signal}){
-    signal.throwIfAborted();const {context}=active();const key=context.env.NVAPI_KEY;
-    if(typeof key!=='string'||!key)throw new Error('PREVIEW_SECRET_UNAVAILABLE');return {auth:{apiKey:key},source:'Cloudflare translation secret'};
+    signal.throwIfAborted();const {context,run}=active();const key=await translationApiKey(context.env as unknown as TranslationBindings,run.organizationId);
+    if(!key)throw new Error('PREVIEW_SECRET_UNAVAILABLE');return {auth:{apiKey:key},source:'Translation provider secret'};
   }}},
   stream(){throw new Error('PREVIEW_STREAM_UNSUPPORTED');},
   streamSimple(model,context,options){

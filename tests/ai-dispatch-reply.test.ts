@@ -12,7 +12,7 @@ function fixture(outcome='accepted'){
   all:async()=>({results:[{...scope,eventId:'event',runId:intake,inputSequence:1,createdAt:Date.now()}]}),
   run:async()=>{if(sql.includes('token=NULL'))finishes.push(values);},
  };}};}};
- const env={DB:db,AI_RECEPTION_ENABLED:'true',AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true',CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>controller}} as any;
+ const env={DB:db,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true',CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>controller}} as any;
  return {env,calls,finishes,intake,answer};
 }
 test('completed automatic dispatch commits the original AI send receipt without rotating its epoch',async()=>{

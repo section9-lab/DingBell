@@ -15,8 +15,10 @@ const root=fileURLToPath(new URL('../../',import.meta.url));
 // initialization, so a test timeout cannot strand a partially created runtime.
 const activeFixtures=new Set<()=>Promise<void>>();
 afterEach(async()=>{await Promise.all([...activeFixtures].map(close=>close()));});
-async function runtimeModules() {
-  const modules:{type:'ESModule';path:string;contents:string}[]=[],visited=new Set<string>();
+type RuntimeModule = { type:'ESModule'; path:string; contents:string };
+let cachedModules: Promise<RuntimeModule[]> | undefined;
+async function loadRuntimeModules() {
+  const modules:RuntimeModule[]=[],visited=new Set<string>();
   async function add(path:string) {
     if(visited.has(path))return;visited.add(path);
     let contents=stripTypeScriptTypes(await readFile(path,'utf8'),{mode:'transform'});
@@ -30,7 +32,12 @@ async function runtimeModules() {
   await add(join(root,'tests/fixtures/conversation-control-worker.ts'));
   return modules;
 }
-export async function conversationControlFixture(throughMigration?:string,config:{outboundEnabled?:string;aiEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}) {
+async function runtimeModules() {
+  cachedModules ??= loadRuntimeModules().catch(error => { cachedModules = undefined; throw error; });
+  // Miniflare owns the supplied objects; preserve an immutable per-process cache.
+  return (await cachedModules).map(module => ({ ...module }));
+}
+export async function conversationControlFixture(throughMigration?:string,config:{outboundEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}) {
   const providerRequests:{path:string;body:unknown}[]=[],providerErrors:string[]=[];
   let providerMode='success', releaseProvider:(()=>void)|undefined;
   const credentialEnv={STORE_CREDENTIAL_ACTIVE_KEY:'test',STORE_CREDENTIAL_KEYS:JSON.stringify({test:btoa('t'.repeat(32))})};
@@ -43,7 +50,7 @@ export async function conversationControlFixture(throughMigration?:string,config
   activeFixtures.add(close);
   try{
   const options={modules:await runtimeModules(),modulesRoot:root,compatibilityDate:'2026-06-01',
-    bindings:{...credentialEnv,OUTBOUND_ENABLED:config.outboundEnabled??'false',AI_RECEPTION_ENABLED:config.aiEnabled??'false',AI_OUTBOUND_ENABLED:config.aiOutboundEnabled??'false',TEST_AI_TIMEOUT_MS:config.aiTimeoutMs??60000},
+    bindings:{...credentialEnv,OUTBOUND_ENABLED:config.outboundEnabled??'false',AI_OUTBOUND_ENABLED:config.aiOutboundEnabled??'false',TEST_AI_TIMEOUT_MS:config.aiTimeoutMs??60000},
     d1Databases:{DB:'synthetic-control'},d1Persist:join(path,'d1'),
     durableObjects:{CONVERSATION_CONTROLLER:{className:'TestConversationController',useSQLite:true},STORE_COORDINATOR:{className:'StoreCoordinator',useSQLite:true}},durableObjectsPersist:join(path,'do'),
     outboundService:async(request:Request)=>{try {
@@ -64,16 +71,36 @@ export async function conversationControlFixture(throughMigration?:string,config
   if(closing)throw new Error('Conversation fixture initialization was cancelled');
   mf=new Miniflare(options);db=await mf.getD1Database('DB') as unknown as D1Database;
   const migrations=(await readdir(join(root,'migrations'))).filter(name=>name.endsWith('.sql')).sort();
+  let legacyPushViews=false;
   async function migrate(names:string[]){
-    for(const name of names){
-      const statements=(await readFile(join(root,'migrations',name),'utf8')).split('--> statement-breakpoint').map(sql=>sql.trim()).filter(Boolean);
-      // Prepare inside workerd as well: preparing each statement through the
-      // Node binding proxy adds hundreds of synchronous RPC round trips.
-      const response=await mf!.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op:'fixture-migrate',statements})});
-      assert.equal(response.status,200,`Fixture migration ${name}: ${await response.text()}`);
+    let pending:{name:string;statements:string[]}[]=[];
+    async function flush() {
+      if (!pending.length) return;
+      const response=await mf!.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op:'fixture-migrate-many',migrations:pending})});
+      assert.equal(response.status,200,`Fixture migrations: ${await response.text()}`);
+      pending=[];
     }
+    for(const name of names){
+      if(name.startsWith('0070_')&&legacyPushViews){
+        await flush();
+        await db.batch([db.prepare('DROP VIEW ozon_push_event'),db.prepare('DROP VIEW ozon_push_chat_head')]);legacyPushViews=false;
+      }
+      const statements=(await readFile(join(root,'migrations',name),'utf8')).split('--> statement-breakpoint').map(sql=>sql.trim()).filter(Boolean);
+      pending.push({name,statements});
+    }
+    await flush();
   }
   await migrate(migrations.filter(name=>!throughMigration||name.slice(0,4)<=throughMigration));
+  if(throughMigration&&throughMigration<'0070'){
+    // Historical financial/audit upgrade tests use today's controller against an old schema.
+    // Empty views model the absence of the unrelated Push sidecar, without changing any
+    // original table, row or trigger under test. The real 0070 replaces these fixture-only
+    // views on a full forward upgrade. Production never creates compatibility views.
+    await db.batch([
+      db.prepare("CREATE VIEW ozon_push_event AS SELECT NULL AS id,NULL AS organization_id,NULL AS store_id,'{}' AS hint,0 AS requires_review WHERE 0"),
+      db.prepare('CREATE VIEW ozon_push_chat_head AS SELECT NULL AS organization_id,NULL AS store_id,NULL AS conversation_id,NULL AS message_id WHERE 0'),
+    ]);legacyPushViews=true;
+  }
   await db.prepare('CREATE TABLE test_provider_request (id INTEGER PRIMARY KEY, path TEXT NOT NULL, body TEXT NOT NULL, accepted INTEGER NOT NULL)').run();
   await db.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('org','Org','org',1),('other-org','Other','other',1)").run();
   for(const [id,role]of [['owner','owner'],['staff','member']])await db.batch([
@@ -104,8 +131,8 @@ export async function conversationControlFixture(throughMigration?:string,config
       const response=await mf!.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op,scope:target,actor:actor(),...extra})});
       return {status:response.status,body:await response.json() as T};
     },
-    async restart(aiEnabled?:string,sendConfig:{outboundEnabled?:string;aiOutboundEnabled?:string}={}){if(closing)throw new Error('Conversation fixture is closed');await mf!.dispose();
-      if(closing)throw new Error('Conversation fixture is closed');if(aiEnabled!==undefined)options.bindings.AI_RECEPTION_ENABLED=aiEnabled;
+    async restart(_aiEnabled?:string,sendConfig:{outboundEnabled?:string;aiOutboundEnabled?:string}={}){if(closing)throw new Error('Conversation fixture is closed');await mf!.dispose();
+      if(closing)throw new Error('Conversation fixture is closed');
       if(sendConfig.outboundEnabled!==undefined)options.bindings.OUTBOUND_ENABLED=sendConfig.outboundEnabled;if(sendConfig.aiOutboundEnabled!==undefined)options.bindings.AI_OUTBOUND_ENABLED=sendConfig.aiOutboundEnabled;
       mf=new Miniflare(options);db=await mf.getD1Database('DB') as unknown as D1Database;},
     async migrateAfter(version:string){

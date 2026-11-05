@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readStoreSync, setStoreSync } from './sync-api.ts';
+import { changeOrderHistory,readStoreSync, setStoreSync } from './sync-api.ts';
 import * as syncAPI from './sync-api.ts';
 
 const receipt = { sync: { storeId: 'store', enabled: true, epoch: 3, dueAt: '2026-10-09T00:00:00Z', lastSuccessAt: null,
@@ -46,11 +46,21 @@ test('product sync receipts require the products source, matching store and comm
   assert.deepEqual(calls,[{path:'/api/companies/c%2F1/stores/s%2F1/sync/products',body:{expectedEpoch:2,enabled:false}}]);
 });
 
-test('FBS receipts bind source and store and reject stale epochs without repeating requests', async t => {
-  const read = Reflect.get(syncAPI,'readFbsSync') as (company:string,store:string)=>Promise<unknown>;
-  const write = Reflect.get(syncAPI,'setFbsSync') as (company:string,store:string,epoch:number,enabled:boolean)=>Promise<unknown>;
+test('history receipts bind company, store, source and command revision; lost acknowledgements never retry',async t=>{
+ const history={source:'fbo_postings',commandRevision:1,state:'active',requestedFrom:'2025-01-01T00:00:00.000Z',requestedTo:'2026-10-01T00:00:00.000Z',coveredFrom:'2026-10-01T00:00:00.000Z',windowSince:'2026-08-31T00:00:00.000Z',windowTo:'2026-10-01T00:00:00.000Z',pagesRead:0};
+ const acknowledgement={companyId:'company',storeId:'store',source:'fbo_postings',history,wakePending:false},body={operation:'start' as const,expectedEpoch:1,expectedHistoryRevision:0,since:'2025-01-01'};
+ for(const value of [{...acknowledgement,companyId:'other'},{...acknowledgement,storeId:'other'},{...acknowledgement,source:'fbs_postings'},{...acknowledgement,history:{...history,commandRevision:0}},{...acknowledgement,history:{...history,source:'fbs_postings'}}]){
+  const mock=t.mock.method(globalThis,'fetch',async()=>Response.json(value));await assert.rejects(changeOrderHistory('company','store','fbo_postings',body),{code:'OPERATION_UNCONFIRMED'});mock.mock.restore();
+ }
+ let calls=0;t.mock.method(globalThis,'fetch',async(path:string,options:RequestInit)=>{calls++;assert.equal(path,'/api/companies/company/stores/store/sync/fbo-postings/history');assert.deepEqual(JSON.parse(String(options.body)),body);throw Error('lost history acknowledgement');});
+ await assert.rejects(changeOrderHistory('company','store','fbo_postings',body),{code:'OPERATION_UNCONFIRMED'});assert.equal(calls,1);
+});
+
+for(const mode of ['fbs','fbo','fbp'] as const)test(`${mode.toUpperCase()} receipts bind source and store and reject stale epochs without repeating requests`, async t => {
+  const read = Reflect.get(syncAPI,mode==='fbs'?'readFbsSync':mode==='fbo'?'readFboSync':'readFbpSync') as (company:string,store:string)=>Promise<unknown>;
+  const write = Reflect.get(syncAPI,mode==='fbs'?'setFbsSync':mode==='fbo'?'setFboSync':'setFbpSync') as (company:string,store:string,epoch:number,enabled:boolean)=>Promise<unknown>;
   assert.equal(typeof read,'function'); assert.equal(typeof write,'function');
-  const fbs = {...receipt,sync:{...receipt.sync,source:'fbs_postings',postingCount:2,readyCount:2,pendingCount:0,failedCount:0,
+  const fbs = {...receipt,sync:{...receipt.sync,source:`${mode}_postings`,postingCount:2,readyCount:2,pendingCount:0,failedCount:0,
     historyStart:'2026-09-09T00:00:00Z',windowSince:'2026-09-09T00:00:00Z',windowTo:'2026-10-09T00:00:00Z',lastCompletedTo:null}};
   for (const sync of [{...fbs.sync,source:'products'},{...fbs.sync,storeId:'other'},{...fbs.sync,epoch:2},{...fbs.sync,enabled:false}]) {
     const mock = t.mock.method(globalThis,'fetch',async()=>Response.json({...fbs,sync}));
@@ -61,5 +71,5 @@ test('FBS receipts bind source and store and reject stale epochs without repeati
   const calls:unknown[]=[];
   t.mock.method(globalThis,'fetch',async(path:string,options:RequestInit)=>{calls.push({path,body:JSON.parse(String(options.body))});throw new Error('Synthetic lost FBS acknowledgement');});
   await assert.rejects(write('c/1','s/1',2,false),{code:'OPERATION_UNCONFIRMED'});
-  assert.deepEqual(calls,[{path:'/api/companies/c%2F1/stores/s%2F1/sync/fbs-postings',body:{expectedEpoch:2,enabled:false}}]);
+  assert.deepEqual(calls,[{path:`/api/companies/c%2F1/stores/s%2F1/sync/${mode}-postings`,body:{expectedEpoch:2,enabled:false}}]);
 });

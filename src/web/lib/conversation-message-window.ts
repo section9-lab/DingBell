@@ -17,6 +17,13 @@ function compare(a: MessageLocator, b: MessageLocator) {
 export function startMessageWindow(page: MessagePage): MessageWindow {
   return { messages: page.messages, viewerMemberId: page.viewerMemberId, historyCursor: page.pageCursor, updatesCursor: page.updatesCursor, hasOlder: page.nextCursor !== null, earlierUpdate: null };
 }
+/** Mutable platform observations (read flags / verified echoes) do not advance the append-only stream. */
+export function refreshMessageWindowMetadata(current:MessageWindow,page:MessagePage):MessageWindow{
+  if(page.viewerMemberId!==current.viewerMemberId)return current;
+  const facts=new Map(page.messages.map(item=>[item.id,item]));let changed=false;
+  const messages=current.messages.map(item=>{const fresh=facts.get(item.id);if(!fresh||JSON.stringify(item)===JSON.stringify(fresh))return item;changed=true;return fresh;});
+  return changed?{...current,messages:messages.sort(compare)}:current;
+}
 export function applyMessageUpdates(current: MessageWindow, requestedCursor: string, batch: MessageUpdates): MessageWindow {
   if (requestedCursor !== current.updatesCursor || batch.viewerMemberId !== current.viewerMemberId) return current;
   if (!batch.messages.length && batch.nextCursor === current.updatesCursor && batch.historyCursor === current.historyCursor) return current;

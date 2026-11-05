@@ -7,7 +7,7 @@ import {conversationControlFixture} from './fixtures/conversation-control.ts';
 import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.ts';
 
 async function fixture(through?:string,aiTimeoutMs=60000){
- const f=await conversationControlFixture(through,{aiEnabled:'true',aiTimeoutMs}),actor={...f.actor(),expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
+ const f=await conversationControlFixture(through,{aiTimeoutMs}),actor={...f.actor(),expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
   const config={kind:'automatic' as const,name:'Future support',storeIds:['store'],priority:50,stages:['presale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};

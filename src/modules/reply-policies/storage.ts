@@ -24,7 +24,8 @@ const versionDTO=(row:VersionRow)=>({revision:row.revision,schemaVersion:row.sch
 
 export async function listPolicies(db:D1Database,actor:PolicyActor,kind:string,after='') {
   const rows=await db.prepare(`SELECT id,kind,version,draft_revision,tested_revision,published_revision,enabled,updated_at,
-    json_extract(draft_config,'$.name') AS name FROM reply_policy WHERE organization_id=? AND kind=? AND id>? AND EXISTS (${access}) ORDER BY id LIMIT 21`)
+    COALESCE((SELECT json_extract(config,'$.name') FROM policy_version WHERE organization_id=reply_policy.organization_id
+      AND policy_id=reply_policy.id AND revision=reply_policy.published_revision),json_extract(draft_config,'$.name')) AS name FROM reply_policy WHERE organization_id=? AND kind=? AND id>? AND EXISTS (${access}) ORDER BY id LIMIT 21`)
     .bind(actor.orgId,kind,after,...params(actor)).all<Row&{name:string}>();
   return {policies:rows.results.slice(0,20).map(row=>({id:row.id,kind:row.kind,name:row.name,version:row.version,draftRevision:row.draft_revision,
     testedRevision:row.tested_revision,publishedRevision:row.published_revision,enabled:!!row.enabled,updatedAt:new Date(row.updated_at).toISOString()})),
@@ -66,6 +67,45 @@ export async function checkPolicy(db:D1Database,actor:PolicyActor,id:string,publ
     FROM reply_policy WHERE organization_id=? AND id=? AND EXISTS (${access})`).bind(actor.orgId,id,...params(actor)).first<{stores_available:number;no_overlap:number;test_current:number}>();
   return !row?'NOT_FOUND':!row.stores_available?'POLICY_STORE_UNAVAILABLE':!row.no_overlap?'POLICY_OVERLAP':publishing&&!row.test_current?'POLICY_TEST_REQUIRED':null;
 }
+export async function checkPolicyConfig(db:D1Database,actor:PolicyActor,id:string,config:ReplyPolicyConfig) {
+  const row=await db.prepare(`SELECT ${storesAvailable('draft_config')} AS stores_available,${noOverlap} AS no_overlap
+    FROM (SELECT ? AS organization_id,? AS id,? AS kind,? AS draft_config) AS reply_policy WHERE EXISTS (${access})`)
+    .bind(actor.orgId,id,config.kind,JSON.stringify(config),...params(actor)).first<{stores_available:number;no_overlap:number}>();
+  return !row?'NOT_FOUND':!row.stores_available?'POLICY_STORE_UNAVAILABLE':!row.no_overlap?'POLICY_OVERLAP':null;
+}
+
+// All checks and the immutable version snapshot commit together; no intermediate
+// saved configuration can leak out when a direct save is rejected.
+export function savePolicy(db:D1Database,actor:PolicyActor,id:string,expectedVersion:number,config:ReplyPolicyConfig,requestId:string) {
+  const candidate='(SELECT config FROM candidate)';
+  const scope=`NOT EXISTS (SELECT 1 FROM json_each(${candidate},'$.storeIds') requested
+    WHERE NOT EXISTS (SELECT 1 FROM store WHERE store.organization_id=? AND store.id=requested.value))
+    AND (json_extract(${candidate},'$.kind')<>'automatic' OR NOT EXISTS (
+      SELECT 1 FROM reply_policy other JOIN policy_version active ON active.organization_id=other.organization_id
+      AND active.policy_id=other.id AND active.revision=other.published_revision
+      WHERE other.organization_id=? AND other.id<>? AND other.kind='automatic' AND other.enabled=1
+      AND json_extract(active.config,'$.priority')=json_extract(${candidate},'$.priority')
+      AND EXISTS (SELECT 1 FROM json_each(active.config,'$.storeIds') s JOIN json_each(${candidate},'$.storeIds') d ON s.value=d.value)
+      AND EXISTS (SELECT 1 FROM json_each(active.config,'$.stages') s JOIN json_each(${candidate},'$.stages') d ON s.value=d.value)))`;
+  const zone="COALESCE((SELECT time_zone FROM company_settings WHERE organization_id=?),'UTC')";
+  if(expectedVersion===0) return db.prepare(`WITH candidate(config) AS (SELECT ?)
+    INSERT INTO reply_policy (organization_id,id,kind,version,draft_revision,draft_config,tested_revision,tested_time_zone,
+      draft_base_revision,published_revision,enabled,published_by,published_at,published_request_id,published_time_zone,updated_at)
+    SELECT ?,?,?,1,1,${candidate},1,${zone},1,1,1,?,unixepoch()*1000,?,${zone},unixepoch()*1000
+    WHERE EXISTS (${access}) AND ${scope} ON CONFLICT(organization_id,id) DO NOTHING RETURNING version`)
+    .bind(JSON.stringify(config),actor.orgId,id,config.kind,actor.orgId,actor.actorUserId,requestId,actor.orgId,
+      ...params(actor),actor.orgId,actor.orgId,id).first();
+  return db.prepare(`WITH candidate(config) AS (SELECT ?)
+    UPDATE reply_policy SET draft_config=${candidate},draft_revision=draft_revision+1,tested_revision=draft_revision+1,
+      tested_time_zone=${zone},draft_base_revision=COALESCE(published_revision,0)+1,draft_rollback_of=NULL,
+      published_revision=COALESCE(published_revision,0)+1,enabled=1,published_by=?,published_at=unixepoch()*1000,
+      published_request_id=?,published_time_zone=${zone},version=version+1,updated_at=unixepoch()*1000
+    WHERE organization_id=? AND id=? AND version=? AND version<9007199254740991 AND kind=?
+      AND EXISTS (${access}) AND ${scope} RETURNING version`)
+    .bind(JSON.stringify(config),actor.orgId,actor.actorUserId,requestId,actor.orgId,actor.orgId,id,expectedVersion,config.kind,
+      ...params(actor),actor.orgId,actor.orgId,id).first();
+}
+
 export type PolicyChange={action:'draft';config:ReplyPolicyConfig}|{action:'test'|'publish'|'pause'}|{action:'restore';revision:number};
 export function changePolicy(db:D1Database,actor:PolicyActor,id:string,expectedVersion:number,change:PolicyChange,requestId:string) {
   let set='',guard='',setValues:(string|number)[]=[],guardValues:(string|number)[]=[];

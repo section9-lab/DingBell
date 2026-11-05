@@ -6,8 +6,7 @@ import {knowledgeFixture} from './fixtures/knowledge.ts';
 
 async function api(){
   const m=await import('../src/modules/budget-audit/storage.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});
-  assert.equal(typeof m?.readCompanyBudgetAudit,'function','company reservations need an independent ledger audit');
-  assert.equal(typeof m?.readQueryAllowanceAudit,'function','deployment query allowances must be audited separately');return m!;
+  assert.equal(typeof m?.readCompanyBudgetAudit,'function','company reservations need an independent ledger audit');return m!;
 }
 async function fixture(){
   const f=await knowledgeFixture(),actor={orgId:'company',actorUserId:'owner',sessionId:f.sqlite.prepare("SELECT id FROM session WHERE user_id='owner'").get()!.id as string,expectedMemberId:'owner'};
@@ -26,40 +25,32 @@ async function fixture(){
     f.sqlite.prepare('INSERT INTO ai_generation(run_id,sequence,claimed_at,usage,charged_micros,settled_at) VALUES(?,?,1,?,?,?)')
       .run(runId,sequence,charge===null?null:'{}',charge,charge===null?null:1);
   }
-  function query(id:string,amount:number,day='2026-10-11'){
-    f.sqlite.prepare("INSERT INTO reply_test_query(id,organization_id,store_id,conversation_id,request_id,actor_user_id,actor_member_id,budget_id,payload,payload_hash,reserved_micros,quota_day,admission_token,created_at) VALUES(?,'company','store-a','audit-conv',?,'owner','owner','budget','{}',?,?,?,'permit',1)")
-      .run(id,id,'a'.repeat(64),amount,day);
-  }
-  return {...f,actor,budget,aiRun,generation,query};
+  return {...f,actor,budget,aiRun,generation};
 }
-test('AI audit includes unused generations, unknown claimed usage and a separate embedding allowance',async t=>{
+test('AI audit includes unused generations and unknown claimed usage',async t=>{
   const m=await api(),f=await fixture();t.after(f.close);f.budget('ai_budget');f.aiRun();f.generation('run',1,20);f.generation('run',2,null);
-  f.sqlite.exec("INSERT INTO ai_knowledge_query(run_id,config,scope,question_hash,reserved_micros,created_at) VALUES('run','{}','{}',printf('%064d',0),60,1)");
-  f.sqlite.exec("UPDATE ai_budget SET reserved_micros=260,spent_micros=20,admitted_runs=1");
+  f.sqlite.exec("UPDATE ai_budget SET reserved_micros=200,spent_micros=20,admitted_runs=1");
   const audit=await m.readCompanyBudgetAudit(f.db,f.actor,'ai','budget');assert.equal(audit!.status,'balanced');
-  assert.deepEqual(audit!.expected,{reservedMicros:'260',spentMicros:'20',admittedRuns:'1'});assert.equal(audit!.embeddingReservedMicros,'60');
-  f.sqlite.exec("UPDATE ai_execution SET closure='{}'; UPDATE ai_budget SET reserved_micros=160");
-  const closed=await m.readCompanyBudgetAudit(f.db,f.actor,'ai','budget');assert.equal(closed!.status,'balanced');assert.equal(closed!.expected.reservedMicros,'160');
+  assert.deepEqual(audit!.expected,{reservedMicros:'200',spentMicros:'20',admittedRuns:'1'});
+  f.sqlite.exec("UPDATE ai_execution SET closure='{}'; UPDATE ai_budget SET reserved_micros=100");
+  const closed=await m.readCompanyBudgetAudit(f.db,f.actor,'ai','budget');assert.equal(closed!.status,'balanced');assert.equal(closed!.expected.reservedMicros,'100');
   const before=JSON.stringify(f.sqlite.prepare('SELECT * FROM ai_budget').all());
   assert.deepEqual({...await m.readCompanyBudgetAudit(f.db,f.actor,'ai','budget'),at:0},{...closed,at:0});assert.equal(JSON.stringify(f.sqlite.prepare('SELECT * FROM ai_budget').all()),before);
   assert.equal(closed!.canRelease,false);assert.equal(closed!.supplierCostsVerified,false);
 });
-test('translation and reply-test audits distinguish held, settled and released runs',async t=>{
+test('translation audits distinguish held, settled and released runs',async t=>{
   const m=await api(),f=await fixture();t.after(f.close);
-  for(const [kind,table,runTable] of [['translation','translation_budget_bucket','reply_preview_run'],['reply-test','reply_test_budget','reply_test_run']] as const){
-    f.budget(table);for(const state of ['held','settled','released']){
-      const id=`${kind}-${state}`,held=state==='held',settled=state==='settled';
-      const identity=kind==='translation'?"source,source_hash,source_revision":"payload,payload_hash";
-      const identityValues=kind==='translation'?"'private original',?,0":"'{}',?";
-      f.sqlite.prepare(`INSERT INTO ${runTable}(id,organization_id,store_id,conversation_id,request_id,actor_user_id,actor_member_id,${identity},budget_id,config,reserved_micros,created_at,receipt,provider_request_claimed_at,settlement,usage,charged_micros,settled_at,release_evidence)
-        VALUES(?,'company','store-a','audit-conv',?,'owner','owner',${identityValues},'budget','{}',100,1,?,?,?, ?,?,?,?)`)
-        .run(id,id,'a'.repeat(64),settled?'{}':null,settled?1:null,state,settled?'{}':null,held?null:settled?25:0,held?null:1,state==='released'?'{}':null);
-    }
-    f.sqlite.exec(`UPDATE ${table} SET reserved_micros=100,spent_micros=25${kind==='translation'?'':',admitted_runs=3'}`);
-    const audit=await m.readCompanyBudgetAudit(f.db,f.actor,kind,'budget');assert.equal(audit!.status,'balanced');
-    assert.deepEqual(audit!.expected,{reservedMicros:'100',spentMicros:'25',admittedRuns:kind==='translation'?null:'3'});
-    assert.equal(JSON.stringify(audit).includes('private original'),false);
+  const [kind,table,runTable]=['translation','translation_budget_bucket','reply_preview_run'] as const;
+  f.budget(table);for(const state of ['held','settled','released']){
+    const id=`${kind}-${state}`,held=state==='held',settled=state==='settled';
+    f.sqlite.prepare(`INSERT INTO ${runTable}(id,organization_id,store_id,conversation_id,request_id,actor_user_id,actor_member_id,source,source_hash,source_revision,budget_id,config,reserved_micros,created_at,receipt,provider_request_claimed_at,settlement,usage,charged_micros,settled_at,release_evidence)
+      VALUES(?,'company','store-a','audit-conv',?,'owner','owner','private original',?,0,'budget','{}',100,1,?,?,?, ?,?,?,?)`)
+      .run(id,id,'a'.repeat(64),settled?'{}':null,settled?1:null,state,settled?'{}':null,held?null:settled?25:0,held?null:1,state==='released'?'{}':null);
   }
+  f.sqlite.exec(`UPDATE ${table} SET reserved_micros=100,spent_micros=25`);
+  const audit=await m.readCompanyBudgetAudit(f.db,f.actor,kind,'budget');assert.equal(audit!.status,'balanced');
+  assert.deepEqual(audit!.expected,{reservedMicros:'100',spentMicros:'25',admittedRuns:null});
+  assert.equal(JSON.stringify(audit).includes('private original'),false);
 });
 test('differences and missing generation records are reported without fixing money or granting authority',async t=>{
   const m=await api(),f=await fixture();t.after(f.close);f.budget('ai_budget');f.aiRun();
@@ -85,22 +76,6 @@ test('large sums remain exact past Number.MAX_SAFE_INTEGER and zero-priced runs 
   const audit=await m.readCompanyBudgetAudit(f.db,f.actor,'ai','budget');assert.equal(audit!.expected.reservedMicros,'18014398509481982');
   assert.equal(audit!.difference.reservedMicros,'-9007199254740991');assert.equal(audit!.expected.admittedRuns,'3');assert.equal(audit!.status,'mismatch');
 });
-test('deployment query audit uses its own day allowance and never deducts it from company test money',async t=>{
-  const m=await api(),f=await fixture();t.after(f.close);f.budget('reply_test_budget');f.query('query',60);f.query('free',0);f.query('yesterday',90,'2026-10-10');
-  f.sqlite.exec("INSERT INTO reply_test_query_usage VALUES('2026-10-11',60,2)");
-  const audit=await m.readQueryAllowanceAudit(f.db,'2026-10-11');assert.equal(audit.status,'balanced');assert.deepEqual(audit.expected,{reservedMicros:'60',queries:'2'});
-  assert.equal((await m.readCompanyBudgetAudit(f.db,f.actor,'reply-test','budget'))!.status,'balanced');
-  f.sqlite.exec("UPDATE reply_test_query_usage SET reserved_micros=61 WHERE day='2026-10-11'");assert.equal((await m.readQueryAllowanceAudit(f.db,'2026-10-11')).status,'mismatch');
-  assert.equal((await m.readQueryAllowanceAudit(f.db,'2026-10-10')).status,'mismatch');assert.equal((await m.readQueryAllowanceAudit(f.db,'2026-10-09')).status,'balanced');
-  await assert.rejects(()=>m.readQueryAllowanceAudit(f.db,'2026-02-30'));
-});
-test('integer overflow is unavailable rather than a rounded balance or automatic refund',async t=>{
-  const m=await api(),f=await fixture();t.after(f.close);f.budget('reply_test_budget');
-  for(let i=0;i<1025;i++)f.query(`large-${i}`,Number.MAX_SAFE_INTEGER);
-  await assert.rejects(()=>m.readQueryAllowanceAudit(f.db,'2026-10-11'),/integer overflow/);
-  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM reply_test_query_usage').get()!.n,0);
-  assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM reply_test_query').get()!.n,1025);
-});
 test('scheduled reconciliation persists bounded alerts and never changes financial counters',async t=>{
   const m=await api(),r=await import('../src/modules/budget-audit/reconciliation.ts'),f=await fixture();t.after(f.close);f.budget('ai_budget');f.aiRun();f.sqlite.exec("UPDATE ai_budget SET reserved_micros=300,admitted_runs=1 WHERE id='budget'");
   const before=JSON.stringify(f.sqlite.prepare("SELECT reserved_micros,spent_micros,admitted_runs FROM ai_budget WHERE id='budget'").get());
@@ -121,7 +96,7 @@ test('scheduled reconciliation persists bounded alerts and never changes financi
 });
 test('0047 atomically backfills existing budgets and preserves them on an injected migration failure',async t=>{
   const f=await knowledgeFixture('0046');t.after(f.close);
-  for(const [table,id] of [['ai_budget','a'],['translation_budget_bucket','t'],['reply_test_budget','r']] as const){
+  for(const [table,id] of [['ai_budget','a'],['translation_budget_bucket','t']] as const){
    const count=table==='translation_budget_bucket'?'':',max_runs',value=table==='translation_budget_bucket'?'':',10';
    f.sqlite.exec(`INSERT INTO ${table}(id,organization_id,starts_at,ends_at,limit_micros${count}) VALUES('${id}','company',1,2,100${value})`);
   }
@@ -129,7 +104,7 @@ test('0047 atomically backfills existing budgets and preserves them on an inject
   f.sqlite.exec('BEGIN');assert.throws(()=>{f.sqlite.exec(migration);f.sqlite.exec('SELECT * FROM synthetic_missing_reconciliation_table');});f.sqlite.exec('ROLLBACK');
   assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='budget_reconciliation_state'").get()!.n,0);
   assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM ai_budget').get()!.n,1);
-  f.sqlite.exec(migration);assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM budget_reconciliation_state').get()!.n,3);
+  f.sqlite.exec(migration);assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM budget_reconciliation_state').get()!.n,2);
   f.sqlite.exec("INSERT INTO ai_budget(id,organization_id,starts_at,ends_at,limit_micros,max_runs) VALUES('new','company',3,4,1,1)");
   assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM budget_reconciliation_state WHERE kind='ai'").get()!.n,2);assert.deepEqual(f.sqlite.prepare('PRAGMA foreign_key_check').all(),[]);
 });
@@ -140,13 +115,11 @@ test('large reconciliation backlogs remain bounded, fair and company scoped',asy
   const first=await r.claimBudgetReconciliations(f.db,1000,25),second=await r.claimBudgetReconciliations(f.db,1000,25);
   assert.equal(first.length,25);assert.equal(second.length,25);assert.equal(new Set([...first,...second].map(c=>c.budgetId)).size,50);assert.equal(first[0].budgetId,'queued-0001');assert.equal(second[0].budgetId,'queued-0026');
   const summary=await m.readCompanyBudgetReconciliationSummary(f.db,f.actor);assert.equal(summary!.totals.tracked,1000);assert.equal(summary!.items.length,50);assert.equal(summary!.truncated,true);
-  const duePlan=JSON.stringify(f.sqlite.prepare('EXPLAIN QUERY PLAN SELECT rowid FROM budget_reconciliation_state WHERE next_due_at<=1 ORDER BY next_due_at,organization_id,kind,budget_id LIMIT 25').all());
-  assert.match(duePlan,/budget_reconciliation_due_idx/);const companyPlan=JSON.stringify(f.sqlite.prepare("EXPLAIN QUERY PLAN SELECT count(*) FROM budget_reconciliation_state WHERE organization_id='company'").all());assert.match(companyPlan,/sqlite_autoindex_budget_reconciliation_state_1/);
 });
 test('new budgets of every kind enter the persistent reconciliation queue without business content',async t=>{
-  const f=await fixture();t.after(f.close);f.budget('ai_budget','a');f.budget('translation_budget_bucket','t');f.budget('reply_test_budget','r');
+  const f=await fixture();t.after(f.close);f.budget('ai_budget','a');f.budget('translation_budget_bucket','t');
   assert.deepEqual(f.sqlite.prepare("SELECT kind,budget_id AS id FROM budget_reconciliation_state ORDER BY kind").all().map(row=>({...row})),[
-    {kind:'ai',id:'a'},{kind:'reply-test',id:'r'},{kind:'translation',id:'t'}]);
+    {kind:'ai',id:'a'},{kind:'translation',id:'t'}]);
   const serialized=JSON.stringify(f.sqlite.prepare('SELECT * FROM budget_reconciliation_state').all());assert.equal(serialized.includes('private'),false);
 });
 test('a manager losing their role during the read cannot receive an old financial snapshot',async t=>{

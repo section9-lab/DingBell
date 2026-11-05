@@ -3,7 +3,6 @@ import type { ConversationController } from './controller.ts';
 
 export interface ControlBindings extends SyncBindings {
   OUTBOUND_ENABLED?:string;
-  AI_RECEPTION_ENABLED?:string;
   AI_OUTBOUND_ENABLED?:string;
   DB?:D1Database;
   CONVERSATION_CONTROLLER?:DurableObjectNamespace<ConversationController>;

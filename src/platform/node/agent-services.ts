@@ -4,7 +4,7 @@ import type { BusinessAgentAuthority } from '../agents/authority.ts';
 import { matchingSupport } from '../../modules/ai-runs/execution.ts';
 
 export function agentServices(authority: BusinessAgentAuthority, driver: AgentDriver): PortableAgents {
-  const uid = (kind: 'translation' | 'reply-test' | 'support', id: string) => {
+  const uid = (kind: 'translation' | 'support', id: string) => {
     const binding = authority.lookup(kind,id); if (!binding) throw new Error('AGENT_AUTHORITY_UNAVAILABLE'); return binding.uid;
   };
   const translation: PortableAgents['translation'] = {
@@ -13,15 +13,6 @@ export function agentServices(authority: BusinessAgentAuthority, driver: AgentDr
     dispatch: run => driver.dispatch(authority.begin('translation',run.id)),
     async read(id,receipt) {
       if (receipt.uid !== uid('translation',id)) throw new Error('AGENT_RECEIPT_CONFLICT');
-      const result = await driver.read(receipt.uid,receipt.submissionId); return result.outcome === 'aborted' ? { outcome: 'failed' } : result;
-    },
-  };
-  const replyTest: PortableAgents['replyTest'] = {
-    lookup: async id => authority.admitted('reply-test',id), inspect: async id => authority.replyTest(id).inspect(),
-    prepare: (scope,id) => authority.prepare('reply-test',scope,id), close: (scope,id) => authority.closeUnstarted('reply-test',scope,id),
-    dispatch: run => driver.dispatch(authority.begin('reply-test',run.id)),
-    async read(id,receipt) {
-      if (receipt.uid !== uid('reply-test',id)) throw new Error('AGENT_RECEIPT_CONFLICT');
       const result = await driver.read(receipt.uid,receipt.submissionId); return result.outcome === 'aborted' ? { outcome: 'failed' } : result;
     },
   };
@@ -47,5 +38,5 @@ export function agentServices(authority: BusinessAgentAuthority, driver: AgentDr
       await authority.closeSupport(run.payload.run.scope,run.id,outcome);
     },
   };
-  return { translation, replyTest, support };
+  return { translation, support };
 }

@@ -11,15 +11,14 @@ async function fixture(){
  };return {...f,input,request};
 }
 async function error(r:Response,status:number,code:string){assert.equal(r.status,status,await r.clone().text());assert.equal((await r.json() as any).error.code,code);}
-test('production budget management is audited, idempotent and independent of reply-test money and command IDs',{timeout:30000},async t=>{
+test('production budget management is audited and idempotent',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);const empty=await f.request();assert.equal(empty.status,200);assert.equal((await empty.json() as any).currentBudget,null);
- assert.equal((await f.request({body:f.input,testBudget:true})).status,200);const create=await f.request({body:f.input});assert.equal(create.status,200,await create.clone().text());assert.equal((await create.json() as any).budget.enabled,false);
+ const create=await f.request({body:f.input});assert.equal(create.status,200,await create.clone().text());assert.equal((await create.json() as any).budget.enabled,false);
  const enable={id:crypto.randomUUID(),action:'set_enabled',budgetId:f.input.id,expectedRevision:0,enabled:true};assert.equal((await f.request({body:enable})).status,200);
  await f.DB.prepare('UPDATE ai_budget SET reserved_micros=20,spent_micros=30,admitted_runs=2 WHERE id=?').bind(f.input.id).run();
  const pause={...enable,id:crypto.randomUUID(),expectedRevision:1,enabled:false};assert.equal((await f.request({body:pause})).status,200);assert.equal((await f.request({body:enable})).status,200);
  const response=await f.request();assert.equal(response.headers.get('cache-control'),'no-store');const data=await response.json() as any;
  assert.equal(data.viewerMemberId,'owner-member');assert.equal(data.currentBudget.enabled,false);assert.equal(data.currentBudget.remainingMicros,99950);assert.equal(data.currentBudget.remainingRuns,8);assert.equal(data.events.length,3);
- const testData=await (await f.request({testBudget:true})).json() as any;assert.equal(testData.currentBudget.spentMicros,0);assert.equal(testData.events.length,1);
  await error(await f.request({body:{...enable,id:crypto.randomUUID()}}),409,'BUDGET_CHANGED');await error(await f.request({body:{...f.input,id:crypto.randomUUID()}}),409,'BUDGET_WINDOW_OVERLAP');
  assert.equal(await f.DB.prepare('SELECT count(*) AS n FROM ai_execution').first('n'),0);
 });
@@ -39,8 +38,8 @@ test('production budget audit failure rolls back and exposes uncertainty without
 });
 test('production budget readiness is server-derived, exposes no secret and cannot be enabled by a budget command',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);const initial=await(await f.request()).json() as any;assert.deepEqual(initial.configuration,{enabled:false,modelConfigured:false,pricesConfigured:false,model:null,maxGenerations:null,perGenerationMicros:null,runReservationMicros:null});
- Object.assign(f.env,{AI_RECEPTION_ENABLED:'false',NVAPI_KEY:'synthetic-private-value',CONVERSATION_CONTROLLER:{},FLUE_SUPPORT_AGENT:{},AI_RECEPTION_CONFIG_JSON:JSON.stringify({maxGenerations:2,model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:2048,pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:0,outputMicrosPerMillion:0,cacheReadMicrosPerMillion:0,cacheWriteMicrosPerMillion:0}}})});
- const response=await(await f.request()).json() as any;assert.equal(response.configuration.enabled,false);assert.equal(response.configuration.modelConfigured,true);assert.equal(response.configuration.pricesConfigured,true);assert.equal(response.configuration.runReservationMicros,0);assert.equal(JSON.stringify(response).includes('synthetic-private-value'),false);
+ Object.assign(f.env,{NVAPI_KEY:'synthetic-private-value',CONVERSATION_CONTROLLER:{},FLUE_SUPPORT_AGENT:{},AI_RECEPTION_CONFIG_JSON:JSON.stringify({maxGenerations:2,model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:2048,pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:0,outputMicrosPerMillion:0,cacheReadMicrosPerMillion:0,cacheWriteMicrosPerMillion:0}}})});
+ const response=await(await f.request()).json() as any;assert.equal(response.configuration.enabled,true);assert.equal(response.configuration.modelConfigured,true);assert.equal(response.configuration.pricesConfigured,true);assert.equal(response.configuration.runReservationMicros,0);assert.equal(JSON.stringify(response).includes('synthetic-private-value'),false);
  assert.equal((await f.request({body:f.input})).status,200);assert.equal((await f.request({body:{id:crypto.randomUUID(),action:'set_enabled',budgetId:f.input.id,expectedRevision:0,enabled:true}})).status,200);
- assert.equal((await(await f.request()).json() as any).configuration.enabled,false);assert.equal(await f.DB.prepare('SELECT count(*) AS n FROM ai_execution').first('n'),0);
+ assert.equal((await(await f.request()).json() as any).configuration.enabled,true);assert.equal(await f.DB.prepare('SELECT count(*) AS n FROM ai_execution').first('n'),0);
 });

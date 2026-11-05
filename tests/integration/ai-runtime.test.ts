@@ -24,8 +24,8 @@ test('native support reply closes and settles through a durable wake before the 
  const saved=(await f.sql('SELECT * FROM ai_execution WHERE id=?',[run.id]))[0],closure=JSON.parse(saved.closure);
  assert.equal(closure.kind,'runtime_closed');assert.equal(closure.outcome,'completed');assert.equal(closure.providerPermits,2);assert.ok(saved.receipt);
  const generations=await f.sql('SELECT usage,charged_micros FROM ai_generation WHERE run_id=? ORDER BY sequence',[run.id]);assert.equal(generations.length,2);assert.ok(generations.every((g:any)=>g.usage!==null&&g.charged_micros!==null));
- const prepared=(await f.sql('SELECT * FROM ai_reply_intent WHERE run_id=?',[run.id]))[0];assert.equal(prepared.id,intentId);assert.equal(prepared.body,'Ширина этой модели — 26 см.');assert.deepEqual(JSON.parse(prepared.citations),[source.body.chunkId]);
- assert.equal(JSON.parse(prepared.knowledge_evidence).chunks[0].documentId,source.body.id);
+ const prepared=JSON.parse((await f.sql('SELECT reply FROM ai_execution WHERE id=?',[run.id]))[0].reply);assert.equal(prepared.id,intentId);assert.equal(prepared.body,'Ширина этой модели — 26 см.');assert.deepEqual(prepared.citations,[source.body.chunkId]);
+ assert.equal(prepared.knowledgeEvidence.chunks[0].documentId,source.body.id);
  const audit=(await f.sql("SELECT actor_user_id,actor_member_id,receipt FROM conversation_control_event WHERE conversation_id=? AND action='ai_send_reply'",[args.scope.conversationId]))[0];
  assert.ok(audit);assert.equal(audit.actor_user_id,null);assert.equal(audit.actor_member_id,null);assert.equal(JSON.parse(audit.receipt).runId,run.id);
  assert.equal((await f.sql("SELECT count(*) n FROM conversation_control_event WHERE conversation_id=? AND action='request_handoff'",[args.scope.conversationId]))[0].n,0);
@@ -39,15 +39,15 @@ test('a recovered native dispatch cannot stop a delivered AI reply after timeout
  const f=await fixture({outboundEnabled:'true',aiOutboundEnabled:'true'});t.after(f.close);
  assert.equal((await f.call('knowledge-source')).status,200);assert.equal((await f.call('reply-store')).status,200);f.mode('reply');
  const input=(await f.call('intake',{queued:true})).body;let prepared=false;
- for(let i=0;i<25;i++){await f.call('cron',{reply:true});if((await f.sql('SELECT count(*) n FROM ai_reply_intent'))[0].n===1){prepared=true;break;}await delay(100);}
+ for(let i=0;i<25;i++){await f.call('cron',{reply:true});if((await f.sql('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL'))[0].n===1){prepared=true;break;}await delay(100);}
  assert.ok(prepared,'the persisted input dispatcher must reach the original reply tool');
  let sent=false;for(let i=0;i<150;i++){if((await f.sql("SELECT count(*) n FROM send_intent WHERE state='sent'"))[0].n===1){sent=true;break;}await delay(100);}
  assert.ok(sent,'the durable reply wake must finish the original delivery');
  const control=()=>f.sql('SELECT lifecycle,reception,assigned_member_id,work_status,version,control_epoch,sequence,updated_at FROM conversation_control WHERE conversation_id=?',[input.scope.conversationId]);
  const before=await control(),queue=(await f.sql('SELECT event_id,run_id,input_sequence FROM ai_dispatch'))[0];assert.ok(queue);
  assert.equal(before[0].reception,'ai');assert.equal(f.calls().length,3);assert.equal(f.ozonCalls().length,1);
- for(const flag of ['timeout','AI_RECEPTION_ENABLED','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED']){
-  if(flag!=='timeout')await f.restart(flag!=='AI_RECEPTION_ENABLED',{aiOutboundEnabled:flag==='AI_OUTBOUND_ENABLED'?'false':'true',outboundEnabled:flag==='OUTBOUND_ENABLED'?'false':'true'});
+ for(const flag of ['timeout','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED']){
+  if(flag!=='timeout')await f.restart(true,{aiOutboundEnabled:flag==='AI_OUTBOUND_ENABLED'?'false':'true',outboundEnabled:flag==='OUTBOUND_ENABLED'?'false':'true'});
   // Restore only the original queue row, as when its completion acknowledgement was lost.
   await f.sql('UPDATE ai_dispatch SET due_at=0,created_at=?',[Date.now()-(flag==='timeout'?300001:0)]);
   await f.call('cron',{reply:true});assert.deepEqual(await control(),before,flag);
@@ -58,26 +58,15 @@ test('a recovered native dispatch cannot stop a delivered AI reply after timeout
  }
 });
 test('native automatic reply does not request the model or Ozon after any deployment switch is disabled',{timeout:240000},async()=>{
- for(const flag of ['AI_RECEPTION_ENABLED','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED']){
+ for(const flag of ['AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED']){
   const f=await fixture({outboundEnabled:'true',aiOutboundEnabled:'true'});try{
    assert.equal((await f.call('reply-store')).status,200);f.mode('reply');const run=await f.reserve({reply:true,model:{promptVersion:'support-reply-v1'}});
-   await f.restart(flag!=='AI_RECEPTION_ENABLED',flag==='AI_OUTBOUND_ENABLED'?{aiOutboundEnabled:'false'}:flag==='OUTBOUND_ENABLED'?{outboundEnabled:'false'}:{});
+   await f.restart(true,flag==='AI_OUTBOUND_ENABLED'?{aiOutboundEnabled:'false'}:flag==='OUTBOUND_ENABLED'?{outboundEnabled:'false'}:{});
    const result=await f.call('execute',{scope:run.payload.run.scope,runId:run.id});assert.equal(result.status,200,JSON.stringify(result.body));assert.notEqual(result.body.status,'pending');
    await delay(1200);assert.equal(f.calls().length,0,flag);assert.equal(f.ozonCalls().length,0,flag);
-   assert.equal((await f.sql('SELECT count(*) n FROM ai_reply_intent'))[0].n,0);assert.equal((await f.sql('SELECT count(*) n FROM send_intent'))[0].n,0);
+   assert.equal((await f.sql('SELECT count(*) n FROM ai_execution WHERE reply IS NOT NULL'))[0].n,0);assert.equal((await f.sql('SELECT count(*) n FROM send_intent'))[0].n,0);
   }finally{await f.close();}
  }
-});
-test('native automatic support saves a cited draft and commits human review without any customer send',{timeout:120000},async t=>{
- const f=await fixture();t.after(async()=>{if(process.env.DINGBELL_TEST_EVIDENCE_DIRECTORY)await writeFile(join(process.env.DINGBELL_TEST_EVIDENCE_DIRECTORY,'native-answer-server.txt'),f.logs());await f.close();});
- const source=await f.call('knowledge-source');assert.equal(source.status,200);f.mode('answer');const input=(await f.call('intake',{queued:true})).body;let finished=false;
- for(let i=0;i<25;i++){await f.call('cron',{answer:true});if((await f.sql('SELECT count(*) n FROM ai_answer'))[0].n===1&&(await f.sql("SELECT count(*) n FROM conversation_control_event WHERE conversation_id=? AND action='request_handoff'",[input.scope.conversationId]))[0].n===1){finished=true;break;}await delay(100);}
- assert.ok(finished,'automatic dispatch must create a cited draft and a human-review receipt');assert.equal(f.calls().length,3);
- assert.deepEqual(f.calls()[1].body.tools.map((t:any)=>t.function.name),['request_handoff','search_knowledge','submit_answer']);
- const draft=(await f.sql('SELECT * FROM ai_answer'))[0];assert.equal(draft.body,'Ширина этой модели — 26 см.');assert.deepEqual(JSON.parse(draft.citations),[source.body.chunkId]);assert.equal(JSON.parse(draft.knowledge_evidence).chunks[0].documentId,source.body.id);
- const event=(await f.sql("SELECT receipt FROM conversation_control_event WHERE conversation_id=? AND action='request_handoff'",[input.scope.conversationId]))[0];assert.match(event.receipt,/draft.*human review/i);
- assert.equal((await f.sql('SELECT count(*) n FROM send_intent'))[0].n,0);assert.equal((await f.sql("SELECT count(*) n FROM synthetic_knowledge_calls WHERE kind='embedding'"))[0].n,1);
- await f.restart();await f.call('cron',{answer:true});await f.call('execute',{scope:input.scope,runId:draft.run_id});assert.equal(f.calls().length,3);assert.equal((await f.sql('SELECT count(*) n FROM ai_answer'))[0].n,1);
 });
 test('native automatic dispatch classifies a live input and retrieves published knowledge once before its answer generation',{timeout:120000},async t=>{
  const f=await fixture();t.after(async()=>{if(process.env.DINGBELL_TEST_EVIDENCE_DIRECTORY)await writeFile(join(process.env.DINGBELL_TEST_EVIDENCE_DIRECTORY,'native-knowledge-server.txt'),f.logs());await f.close();});
@@ -85,7 +74,7 @@ test('native automatic dispatch classifies a live input and retrieves published 
  const input=(await f.call('intake',{queued:true})).body;let finished=false;
  for(let i=0;i<25;i++){await f.call('cron',{knowledge:true});if((await f.sql("SELECT count(*) n FROM conversation_control_event WHERE conversation_id=? AND action='request_handoff'",[input.scope.conversationId]))[0].n===1){finished=true;break;}await delay(100);}
  assert.ok(finished,f.logs());assert.equal(f.calls().length,3);assert.deepEqual(f.calls()[0].body.tools.map((t:any)=>t.function.name),['submit_classification']);
- assert.deepEqual(f.calls()[1].body.tools.map((t:any)=>t.function.name),['request_handoff','search_knowledge']);assert.equal(f.calls()[1].body.parallel_tool_calls,false);
+ assert.deepEqual(f.calls()[1].body.tools.map((t:any)=>t.function.name),['request_handoff','search_knowledge','get_product_context']);assert.equal(f.calls()[1].body.parallel_tool_calls,false);
  assert.match(JSON.stringify(f.calls()[2].body.messages),/Ширина — 26 см/);
  assert.equal((await f.sql("SELECT count(*) n FROM synthetic_knowledge_calls WHERE kind='embedding'"))[0].n,1);
  const query=(await f.sql('SELECT * FROM ai_knowledge_query'))[0];assert.equal(JSON.parse(query.evidence).chunks[0].documentId,source.body.id);assert.equal(query.reserved_micros,60);
@@ -169,7 +158,7 @@ test('native Support uses the production budget, controlled tool and original Fl
   const saved=(await f.call('run',args(run))).body;assert.equal(saved.closure.kind,'unstarted_closed');assert.equal(saved.remainingReservedMicros,0);
   assert.equal((await f.call('execute',args(run))).body.status,'closed');assert.equal(f.calls().length,before);
  });
- await t.test('takeover persists cancellation before abort; a failed abort is repaired after restart even with AI disabled',async()=>{
+ await t.test('takeover persists cancellation before abort; a failed abort is repaired after restart',async()=>{
   f.mode('hold');try{
    const run=await f.reserve(),before=f.calls().length;assert.equal((await f.call('execute',args(run))).body.status,'pending');
    assert.equal((await f.call('reconcile',args(run))).body.status,'pending');assert.equal((await f.call('inspect',args(run))).body.cancellation,null);
@@ -277,11 +266,11 @@ async function fixture(sendOptions:{outboundEnabled?:string;aiOutboundEnabled?:s
     if(mode==='lost'){request.socket.destroy();return;}
     if(mode==='503'){response.writeHead(503).end('synthetic');return;}
     const intake=calls.at(-1)!.body.tools.some((t:any)=>t.function.name==='submit_classification');
-    const knowledge=['knowledge','answer','reply'].includes(mode)&&!calls.at(-1)!.body.messages.some((m:any)=>m.role==='tool');
-    const answer=['answer','reply'].includes(mode)&&!knowledge&&!intake,reference=answer?calls.at(-1)!.body.messages.filter((m:any)=>m.role==='tool').map((m:any)=>JSON.parse(m.content)).find((r:any)=>r.references?.length)?.references[0].chunkId:undefined;
-    const names=mode==='unexpected-tool'?['task']:[intake?'submit_classification':knowledge?'search_knowledge':answer?mode==='reply'?'prepare_reply':'submit_answer':'request_handoff'];
+    const knowledge=['knowledge','reply'].includes(mode)&&!calls.at(-1)!.body.messages.some((m:any)=>m.role==='tool');
+    const answer=['reply'].includes(mode)&&!knowledge&&!intake,reference=answer?calls.at(-1)!.body.messages.filter((m:any)=>m.role==='tool').map((m:any)=>JSON.parse(m.content)).find((r:any)=>r.references?.length)?.references[0].chunkId:undefined;
+    const names=mode==='unexpected-tool'?['task']:[intake?'submit_classification':knowledge?'search_knowledge':answer?'prepare_reply':'request_handoff'];
     const args={...(intake?{stage:mode==='unknown-classification'?'unknown':'presale',language:'ru',customerRequestedHuman:false}:knowledge?{}:answer?{body:'Ширина этой модели — 26 см.',citations:[reference]}:{reason:'customer_request',neededInformation:[]}),...(mode==='invalid-input'?{runId:'forged'}:{})};
-    const records=[{id:'synthetic',object:'chat.completion.chunk',created:1,model:'nvidia/nemotron-3-super-120b-a12b',choices:[{index:0,delta:{role:'assistant',content:mode==='text'?'Unreviewed reply.':null,...(mode==='text'?{}:{tool_calls:names.map((name,index)=>({index,id:`call${index}`,type:'function',function:{name,arguments:JSON.stringify(args)}}))})},finish_reason:mode==='text'?'stop':'tool_calls'}]},
+    const records=[{id:'synthetic',object:'chat.completion.chunk',created:1,model:'nvidia/nemotron-3.5-super-vl-120b-a12b',choices:[{index:0,delta:{role:'assistant',content:mode==='text'?'Unreviewed reply.':null,...(mode==='text'?{}:{tool_calls:names.map((name,index)=>({index,id:`call${index}`,type:'function',function:{name,arguments:JSON.stringify(args)}}))})},finish_reason:mode==='text'?'stop':'tool_calls'}]},
       ...(mode==='missing-usage'?[]:[{id:'synthetic',choices:[],usage:{prompt_tokens:12,completion_tokens:3,total_tokens:15,prompt_tokens_details:{cached_tokens:2,cache_write_tokens:1}}}])];
     const wire=records.map(item=>`data: ${JSON.stringify(item)}\n\n`).join('')+(mode==='truncated'?'':'data: [DONE]\n\n');
     const respond=()=>response.writeHead(200,{'content-type':'text/event-stream'}).end(wire);
@@ -290,9 +279,9 @@ async function fixture(sendOptions:{outboundEnabled?:string;aiOutboundEnabled?:s
   const config=JSON.parse(await readFile(join(root,'wrangler.jsonc'),'utf8'));config.name='ai-runtime-fixture';delete config.triggers;delete config.assets;
   const configPath=join(path,'wrangler.json');await writeFile(configPath,JSON.stringify(config));
   let child:ChildProcess|undefined,base='',logs='';
-  async function start(enabled=true){
+  async function start(){
     const portServer=createServer();portServer.listen(0,'127.0.0.1');await once(portServer,'listening');const portAddress=portServer.address();assert.ok(portAddress&&typeof portAddress==='object');const port=portAddress.port;await new Promise<void>(resolve=>portServer.close(()=>resolve()));base=`http://127.0.0.1:${port}`;
-    child=spawn(process.execPath,[join(root,'node_modules/vite/bin/vite.js'),'--config','tests/fixtures/ai-runtime/vite.config.ts','--host','127.0.0.1','--port',String(port),'--strictPort'],{cwd:root,detached:true,stdio:['ignore','pipe','pipe'],env:{...process.env,WRANGLER_SEND_METRICS:'false',DINGBELL_SUPPORT_CONFIG:configPath,DINGBELL_SUPPORT_STATE:path,DINGBELL_SUPPORT_GATE:`http://127.0.0.1:${gatePort}`,DINGBELL_SUPPORT_TOKEN:token,DINGBELL_SUPPORT_ENABLED:String(enabled),DINGBELL_SUPPORT_OUTBOUND:sendConfig.outboundEnabled,DINGBELL_SUPPORT_AI_OUTBOUND:sendConfig.aiOutboundEnabled}});
+    child=spawn(process.execPath,[join(root,'node_modules/vite/bin/vite.js'),'--config','tests/fixtures/ai-runtime/vite.config.ts','--host','127.0.0.1','--port',String(port),'--strictPort'],{cwd:root,detached:true,stdio:['ignore','pipe','pipe'],env:{...process.env,WRANGLER_SEND_METRICS:'false',DINGBELL_SUPPORT_CONFIG:configPath,DINGBELL_SUPPORT_STATE:path,DINGBELL_SUPPORT_GATE:`http://127.0.0.1:${gatePort}`,DINGBELL_SUPPORT_TOKEN:token,DINGBELL_SUPPORT_OUTBOUND:sendConfig.outboundEnabled,DINGBELL_SUPPORT_AI_OUTBOUND:sendConfig.aiOutboundEnabled}});
     child.stdout!.on('data',data=>{logs=(logs+data).slice(-16000);});child.stderr!.on('data',data=>{logs=(logs+data).slice(-16000);});
     for(let i=0;i<240;i++){try{const r=await fetch(`${base}/api/health`,{signal:AbortSignal.timeout(700)});if(r.ok&&(await r.json() as any).service==='support-runtime-fixture'){assert.ok(logs.includes('SUPPORT_TRANSPORT_BOUND'),'provider transport must resolve to the synthetic fixture before any dispatch');assert.ok(logs.includes('SUPPORT_OZON_TRANSPORT_BOUND'),'Ozon must resolve to a local transport before any dispatch');assert.equal((await call('safety')).body.syntheticKey,true,'effective Worker key must be the fixed synthetic value');return;}}catch{}if(child.exitCode!==null)break;await delay(250);}
     throw new Error(`fixture startup failed: ${logs}`);
@@ -312,7 +301,7 @@ async function fixture(sendOptions:{outboundEnabled?:string;aiOutboundEnabled?:s
     await sql("INSERT INTO session(id,user_id,token,expires_at,updated_at) VALUES ('owner-session','owner','owner-token',?,1)",[Date.now()+3600_000]);
     await sql("INSERT INTO store(id,organization_id,name,platform_store_id,status,created_at,updated_at) VALUES ('store','org','Store','1','verified',1,1)");
     const setup=await call('setup');assert.equal(setup.status,200,JSON.stringify(setup.body));
-    return {call,sql,calls:()=>calls,ozonCalls:()=>ozonCalls,release(){for(const fn of releases.splice(0))fn();held=[];},mode:(next:string)=>{mode=next;},base:()=>base,logs:()=>logs,async restart(enabled=true,patch:{outboundEnabled?:string;aiOutboundEnabled?:string}={}){if(child)await stop(child);child=undefined;sendConfig={...sendConfig,...patch};await start(enabled);},close,
+    return {call,sql,calls:()=>calls,ozonCalls:()=>ozonCalls,release(){for(const fn of releases.splice(0))fn();held=[];},mode:(next:string)=>{mode=next;},base:()=>base,logs:()=>logs,async restart(_enabled=true,patch:{outboundEnabled?:string;aiOutboundEnabled?:string}={}){if(child)await stop(child);child=undefined;sendConfig={...sendConfig,...patch};await start();},close,
       async reserve(options:unknown={}){const result=await call('reserve',options);assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.outcome,'reserved');return result.body.run as AiExecution;},
       async result(run:AiExecution){for(let i=0;i<100;i++){const result=await call('read',{scope:run.payload.run.scope,runId:run.id});if(result.body.status!=='pending')return result;await delay(100);}throw new Error(`result timeout ${logs}`);},
     };

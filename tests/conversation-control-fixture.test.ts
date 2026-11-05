@@ -5,6 +5,19 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath,URL} from 'node:url';
+import {conversationControlFixture} from './fixtures/conversation-control.ts';
+
+test('batched fixture migrations keep per-file atomicity and stop at the failing file', async t => {
+  const f = await conversationControlFixture(); t.after(f.close);
+  const response = await f.call('fixture-migrate-many', { migrations: [
+    { name: 'first.sql', statements: ['CREATE TABLE fixture_migration_test (value INTEGER)'] },
+    { name: 'broken.sql', statements: ['INSERT INTO fixture_migration_test VALUES (1)', 'INSERT INTO missing_fixture_table VALUES (1)'] },
+    { name: 'later.sql', statements: ['INSERT INTO fixture_migration_test VALUES (2)'] },
+  ] });
+  assert.equal(response.status, 500);
+  assert.equal(response.body.migration, 'broken.sql');
+  assert.equal(await f.db.prepare('SELECT COUNT(*) AS total FROM fixture_migration_test').first('total'), 0);
+});
 
 for(const scenario of ['failure','initializing','ready']){
   test(`control fixture releases its runtime and files after ${scenario}`,{timeout:25000},async()=>{

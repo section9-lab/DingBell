@@ -66,6 +66,21 @@ test('context discards already loaded facts on final grant, membership, session 
   } finally {await f.close();}
 });
 
+test('message order references include FBO/FBP, deduplicate legacy FBS and refuse cross-source ambiguity',{timeout:60_000},async t=>{
+ const f=await conversationsFixture();t.after(f.close);
+ for(const sql of conversationContextSQL('company','store-a'))await f.DB.prepare(sql).run();
+ // Identical order and posting identifiers across sources are distinct parcels, not lost rows.
+ await f.DB.prepare("INSERT INTO fbo_posting SELECT * FROM fbs_posting WHERE store_id='store-a'").run();
+ await f.DB.prepare("INSERT INTO fbp_posting SELECT * FROM fbs_posting WHERE store_id='store-a'").run();
+ const seen:string[]=[];let cursor:string|null=null;
+ do{const response=await f.request('/conv-a/messages/msg-a1/context'+(cursor?'?afterPosting='+encodeURIComponent(cursor):''));assert.equal(response.status,200);const data=await response.json() as any;assert.equal(data.order.state,'matched');for(const row of data.order.postings)seen.push(`${row.fulfillmentType}:${row.postingNumber}`);cursor=data.order.nextPosting;}while(cursor);
+ assert.equal(seen.length,24);assert.equal(new Set(seen).size,24);assert.equal(seen.filter(key=>key.startsWith('fbo:')).length,12);assert.equal(seen.filter(key=>key.startsWith('fbp:')).length,12);assert.equal(seen.filter(key=>key.startsWith('fbs:')).length,0);
+ await f.DB.prepare("DELETE FROM fbp_posting WHERE store_id='store-a'").run();
+ await f.DB.prepare("DELETE FROM fbs_posting WHERE store_id='store-a'").run();
+ let data=await(await f.request('/conv-a/messages/msg-a1/context')).json() as any;assert.equal(data.order.state,'matched');assert.equal(data.order.postings[0].fulfillmentType,'fbo');assert.ok(data.order.previewProduct);
+ await f.DB.prepare("UPDATE fbo_posting SET order_id='999' WHERE posting_number='order-1-12'").run();data=await(await f.request('/conv-a/messages/msg-a1/context')).json() as any;assert.equal(data.order.state,'ambiguous');assert.deepEqual(data.order.postings,[]);
+});
+
 test('structured references resolve exact store snapshots, SKU aliases and all split postings without guessing', {timeout:60_000}, async()=>{
   const f=await conversationsFixture();
   try {
@@ -76,7 +91,7 @@ test('structured references resolve exact store snapshots, SKU aliases and all s
     const first=await response.json() as any;
     assert.equal(first.product.state,'matched');assert.equal(first.product.item.id,'901');assert.equal(first.product.item.name,'桌面收纳盒');assert.equal(first.product.item.skuSource,'details');
     assert.equal(first.product.item.price,'1099.00');assert.equal(first.product.item.primaryImage,'https://ir-20.ozone.ru/s3/context-product.jpg');assert.equal(first.product.item.factsObservedAt,new Date(600).toISOString());
-    assert.equal(first.order.state,'matched');assert.deepEqual(first.order.previewProduct,{orderId:'801',sku:'9007199254740993',offerId:'DESK-BOX',name:'桌面收纳盒',productId:'901',primaryImage:'https://ir-20.ozone.ru/s3/context-product.jpg'});assert.equal(first.order.orderId,'801');assert.equal(first.order.postings.length,10);assert.equal(first.order.nextPosting,'order-1-10');
+    assert.equal(first.order.state,'matched');assert.deepEqual(first.order.previewProduct,{orderId:'801',sku:'9007199254740993',offerId:'DESK-BOX',name:'桌面收纳盒',productId:'901',primaryImage:'https://ir-20.ozone.ru/s3/context-product.jpg'});assert.equal(first.order.orderId,'801');assert.equal(first.order.postings.length,10);assert.equal(first.order.nextPosting,'fbs:order-1-10');
     const posting=first.order.postings[0];assert.equal(posting.status,'delivering');assert.equal(posting.source,'list');assert.equal(posting.observedAt,new Date(800).toISOString());assert.equal(posting.productCount,1);
     assert.equal(JSON.stringify(first).includes('DO_NOT_EXPOSE'),false);
     await f.DB.prepare(`INSERT INTO message (id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,order_number,event_at,received_at,ingest_mode)

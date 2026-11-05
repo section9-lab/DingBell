@@ -71,15 +71,10 @@ test('unconfirmed AI usage and a closure without any generation cannot authorize
  const empty=await fixture();t.after(empty.f.close);await bindAiExecutionReceipt(empty.f.db,empty.scope,empty.run.request.runId,empty.receipt);await close(empty);
  assert.equal(await m.reviewCompletedAiReply(empty.env,empty.read,empty.scope,empty.run.request.runId),null);await noSend(empty);
 });
-test('completed review rejects missing intents and cannot promote a human-review prompt',{timeout:60000},async()=>{
+test('completed review rejects missing intents and cannot promote a non-reply prompt',{timeout:60000},async()=>{
  const m=await api();
- for(const prompt of ['support-reply-v1','support-answer-v1']){
+ for(const prompt of ['support-knowledge-v1']){
   const x=await fixture(prompt,false);try{
-   if(prompt==='support-answer-v1'){
-    const execution=await x.f.db.prepare('SELECT payload_hash AS hash FROM ai_execution WHERE id=?').bind(x.run.request.runId).first<{hash:string}>();assert.ok(execution);
-    await x.f.db.prepare('INSERT INTO ai_reply_intent(run_id,id,payload_hash,body,body_hash,citations,knowledge_evidence,platform_store_id,platform_thread_id,credential_version,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-     .bind(x.run.request.runId,'ai-reply:'+x.run.request.runId,execution.hash,x.input.body,await knowledgeHash(x.input.body),JSON.stringify(x.input.citations),JSON.stringify(x.evidence),'1','thread',1,Date.now()).run();
-   }
    await generation(x);await close(x);assert.equal(await m.reviewCompletedAiReply(x.env,x.read,x.scope,x.run.request.runId),null,prompt);await noSend(x);
   }finally{await x.f.close();}
  }
@@ -88,7 +83,7 @@ test('completed reply keeps all kill switches and budget validity but requires n
  const m=await api(),x=await fixture();t.after(x.f.close);const id=x.run.request.runId;await generation(x);await close(x);
  await x.f.db.prepare('UPDATE ai_budget SET spent_micros=limit_micros,admitted_runs=max_runs').run();
  const before=await budget(x);assert.ok(await m.reviewCompletedAiReply(x.env,x.read,x.scope,id));assert.deepEqual(await budget(x),before);
- for(const flag of ['AI_RECEPTION_ENABLED','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED'])for(const value of [undefined,'false','TRUE'])assert.equal(await m.reviewCompletedAiReply({...x.env,[flag]:value},x.read,x.scope,id),null,flag);
+ for(const flag of ['AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED'])for(const value of [undefined,'false','TRUE'])assert.equal(await m.reviewCompletedAiReply({...x.env,[flag]:value},x.read,x.scope,id),null,flag);
  await x.f.db.prepare('UPDATE ai_budget SET enabled=0').run();assert.equal(await m.reviewCompletedAiReply(x.env,x.read,x.scope,id),null);
  await noSend(x);
 });

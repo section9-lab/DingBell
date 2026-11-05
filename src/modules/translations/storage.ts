@@ -220,6 +220,26 @@ export async function claimTranslationProviderRequest(db:D1Database,scope:Transl
     RETURNING provider_request_claimed_at`).bind(...scopeValues(scope,runId),value.reservedMicros).first();
   return claimed!==null;
 }
+function zeroCost(config:TranslationConfig){
+  const price=config.pricing;
+  return price.inputMicrosPerMillion===0&&price.outputMicrosPerMillion===0&&price.cacheReadMicrosPerMillion===0&&price.cacheWriteMicrosPerMillion===0;
+}
+/**
+ * 计费翻译要求存在唯一的活动预算窗口；零成本翻译则自动准备一条零额度窗口，
+ * 使「翻译成俄语」不依赖任何预算配置。已有预算窗口始终优先，绝不被替换。
+ */
+async function resolveTranslationBudget(db:D1Database,orgId:string,config:TranslationConfig):Promise<string|null>{
+  const active=async()=>(await db.prepare(`SELECT id FROM translation_budget_bucket WHERE organization_id=? AND enabled=1
+    AND starts_at<=${now} AND ends_at>${now} ORDER BY starts_at LIMIT 2`).bind(orgId).all<{id:string}>()).results;
+  const current=await active();if(current.length===1)return current[0]!.id;
+  if(current.length>1||!zeroCost(config))return null;
+  const existing=await db.prepare(`SELECT id FROM translation_budget_bucket WHERE organization_id=? AND enabled=1 ORDER BY starts_at LIMIT 1`).bind(orgId).first<{id:string}>();
+  if(existing)return existing.id;
+  await db.prepare(`INSERT INTO translation_budget_bucket(id,organization_id,starts_at,ends_at,enabled,revision,limit_micros,reserved_micros,spent_micros)
+    SELECT ?,?,0,8640000000000000,1,0,0,0,0 WHERE NOT EXISTS (SELECT 1 FROM translation_budget_bucket WHERE organization_id=?)`)
+    .bind(`translation-zero:${orgId}`,orgId,orgId).run();
+  const created=await active();return created.length===1?created[0]!.id:null;
+}
 export async function admitTranslationPreview(db:D1Database,actor:TranslationActor,input:Omit<TranslationInput,'budgetId'>,env:TranslationDeploymentEnv):Promise<TranslationReservation|{outcome:'disabled'|'not_configured'}>{
   if(!v.is(previewInputSchema,input))throw new RangeError('INVALID_TRANSLATION_INPUT');
   const replay=async()=>{
@@ -229,10 +249,9 @@ export async function admitTranslationPreview(db:D1Database,actor:TranslationAct
   const previous=await replay();if(previous)return previous;
   if(env.TRANSLATION_ENABLED!=='true')return {outcome:'disabled'};
   const config=(await import('./deployment-config.ts')).readTranslationDeploymentConfig(env);if(!config)return {outcome:'not_configured'};
-  const budgets=await db.prepare(`SELECT id FROM translation_budget_bucket WHERE organization_id=? AND enabled=1
-    AND starts_at<=${now} AND ends_at>${now} ORDER BY starts_at LIMIT 2`).bind(actor.orgId).all<{id:string}>();
-  if(budgets.results.length!==1)return {outcome:'budget_unavailable'};
-  const result=await reserveTranslation(db,actor,{...input,budgetId:budgets.results[0]!.id},config);
+  const budgetId=await resolveTranslationBudget(db,actor.orgId,config);
+  if(!budgetId)return {outcome:'budget_unavailable'};
+  const result=await reserveTranslation(db,actor,{...input,budgetId},config);
   // A concurrent original request may have chosen a different admission window.
   return result.outcome==='conflict'?(await replay()??result):result;
 }

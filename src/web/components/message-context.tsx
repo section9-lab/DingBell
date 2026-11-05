@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { ImageOff } from 'lucide-react';
 import { ApiError } from '../lib/api';
+import { orderStatusLabel,orderStatusRaw } from '../../shared/order-status';
 import { readMessageContext } from '../lib/conversation-context-api';
 import type { ConversationMessage } from '../lib/conversations-api';
 import { useCompanySettings } from './company-settings-provider';
@@ -63,21 +64,22 @@ function ContextDetails({companyId,conversationId,storeId,viewerMemberId,source,
         {item.archived===true&&<Badge variant="outline">采集时已归档</Badge>}
         <p className="text-muted-foreground">SKU 来源：{item.skuSource==='list'?'商品列表':item.skuSource==='details'?'商品详情':'商品列表与详情'}</p>
         <p className="text-muted-foreground">列表采集：{date(item.listObservedAt)}</p><p className="text-muted-foreground">详情采集：{date(item.factsObservedAt,'尚未导入')}</p>
-      </>:orderProduct?<><div className="flex min-w-0 items-center gap-3"><ContextProductImage src={orderProduct.primaryImage} alt={orderProduct.name??`商品 ${orderProduct.offerId}`}/><div className="min-w-0"><p className="break-words text-sm font-medium">{orderProduct.name??'订单商品名称尚未提供'}</p><p className="break-words text-muted-foreground">商家编码：{orderProduct.offerId}</p><p className="text-muted-foreground">SKU：{orderProduct.sku}</p>{orderProduct.productId&&<Button className="mt-1 h-auto p-0" variant="link" render={<Link to={`/workspace/products?store=${encodeURIComponent(storeId)}&product=${encodeURIComponent(orderProduct.productId)}`}/>}>查看商品资料</Button>}</div></div><p className="text-muted-foreground">这是消息订单号匹配到的首项商品预览，不代表订单只有这一项或消费者归属已经验证。</p></>:<p className="text-muted-foreground">{product.state==='not_provided'?(source.orderNumber?'这条消息只携带订单号；当前已导入的 FBS 快照中没有匹配订单，因此无法读取关联商品。':'这条消息没有携带 SKU 或订单号。'):product.state==='ambiguous'?'同一 SKU 对应多个商品，暂不展示详情。':'尚未导入匹配的商品。'}</p>}
+      </>:orderProduct?<><div className="flex min-w-0 items-center gap-3"><ContextProductImage src={orderProduct.primaryImage} alt={orderProduct.name??`商品 ${orderProduct.offerId}`}/><div className="min-w-0"><p className="break-words text-sm font-medium">{orderProduct.name??'订单商品名称尚未提供'}</p><p className="break-words text-muted-foreground">商家编码：{orderProduct.offerId}</p><p className="text-muted-foreground">SKU：{orderProduct.sku}</p>{orderProduct.productId&&<Button className="mt-1 h-auto p-0" variant="link" render={<Link to={`/workspace/products?store=${encodeURIComponent(storeId)}&product=${encodeURIComponent(orderProduct.productId)}`}/>}>查看商品资料</Button>}</div></div><p className="text-muted-foreground">这是消息订单号匹配到的首项商品预览，不代表订单只有这一项或消费者归属已经验证。</p></>:<p className="text-muted-foreground">{product.state==='not_provided'?(source.orderNumber?'这条消息只携带订单号；当前已导入的订单快照中没有匹配订单，因此无法读取关联商品。':'这条消息没有携带 SKU 或订单号。'):product.state==='ambiguous'?'同一 SKU 对应多个商品，暂不展示详情。':'尚未导入匹配的商品。'}</p>}
     </div>
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2"><h4 className="font-medium">订单包裹</h4><Badge variant="outline">FBS</Badge></div>
+      <div className="flex items-center justify-between gap-2"><h4 className="font-medium">订单包裹</h4><Badge variant="outline">FBS / FBO / FBP</Badge></div>
       {source.orderNumber&&<p>订单号：{source.orderNumber}</p>}
-      {order.state!=='matched'?<p className="text-muted-foreground">{order.state==='not_provided'?'这条消息没有携带订单号。':order.state==='ambiguous'?'同一订单号对应多个订单，暂不展示包裹。':'消息包含订单号，但当前 FBS 快照中未找到对应订单；它可能尚未进入同步范围，或不是 FBS 订单。'}</p>:<>
-        {order.postings.map(posting=><article key={posting.postingNumber} className="flex flex-col gap-2 rounded-lg border bg-background p-3" aria-label={`包裹 ${posting.postingNumber}`}>
-          <h5 className="font-medium">{posting.postingNumber}</h5><p>平台状态：{posting.status??'尚未提供'}</p>
+      {order.state!=='matched'?<p className="text-muted-foreground">{order.state==='not_provided'?'这条消息没有携带订单号。':order.state==='ambiguous'?'同一订单号对应多个订单，暂不展示包裹。':'消息包含订单号，但当前 FBS / FBO / FBP 快照中未找到对应订单；它可能尚未进入同步范围。'}</p>:<>
+        {order.postings.map(posting=><article key={`${posting.fulfillmentType}:${posting.postingNumber}`} className="flex flex-col gap-2 rounded-lg border bg-background p-3" aria-label={`包裹 ${posting.postingNumber}`}>
+          <h5 className="font-medium"><Badge variant="outline" className="mr-2">{posting.fulfillmentType.toUpperCase()}</Badge>{posting.postingNumber}</h5><p>平台状态：<span title={orderStatusRaw(posting)}>{orderStatusLabel(posting,'尚未提供')}</span></p>
           <p>运单号：{posting.trackingNumber??'尚未提供'}</p><p>商品记录：{posting.productCount??'未知'} 项</p>
           <p className="text-muted-foreground">采用{posting.source==='details'?'包裹详情':posting.source==='list'?'包裹列表':'未确认'}记录 · {date(posting.observedAt)}</p>
+          <Button className="h-auto self-start p-0" variant="link" render={<Link to={`/workspace/orders?${new URLSearchParams({store:storeId,posting:posting.postingNumber,type:posting.fulfillmentType})}`}/>}>查看订单详情</Button>
         </article>)}
         {!order.postings.length&&<p className="text-muted-foreground">本页已无包裹，请返回前一页或稍后刷新。</p>}
         <div className="flex flex-wrap items-center gap-2"><Button ref={previous} size="sm" variant="outline" disabled={!pages.length||query.isFetching} onClick={()=>{focusPage.current='previous';setPages(value=>value.slice(0,-1));}}>上一页包裹</Button><span>第 {pages.length+1} 页</span><Button ref={next} size="sm" variant="outline" disabled={!order.nextPosting||query.isFetching} onClick={()=>{focusPage.current='next';setPages(value=>[...value,order.nextPosting!]);}}>下一页包裹</Button></div>
       </>}
-      <p className="text-muted-foreground">仅限已导入的 FBS 数据；未匹配不代表没有订单。状态和价格是采集时的记录。</p>
+      <p className="text-muted-foreground">仅限已导入的 FBS / FBO / FBP 数据；未匹配不代表没有订单。状态和价格是采集时的记录。</p>
     </div>
     <details className="text-muted-foreground"><summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring">查看关联依据</summary><dl className="mt-2 flex flex-col gap-2">
       <div><dt>来源</dt><dd>Ozon 消息附带的订单号 / SKU</dd></div>

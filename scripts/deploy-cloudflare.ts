@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { retiringTables, retirementArchivePlan, assertRetirementArchives, assertRetirementInventory } from '../src/platform/database/retirement.ts';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..');
-export type DeployOptions = { config: string; dryRun: boolean; secretsFile?: string };
+export type DeployOptions = { config: string; dryRun: boolean; secretsFile?: string; archiveRetired?: boolean };
 
 export function deployArguments(options: DeployOptions, config: unknown): string[][] {
   if (!config || typeof config !== 'object' || !('name' in config)
@@ -37,11 +38,8 @@ export function assertLegacyRunsDrained(rows: Record<string, unknown>[], expecte
   }
 }
 
-async function legacyDrainCheck(options:DeployOptions,config:unknown){
-  if(options.dryRun||!config||typeof config!=='object'||!('durable_objects'in config))return;
-  const bindings=(config as {durable_objects?:{bindings?:{name:string}[]}}).durable_objects?.bindings;
-  if(!bindings?.some(binding=>binding.name==='PI_AGENT'))return;
-  async function query(sql:string):Promise<Record<string,unknown>[]>{
+async function query(options: DeployOptions, sql:string):Promise<Record<string,unknown>[]>{
+    if(options.dryRun)throw new Error('Dry runs cannot query or mutate a remote database.');
     const output=await new Promise<string>((done,reject)=>{
       const child=spawn(process.execPath,[resolve(root,'node_modules/wrangler/bin/wrangler.js'),'d1','execute','DB','--remote','--config',options.config,'--command',sql,'--json'],{cwd:root,stdio:['ignore','pipe','pipe'],env:{...process.env,WRANGLER_SEND_METRICS:'false'}});
       let text='';
@@ -54,16 +52,43 @@ async function legacyDrainCheck(options:DeployOptions,config:unknown){
     const result=JSON.parse(output) as {success?:boolean;results?:Record<string,unknown>[]}[];
     if(!Array.isArray(result)||!result.length||result.some(value=>value.success!==true||!Array.isArray(value.results)))throw new Error('Legacy execution drain could not be confirmed.');
     return result.flatMap(value=>value.results??[]);
-  }
-  const present=new Set((await query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('reply_preview_run','reply_test_run','ai_execution')")).map(row=>row.name));
+}
+
+async function legacyDrainCheck(options:DeployOptions,config:unknown){
+  if(options.dryRun||!config||typeof config!=='object'||!('durable_objects'in config))return;
+  const bindings=(config as {durable_objects?:{bindings?:{name:string}[]}}).durable_objects?.bindings;
+  if(!bindings?.some(binding=>binding.name==='PI_AGENT'))return;
+  const present=new Set((await query(options,"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('reply_preview_run','reply_test_run','ai_execution')")).map(row=>row.name));
   const queries=['reply_preview_run','reply_test_run'].filter(table=>present.has(table)).map(table=>`SELECT count(*) AS pending FROM ${table} WHERE settlement='held' AND (receipt IS NULL OR substr(json_extract(receipt,'$.uid'),1,3)<>'pi_')`);
   if(present.has('ai_execution'))queries.push("SELECT count(*) AS pending FROM ai_execution WHERE closure IS NULL AND (receipt IS NULL OR substr(json_extract(receipt,'$.uid'),1,3)<>'pi_')");
-  if(queries.length)assertLegacyRunsDrained(await query(queries.join(' UNION ALL ')),queries.length);
+  if(queries.length)assertLegacyRunsDrained(await query(options,queries.join(' UNION ALL ')),queries.length);
+}
+
+async function archiveRetiredResources(options: DeployOptions, config: unknown) {
+  if(options.dryRun)return;
+  const binding=(config as {d1_databases:{binding:string;migrations_dir?:string}[]}).d1_databases.find(value=>value.binding==='DB')!;
+  const directory=resolve(dirname(options.config),binding.migrations_dir??'migrations');
+  const migrations=await Promise.all((await readdir(directory)).filter(name=>name.endsWith('.sql')).map(name=>readFile(resolve(directory,name),'utf8')));
+  const retiring=[...new Set(migrations.flatMap(retiringTables))];
+  if(!retiring.length)return;
+  const present=new Set((await query(options,"SELECT name FROM sqlite_master WHERE type='table'")).map(row=>row.name));
+  const tables=retiring.filter(table=>present.has(table));
+  if(!tables.length)return;
+  const counts=await query(options,tables.map(table=>`SELECT '${table}' AS name,COUNT(*) AS records FROM "${table}"`).join(' UNION ALL '));
+  assertRetirementInventory(counts,tables,options.archiveRetired===true);
+  for(const table of tables){
+    const plan=retirementArchivePlan(table);
+    const rows=await query(options,[...plan.statements,plan.verify].join(';\n'));
+    assertRetirementArchives(rows,[table]);
+  }
+  // Freezing the retiring sources also fences a legacy admission racing the first drain check.
+  await legacyDrainCheck(options,config);
 }
 export async function deployCloudflare(options: DeployOptions): Promise<void> {
   const config = JSON.parse(await readFile(options.config, 'utf8')) as unknown;
   const commands = deployArguments(options, config);
   await legacyDrainCheck(options,config);
+  await archiveRetiredResources(options,config);
   for (const args of commands) {
     const code = await new Promise<number | null>((complete, reject) => {
       const child = spawn(process.execPath, [resolve(root, 'node_modules/wrangler/bin/wrangler.js'), ...args], {
@@ -81,6 +106,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   for (let index = 2; index < process.argv.length; index++) {
     const argument = process.argv[index];
     if (argument === '--dry-run') options.dryRun = true;
+    else if (argument === '--archive-retired') options.archiveRetired = true;
     else if ((argument === '--config' || argument === '--secrets-file') && process.argv[index + 1]) {
       const value = resolve(process.argv[++index]!);
       if (argument === '--config') options.config = value;

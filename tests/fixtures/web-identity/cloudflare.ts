@@ -1,11 +1,10 @@
-import productionHandlers from '../../../src/cloudflare.ts';
-import { StoreCoordinator as ProductionStoreCoordinator } from '../../../src/modules/sync/coordinator.ts';
+import { createWorker, StoreCoordinator as ProductionStoreCoordinator, ConversationController as ProductionConversationController, PiAgentObject as ProductionPiAgentObject } from '../../../src/platform/cloudflare/worker.ts';
+import app from './mail-app.ts';
+export { FlueReplyPreviewAgent, FlueReplyTestAgent, FlueSupportAgent } from '../../../src/platform/cloudflare/worker.ts';
 import { runSyncPage } from '../../../src/modules/sync/runner.ts';
 import type { SyncScope } from '../../../src/modules/sync/types.ts';
 import { syntheticStoreFetch } from './store-fetch.ts';
-import { ConversationController as ProductionConversationController } from '../../../src/modules/conversations/controller.ts';
 import { sendOzonMessage } from '../../../src/modules/ozon/send.ts';
-export { TestKnowledgeIndexWorkflow as KnowledgeIndexWorkflow, TestKnowledgeReviewWorkflow as KnowledgeReviewWorkflow } from '../knowledge-index-worker.ts';
 
 export class ConversationController extends ProductionConversationController {
   protected override sendReply(credentials: { clientId: string; apiKey: string }, input: { chatId: string; body: string }) {
@@ -19,4 +18,9 @@ export class StoreCoordinator extends ProductionStoreCoordinator {
     await runSyncPage({ ...this.env, DB: this.env.DB }, scope, { fetcher: syntheticStoreFetch, reserve: (bucket, now) => this.reserve(bucket, now) });
   }
 }
-export default productionHandlers;
+// This UI fixture injects synthetic service runtimes. Unexpected model dispatches
+// must fail locally instead of sending even synthetic credentials to a real service.
+export class PiAgentObject extends ProductionPiAgentObject {
+  protected override providerFetch = (async () => { throw new Error('UNEXPECTED_BROWSER_PROVIDER_CALL'); }) as typeof fetch;
+}
+export default createWorker(app);

@@ -17,14 +17,14 @@ function reported(value:unknown):TranslationUsage|null {
 }
 // Buffer only this small, one-shot translation. The unchanged SSE bytes still go
 // through the official SDK; the side record distinguishes reported usage from its defaults.
-export function previewFetch(gate:PreviewTransportGate,send:typeof fetch=fetch,options:{allowedTool?:string;allowedTools?:readonly string[]}={}):typeof fetch {
+export function previewFetch(gate:PreviewTransportGate,send:typeof fetch=fetch,options:{allowedTool?:string;allowedTools?:readonly string[];endpoint?:string}={}):typeof fetch {
   const allowed=options.allowedTools?[...options.allowedTools]:options.allowedTool?[options.allowedTool]:[];
   return async(input,init)=>{
     const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;
     const method=(init?.method??(input instanceof Request?input.method:'GET')).toUpperCase();
     const parent=init?.signal??(input instanceof Request?input.signal:undefined);
     parent?.throwIfAborted();
-    if(url!==PREVIEW_ENDPOINT||method!=='POST')throw new Error('PREVIEW_REQUEST_REJECTED');
+    if(url!==(options.endpoint??PREVIEW_ENDPOINT)||method!=='POST')throw new Error('PREVIEW_REQUEST_REJECTED');
     gate.spend();
     if(!await gate.claim())throw new Error('PREVIEW_REQUEST_UNAVAILABLE');
     const signal=parent?AbortSignal.any([parent,AbortSignal.timeout(45_000)]):AbortSignal.timeout(45_000);

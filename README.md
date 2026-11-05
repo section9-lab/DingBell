@@ -16,9 +16,9 @@ Deployment buttons remain withheld while the final cloud installation and first-
 
 Authentication, companies and membership, encrypted store credentials, imported conversations/products/orders, conversation ownership, frozen execution inputs, budget admission and settlement, translation, answer tools and the sender use the same business rules across adapters. The sender preserves the original intent and allows one provider attempt; unknown outcomes are not resent automatically. Historical execution receipts are never replaced with newly created runs.
 
-Platform-specific integrations are explicit. Cloudflare's optional Workers AI/Vectorize knowledge index and Workflows retain their own bindings. The default Node/Vercel profile leaves those integrations unavailable; it does not substitute an incompatible embedding model or claim semantic retrieval parity. Large asynchronous exports require the separately configured optional object-store adapter. The default synchronous CSV path remains bounded to 5,000 rows and 8 MiB, with a 4 MiB synchronous response cap on Vercel.
+Knowledge retrieval uses the same SQLite FTS5 trigram index on all three targets, with live publication, company, language and store/product checks. It is keyword/substring retrieval, not semantic search. Two-character terms use a scoped substring fallback; no arbitrary first-500-chunk scan hides later publications. Large asynchronous exports require the separately configured optional object-store adapter. The default synchronous CSV path remains bounded to 5,000 rows and 8 MiB, with a 4 MiB synchronous response cap on Vercel.
 
-Model execution, knowledge indexing, automatic reception and outbound sends all default to disabled. Enable a capability only after configuring its provider, reviewed pricing, budget and store permissions. Synthetic tests do not establish model answer quality, real Ozon delivery or invoice accuracy. [Acceptance boundaries](docs/03-acceptance.md) and [architecture](docs/02-architecture.md) describe these contracts.
+Translation and outbound switches default to disabled. Saving a model connection alone does not authorize execution: reviewed prices/limits, a usable explicit budget and a published policy are required. Automatic customer replies require explicit company authorization plus deployment and store send gates. Missing/paused/exhausted budgets never fall back to unlimited credit. Synthetic tests do not establish model answer quality, real Ozon delivery or invoice accuracy. [Acceptance boundaries](docs/03-acceptance.md) and [architecture](docs/02-architecture.md) describe these contracts.
 
 ## Run on your own server
 
@@ -38,7 +38,7 @@ The standalone build includes its dependencies; the deployed server does not nee
 
 ## Cloud deployments
 
-Cloudflare uses `npm run build` and `npm run deploy:cloudflare`. Provision a D1 database, replace the local-only database placeholder, configure installation secrets, then deploy. The deployment command applies migrations before uploading and stops on migration failure. `--dry-run` never applies remote migrations.
+Cloudflare uses `npm run build` and `npm run deploy:cloudflare`. Provision a D1 database, replace the local-only database placeholder, configure installation secrets, then deploy. The deployment command verifies legacy drain and archives retiring tables before applying migrations and uploading. Existing historical data requires the explicit `--archive-retired` option after backup and quiescence; do not bypass this helper with direct migrations. `--dry-run` never queries or changes remote data.
 
 Vercel uses the checked-in [vercel.json](vercel.json) and `npm run build:vercel`. Configure installation secrets plus `DINGBELL_GATEWAY_SECRET`; the adapter creates its own Drive and private business Sandbox. Native queues handle maintenance when no browser is connected. The Drive allows a single writer; this profile is a persistent Node backend and incurs Sandbox/Drive/queue usage. Preview deployments do not own the production business backend.
 
@@ -56,9 +56,11 @@ node --test tests/integration/build.test.ts
 npm run check:release
 ```
 
-`npm run check` runs these checks from installed root dependencies and installs the isolated runtime toolchains. `npm run test:portable` verifies Pi tool termination, native Node business contracts, actual workerd Pi execution, the standalone compiled HTTP artifact and durable object transaction behavior. `npm run test:web` runs the existing Chromium UI suite; install its browser once with `npx playwright install chromium`. The repository has no separate Lint command; source-governance checks run in the test suite.
+`npm run check` runs these checks from installed root dependencies and installs the isolated runtime toolchains. `npm run test:portable` verifies Pi tool termination, native Node business contracts, actual workerd Pi execution, the standalone compiled HTTP artifact and durable object transaction behavior. `npm run test:web:portable` runs current-model configuration, text-publication, same-origin message-image and Push/SSE Chromium regressions; `npm run test:web:cloudflare-smoke` exercises file import against the compiled Pi Worker; install its browser once with `npx playwright install chromium`. `npm run test:web` additionally includes historical UI scenarios that still require migration to current contracts; it is not a portable release-pass claim. The repository has no separate Lint command; source-governance checks run in the test suite.
 
 Cloud probes require explicit `--isolated-cloud`, create uniquely named synthetic-only resources and clean them up. Local logs, state and test credentials are ignored. Instructions and sanitized evidence are in [probes/deployment](probes/deployment/README.md), [Pi portability](probes/pi-portability/RESULTS.md), and [Vercel native storage](probes/vercel-native/README.md).
+
+See [production hardening and remaining boundaries](docs/16-production-hardening.md) for Node guard semantics, financial safety and historical-data recovery limits. The [repository package and runtime boundaries](docs/18-monorepo.md) explain the independently locked targets and their dependency checks.
 
 ## License
 

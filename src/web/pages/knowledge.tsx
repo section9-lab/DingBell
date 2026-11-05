@@ -4,12 +4,12 @@ import { useSearchParams } from 'react-router';
 import { BookOpen, Plus } from 'lucide-react';
 import type { KnowledgeFilters } from '../../shared/knowledge';
 import { ApiError, type Company } from '../lib/api';
-import { readKnowledgeList, type KnowledgeGap } from '../lib/knowledge-api';
+import { storesInfiniteQueryKey } from '../lib/query-keys';
+import { readKnowledgeList } from '../lib/knowledge-api';
 import { readStores } from '../lib/stores-api';
 import { KnowledgeEditor } from '../components/knowledge-editor';
 import { KnowledgeProductImport } from '../components/knowledge-product-import';
 import { KnowledgeFileImport } from '../components/knowledge-file-import';
-import { KnowledgeGaps } from '../components/knowledge-gaps';
 import { useWorkspaceExit } from '../components/workspace-exit';
 import { knowledgeKinds, knowledgeLanguages, knowledgeStates } from '../components/knowledge-fields';
 import { ErrorNotice } from '../components/identity-shared';
@@ -25,13 +25,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 
 export function KnowledgePage({ company, refresh }: { company: Company; refresh: (notice?: unknown) => Promise<void> }) {
   const [search, setSearch] = useSearchParams(), [newId, setNewId] = useState<string | null>(null);
-  const [gapSeed, setGapSeed] = useState<KnowledgeGap | null>(null);
   const [filters, setFilters] = useState<KnowledgeFilters>({}), [after, setAfter] = useState('');
   const { setDirty, confirmExit: navigate } = useWorkspaceExit();
   const management = ['owner', 'admin'].includes(company.role), selectedId = newId ?? search.get('document');
   const importing = ['products', 'files'].includes(search.get('import') ?? '') ? search.get('import') : null;
   const list = useQuery({ queryKey: ['knowledge', company.id, filters, after], queryFn: ({ signal }) => readKnowledgeList(company.id, filters, after, signal), enabled: management, retry: false });
-  const stores = useInfiniteQuery({ queryKey: ['knowledge-stores', company.id], queryFn: ({ pageParam, signal }) => readStores(company.id, pageParam, signal),
+  const stores = useInfiniteQuery({ queryKey: storesInfiniteQueryKey(company.id), queryFn: ({ pageParam, signal }) => readStores(company.id, pageParam, signal),
     initialPageParam: 0, getNextPageParam: page => page.nextOffset ?? undefined, enabled: management, retry: false });
   const storeRows = stores.data?.pages.flatMap(page => page.stores) ?? [];
   const resetEditor = useCallback(async (error?: unknown) => {
@@ -42,22 +41,19 @@ export function KnowledgePage({ company, refresh }: { company: Company; refresh:
   useEffect(() => { const error = list.error ?? stores.error; if (error instanceof ApiError && ['FORBIDDEN', 'UNAUTHENTICATED', 'NOT_FOUND'].includes(error.code)) void refresh(error); }, [list.error, stores.error, refresh]);
   function filter<K extends keyof KnowledgeFilters>(key: K, value: KnowledgeFilters[K]) { setFilters(current => ({ ...current, [key]: value })); setAfter(''); }
   return <>
-    <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex flex-col gap-2"><h1 className="text-2xl font-semibold tracking-tight">知识库</h1><p className="text-sm text-muted-foreground">维护商品事实与店铺政策，检索测试通过后再发布。</p></div>
-      {management && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => navigate(() => { setNewId(null); setGapSeed(null); setSearch({ view: 'gaps' }); })}>知识缺口</Button><Button variant="outline" onClick={() => navigate(() => { setNewId(null); setGapSeed(null); setSearch({ import: 'files' }); })}>从文件导入</Button><Button variant="outline" onClick={() => navigate(() => { setNewId(null); setGapSeed(null); setSearch({ import: 'products' }); })}>从商品导入</Button><Button onClick={() => navigate(() => { setGapSeed(null); setNewId(crypto.randomUUID()); setSearch({}); })}><Plus data-icon="inline-start"/>新建知识</Button></div>}
+    <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex flex-col gap-2"><h1 className="text-2xl font-semibold tracking-tight">知识库</h1><p className="text-sm text-muted-foreground">维护商品事实与店铺政策，发布后供 AI 按关键词直接检索回复。</p></div>
+      {management && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => navigate(() => { setNewId(null); setSearch({ import: 'files' }); })}>从文件导入</Button><Button variant="outline" onClick={() => navigate(() => { setNewId(null); setSearch({ import: 'products' }); })}>从商品导入</Button><Button onClick={() => navigate(() => { setNewId(crypto.randomUUID()); setSearch({}); })}><Plus data-icon="inline-start"/>新建知识</Button></div>}
     </div>
-    {!management ? <Alert><AlertTitle>需要管理员权限</AlertTitle><AlertDescription>知识的维护、测试与发布由公司所有者或管理员负责。客服在消息中心查看已授权的回答依据。</AlertDescription></Alert> : <>
-      {list.data && !list.data.capabilities.indexing && <Alert><AlertTitle>索引服务尚未启用</AlertTitle><AlertDescription>可以保存和整理草稿。启用索引、检索测试及发布需要部署管理员完成服务配置。</AlertDescription></Alert>}
-      {list.data?.capabilities.indexing && !list.data.capabilities.review && <Alert><AlertTitle>检索测试与发布尚未启用</AlertTitle><AlertDescription>可保存草稿并建立索引，发布前还需部署管理员配置检索测试与发布服务。</AlertDescription></Alert>}
+    {!management ? <Alert><AlertTitle>需要管理员权限</AlertTitle><AlertDescription>知识的维护与发布由公司所有者或管理员负责。客服在消息中心查看已授权的回答依据。</AlertDescription></Alert> : <>
       {stores.isError && <Alert><AlertTitle>店铺读取失败</AlertTitle><AlertDescription><p>请重新读取店铺后再修改知识范围。</p><Button variant="outline" onClick={() => void stores.refetch()}>重新读取店铺</Button></AlertDescription></Alert>}
       {stores.hasNextPage && <Button variant="outline" className="self-start" disabled={stores.isFetchingNextPage} onClick={() => void stores.fetchNextPage()}>加载更多店铺</Button>}
-      {search.get('view')==='gaps' ? <div className="flex min-w-0 flex-col gap-4"><Button variant="ghost" className="self-start" onClick={()=>setSearch({})}>返回知识库</Button><KnowledgeGaps key={company.id} companyId={company.id} stores={storeRows} refresh={resetEditor} onOpen={(gap,reuse)=>navigate(()=>{setGapSeed(reuse?gap:null);setNewId(null);setSearch({document:gap.documentId});})}/></div> : importing ? <div className="flex min-w-0 flex-col gap-4"><Button variant="ghost" className="self-start" onClick={()=>navigate(()=>setSearch({}))}>返回知识库</Button>{importing==='files'
+      {importing ? <div className="flex min-w-0 flex-col gap-4"><Button variant="ghost" className="self-start" onClick={()=>navigate(()=>setSearch({}))}>返回知识库</Button>{importing==='files'
         ? <KnowledgeFileImport key={company.id} companyId={company.id} stores={storeRows} unavailable={stores.isError||stores.isPending} onOpen={id=>navigate(()=>setSearch({document:id}))} refresh={resetEditor}/>
         : <KnowledgeProductImport companyId={company.id} stores={storeRows} unavailable={stores.isError||stores.isPending} onOpen={id=>setSearch({document:id})} refresh={resetEditor}/>}</div> : selectedId ? <div className="flex min-w-0 flex-col gap-4">
         <Button variant="ghost" className="self-start" onClick={() => navigate(() => { setNewId(null); setSearch({}); })}>返回知识库</Button>
         {list.isError && <div className="flex flex-col gap-3"><ErrorNotice error={list.error}/><Button variant="outline" className="self-start" disabled={list.isFetching} onClick={() => void list.refetch()}>重新读取知识库配置</Button></div>}
-        <KnowledgeEditor key={`${company.id}:${selectedId}:${gapSeed?.jobId ?? ''}:${gapSeed?.caseIndex ?? ''}`} companyId={company.id} id={selectedId} isNew={newId === selectedId} stores={storeRows}
-          initialQuestion={gapSeed?.documentId===selectedId?{question:gapSeed.question,minimumScore:gapSeed.minimumScore}:undefined}
-          unavailable={stores.isError || stores.isPending || list.isError || list.isPending} capabilities={list.data?.capabilities ?? { indexing: false, review: false }}
+        <KnowledgeEditor key={`${company.id}:${selectedId}`} companyId={company.id} id={selectedId} isNew={newId === selectedId} stores={storeRows}
+          unavailable={stores.isError || stores.isPending || list.isError || list.isPending}
           onSaved={id => { if (newId === id) setDirty(false); setSearch({ document: id }, { replace: true }); }} onDirty={setDirty} refresh={resetEditor}/>
       </div> : <Card><CardHeader><CardTitle>知识资料</CardTitle><CardDescription>草稿独立保存，已发布版本继续生效，直到新版本发布或撤回。</CardDescription></CardHeader>
         <CardContent className="flex min-w-0 flex-col gap-5">

@@ -4,7 +4,13 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { encryptCredentials } from '../src/modules/stores/credentials.ts';
-import { checkCursorProgress, historyCheckpoint, retrySyncFailure, runSyncPage } from '../src/modules/sync/runner.ts';
+import { checkCursorProgress, historyCheckpoint, historyDueIn, retrySyncFailure, runSyncPage } from '../src/modules/sync/runner.ts';
+
+test('history cadence keeps unread chats warm and idle chats cheap', () => {
+  assert.equal(historyDueIn(true, 0), 1_000, 'an unfinished page continues immediately');
+  assert.equal(historyDueIn(false, 3), 60_000, 'a chat that just delivered messages stays warm');
+  assert.equal(historyDueIn(false, 0), 900_000, 'a chat with nothing new falls back to the slow sweep');
+});
 
 test('sync retries obey Retry-After and stop rather than shorten an excessive provider delay', () => {
   assert.deepEqual(retrySyncFailure({ code: 'rate_limited', retryAfterMs: 120_000 }, 'discovery', 0, 1_000, 0),
@@ -29,6 +35,38 @@ test('source-specific failures isolate product permissions while invalid credent
   assert.equal(retrySyncFailure({ code: 'permission_denied' }, 'product-details', 0, 0, 0).code, 'product_details_permission_denied');
   assert.equal(retrySyncFailure({ code: 'invalid_credentials' }, 'product-list', 0, 0, 0).disableAll, true);
   assert.equal(retrySyncFailure({ code: 'credentials_unavailable' }, 'discovery', 0, 0, 0).disableAll, true);
+});
+
+test('every permission failure disables its own source, including unknown stream names', () => {
+  const streams = [
+    ['discovery', 'chat_list_permission_denied'],
+    ['backfill', 'chat_history_permission_denied'],
+    ['__proto__', 'chat_history_permission_denied'],
+    ['product-list', 'product_list_permission_denied'],
+    ['product-details', 'product_details_permission_denied'],
+    ['fbs-list', 'fbs_list_permission_denied'],
+    ['fbs-detail', 'fbs_details_permission_denied'],
+    ['fbo-list', 'fbo_list_permission_denied'],
+    ['fbo-detail', 'fbo_details_permission_denied'],
+    ['fbp-list', 'fbp_list_permission_denied'],
+    ['fbp-detail', 'fbp_details_permission_denied'],
+  ] as const;
+  for (const [stream, code] of streams) {
+    assert.deepEqual(retrySyncFailure({ code: 'permission_denied' }, stream, 0, 0, 0), {
+      code, nextDueAt: 5_000, disable: true,
+    });
+  }
+});
+
+test('retry boundaries preserve provider waits, jitter bounds and terminal decisions', () => {
+  assert.deepEqual(retrySyncFailure({ code: 'rate_limited', retryAfterMs: 86_400_000 }, 'discovery', 0, 0, 0),
+    { code: 'rate_limited', nextDueAt: 86_400_000, disable: false, blockedUntil: 86_400_000 });
+  assert.equal(retrySyncFailure({ code: 'network_error' }, 'backfill', 0, 0, -1).nextDueAt, 5_000);
+  assert.equal(retrySyncFailure({ code: 'network_error' }, 'backfill', 0, 0, 2).nextDueAt, 10_000);
+  assert.equal(retrySyncFailure({ code: 'network_error' }, 'backfill', 10, 0, 1).nextDueAt, 600_000);
+  for (const code of ['invalid_request', 'redirect_refused', 'cursor_stalled']) {
+    assert.equal(retrySyncFailure({ code }, 'backfill', 0, 0, 0).disable, true);
+  }
 });
 
 test('message checkpoints preserve opaque IDs and consume inclusive page boundaries', () => {
@@ -81,7 +119,7 @@ test('one bounded sync page discovers then imports history without creating an A
     database.prepare("INSERT INTO sync_cursor (store_id,organization_id,thread_id,stream,due_at) VALUES ('store','org','','discovery',0)"),
   ]);
   const requests: string[] = [];
-  let mode: 'history' | 'incremental' | 'rate-limited' | 'pause' | 'empty' | 'bootstrap' | 'bootstrap-tail' | 'bootstrap-forward' = 'history';
+  let mode: 'history' | 'incremental' | 'rate-limited' | 'pause' | 'empty' | 'bootstrap' | 'bootstrap-tail' | 'bootstrap-forward' | 'chatbot' = 'history';
   let discoveryNext: string | null = null;
   let emptyThread = false;
   const historyRequests: { direction: string; from_message_id?: number }[] = [];
@@ -94,8 +132,8 @@ test('one bounded sync page discovers then imports history without creating an A
       historyRequests.push(JSON.parse(String(init?.body)));
       if (mode === 'rate-limited') return new Response('', { status: 429, headers: { 'retry-after': '120' } });
       if (mode === 'pause') await database.prepare("UPDATE store SET status='paused',revision=revision+1 WHERE id='store'").run();
-      const ids = mode === 'history' ? ['11', '10'] : mode === 'pause' ? ['13'] : mode === 'empty' ? [] : mode === 'bootstrap' ? ['22', '21'] : mode === 'bootstrap-tail' ? ['21', '20'] : mode === 'bootstrap-forward' ? ['22', '23'] : ['10', '11', '12'];
-      return Response.json({ messages: ids.map(id => ({ message_id: id, created_at: '2026-10-01T00:00:00Z', user: { id: '123', type: id === '12' ? 'Seller' : id === '11' ? 'Сustomer' : 'Customer' }, data: ['A synthetic question'], is_image: false, is_read: false })), has_next: mode === 'bootstrap' });
+      const ids = mode === 'history' ? ['11', '10'] : mode === 'pause' ? ['13'] : mode === 'empty' ? [] : mode === 'bootstrap' ? ['22', '21'] : mode === 'bootstrap-tail' ? ['21', '20'] : mode === 'bootstrap-forward' ? ['22', '23'] : mode === 'chatbot' ? ['23','24'] : ['10', '11', '12'];
+      return Response.json({ messages: ids.map(id => ({ message_id: id, created_at: '2026-10-01T00:00:00Z', user: { id: id === '24' ? 'synthetic_chatbot' : '123', type: id === '24' ? 'ChatBot' : id === '12' ? 'Seller' : id === '11' ? 'Сustomer' : 'Customer' }, data: ['A synthetic question'], is_image: false, is_read: false })), has_next: mode === 'bootstrap' });
     }
     throw new Error('Unexpected test request');
   }) as typeof fetch;
@@ -215,5 +253,14 @@ test('one bounded sync page discovers then imports history without creating an A
     assert.equal(historyRequests.at(-1)?.from_message_id, 22);
     assert.equal(await database.prepare('SELECT count(*) FROM message').first('count(*)'), 4);
     assert.equal(await database.prepare("SELECT count(*) FROM ingest_event WHERE state='pending'").first('count(*)'), 1);
+  });
+  await context.test('ChatBot metadata does not stop sync or become a customer AI trigger',async()=>{
+    mode='chatbot';await database.prepare('UPDATE store_sync_source SET due_at=0').run();await database.prepare("UPDATE sync_cursor SET due_at=0 WHERE stream='incremental'").run();
+    await runSyncPage(env,{orgId:'org',storeId:'store'},{fetcher});
+    assert.deepEqual(await database.prepare("SELECT sender_id,sender_type,direction FROM message WHERE platform_message_id='24'").first(),{sender_id:'synthetic_chatbot',sender_type:'ChatBot',direction:'unknown'});
+    assert.equal(await database.prepare("SELECT cursor FROM sync_cursor WHERE stream='incremental'").first('cursor'),'24');
+    assert.equal(await database.prepare('SELECT enabled FROM store_sync_source').first('enabled'),1);
+    assert.equal(await database.prepare('SELECT last_error FROM store_sync_source').first('last_error'),null);
+    assert.equal(await database.prepare("SELECT count(*) FROM ingest_event WHERE state='pending'").first('count(*)'),1);
   });
 });

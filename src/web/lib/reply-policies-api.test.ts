@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createReplyPolicy, readReplyPolicy, readReplyPolicies, updateReplyPolicy } from './reply-policies-api.ts';
+import { createReplyPolicy, readReplyPolicy, readReplyPolicies, saveReplyPolicy, updateReplyPolicy } from './reply-policies-api.ts';
 
 const config={kind:'automatic' as const,name:'售前接待',storeIds:['store-a'],priority:50,stages:['presale' as const],mode:'suggest' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
 const policy={id:'p/id',kind:'automatic',version:1,draftRevision:1,testedRevision:null,testedTimeZone:null,draftBaseRevision:null,draftRollbackOf:null,draft:config,enabled:false,published:null,updatedAt:'2026-10-10T00:00:00.000Z'};
@@ -13,6 +13,10 @@ test('policy requests bind company and policy IDs and send exact versioned actio
   await updateReplyPolicy('a/b','p/id','draft',{expectedVersion:1,config});
   assert.deepEqual(JSON.parse(String(calls[1].init.body)),{expectedVersion:1,config});
   assert.equal(calls[1].init.method,'POST');
+  await saveReplyPolicy('a/b','p/id',0,config);
+  assert.equal(calls[2].url,'/api/companies/a%2Fb/reply-policies/p%2Fid/save');
+  assert.equal(calls[2].init.method,'POST');
+  assert.deepEqual(JSON.parse(String(calls[2].init.body)),{expectedVersion:0,config});
 });
 test('policy responses reject wrong scope, contradictory versions and malformed publication snapshots',async t=>{
   const publication={revision:1,schemaVersion:1,config,timeZone:'UTC',publishedBy:'admin',publishedAt:policy.updatedAt,rollbackOf:null};
@@ -33,4 +37,5 @@ test('policy lists preserve their kind and an uncertain write is attempted only 
   await assert.rejects(readReplyPolicies('a/b','automatic'),{code:'INVALID_RESPONSE'});mock.mock.restore();
   let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;throw new Error('connection lost');});
   await assert.rejects(createReplyPolicy('a/b','p/id',config),{code:'OPERATION_UNCONFIRMED'});assert.equal(calls,1);
+  await assert.rejects(saveReplyPolicy('a/b','p/id',1,config),{code:'OPERATION_UNCONFIRMED'});assert.equal(calls,2);
 });

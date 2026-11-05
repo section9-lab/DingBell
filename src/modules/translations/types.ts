@@ -3,7 +3,8 @@ import type { StoreActor } from '../stores/storage.ts';
 export type TranslationActor = StoreActor;
 export interface TranslationScope { organizationId:string;storeId:string;conversationId:string }
 export interface TranslationConfig {
-  provider:'nvidia';model:string;modelConfigVersion:string;promptVersion:string;
+  provider:'nvidia'|'openai-compatible';model:string;
+  connection?:{companyId:string;revision:number;baseUrl:string};modelConfigVersion:string;promptVersion:string;
   // Conservative total of input + cacheRead + cacheWrite; not an SDK input limit.
   maxInputTokens:number;maxOutputTokens:number;
   pricing:{version:string;currency:'USD';inputMicrosPerMillion:number;outputMicrosPerMillion:number;cacheReadMicrosPerMillion:number;cacheWriteMicrosPerMillion:number};

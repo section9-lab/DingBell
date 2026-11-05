@@ -34,7 +34,7 @@ function replyMemberHeader(c: Context<ApplicationEnv>): string | null {
 function validPath(c: Context<ApplicationEnv>, allowQuery = false) {
   return (allowQuery || !new URL(c.req.url).search) && ['companyId', 'id'].every(key => {
     const id = c.req.param(key);
-    return id && id.trim() && id.length <= 256 && !/[\u0000-\u001f\u007f]/.test(id);
+    return !!id && id.trim().length > 0 && id.length <= 256 && !/[\u0000-\u001f\u007f]/.test(id);
   });
 }
 const invalid = (c: Context<ApplicationEnv>) => apiError(c, 'INVALID_REQUEST', 'Provide only the required conversation command fields.', 400);

@@ -41,6 +41,14 @@ test('history sends an exact large integer cursor and retains source data withou
   assert.equal(result.messages[1].isImage, true);
 });
 
+test('ChatBot sender IDs are opaque metadata while message IDs and SKU cursors remain decimal',async()=>{
+ const bot={...message,user:{id:'synthetic_chatbot',type:'ChatBot'}};
+ const page=await readOzonMessages(credentials,{chatId:'chat',direction:'Backward'},async()=>Response.json({messages:[message,bot],has_next:false}));
+ assert.equal(page.messages[1].senderId,'synthetic_chatbot');assert.equal(page.messages[1].senderType,'ChatBot');assert.equal(page.messages[0].senderId,message.user.id);
+ for(const userId of [123.5,{},[],true,' padded ','bad\u0000id','x'.repeat(257)])await assert.rejects(readOzonMessages(credentials,{chatId:'chat',direction:'Backward'},async()=>Response.json({messages:[{...bot,user:{id:userId,type:'ChatBot'}}],has_next:false})),{code:'invalid_response'});
+ for(const patch of [{message_id:'opaque-message'},{context:{sku:'opaque-sku'}}])await assert.rejects(readOzonMessages(credentials,{chatId:'chat',direction:'Backward'},async()=>Response.json({messages:[{...bot,...patch}],has_next:false})),{code:'invalid_response'});
+});
+
 test('numeric ID tokens retain exact digits in both Node and the deployed workerd runtime', { timeout: 30_000 }, async context => {
   const body = JSON.stringify({ messages: [message], has_next: false }).replaceAll('"3000000000817031942"', '3000000000817031942').replaceAll('"3000000000817031941"', '3000000000817031941').replaceAll('"3000000000817031939"', '3000000000817031939');
   const fetcher = (async () => new Response(body)) as typeof fetch;
@@ -116,9 +124,18 @@ test('known chat IDs still reject fractional, negative and exponent tokens while
   assert.equal(page.chats[0].id, chat.chat.chat_id);
 });
 
-test('the eight-second deadline also bounds a response whose stream never settles', { timeout: 12_000 }, async () => {
-  let cancelled = false;
-  const started = Date.now();
-  await assert.rejects(listOzonChats(credentials, {}, (async () => new Response(new ReadableStream({ cancel() { cancelled = true; } }))) as typeof fetch), fails('timed_out'));
-  assert.ok(Date.now() - started >= 7_500); assert.equal(cancelled, true);
+test('the eight-second deadline also bounds a response whose stream never settles', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let cancelled = false, settled = false;
+  const pending = listOzonChats(credentials, {}, (async () => new Response(new ReadableStream({ cancel() { cancelled = true; } }))) as typeof fetch);
+  // Install the rejection observer before advancing timers so no rejection is lost.
+  const result = assert.rejects(pending, fails('timed_out')).then(() => { settled = true; });
+  await Promise.resolve(); await Promise.resolve();
+  t.mock.timers.tick(7_999);
+  await Promise.resolve();
+  assert.equal(settled, false, 'the provider deadline must not expire early');
+  assert.equal(cancelled, false, 'the response stream must remain open before the deadline');
+  t.mock.timers.tick(1);
+  await result;
+  assert.equal(cancelled, true);
 });

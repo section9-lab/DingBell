@@ -1,6 +1,7 @@
+import {pushCoordinatorRuntime,pushJobCondition,pushJobFrom,pushDue,runnablePush} from '../ozon-push/storage.ts';
 import { storeAccess, storeColumns } from '../stores/storage.ts';
 import { prepareProductSyncSeed } from '../products/sync-seed.ts';
-import { prepareFbsSyncSeed } from '../orders/sync-seed.ts';
+import { prepareFbsSyncSeed, prepareFboSyncSeed,prepareFbpSyncSeed } from '../orders/sync-seed.ts';
 import type { StoreActor, StoreRecord } from '../stores/storage.ts';
 import type { StoreCoordinatorRecord, StoreSyncRecord, SyncCursor, SyncLease, SyncPage, SyncScope, SyncSource, SyncSourceRecord, SyncSQL } from './types.ts';
 
@@ -15,7 +16,7 @@ const stateColumns = `store.organization_id AS orgId,store.id AS storeId,? AS so
 const stateFrom = `FROM store LEFT JOIN store_coordinator AS coordinator ON coordinator.store_id=store.id
   LEFT JOIN store_sync_source AS authority ON authority.store_id=store.id AND authority.source=?`;
 const validSource = `authority.enabled=1 AND store.status NOT IN ('paused','disconnected') AND store.credential_version=authority.credential_version`;
-function sourceValue(source: SyncSource) { if (source!=='chat' && source!=='products' && source!=='fbs_postings') throw new Error('INVALID_SYNC_SOURCE'); return source; }
+function sourceValue(source: SyncSource) { if (source!=='chat' && source!=='products' && source!=='fbs_postings' && source!=='fbo_postings' && source!=='fbp_postings') throw new Error('INVALID_SYNC_SOURCE'); return source; }
 function state(row: StoreSyncRecord | null): StoreSyncRecord | null { return row ? {...row,enabled:!!row.enabled} : null; }
 async function readState(db:D1Database,scope:SyncScope,source:SyncSource) {
   return state(await db.prepare(`SELECT ${stateColumns} ${stateFrom} WHERE store.id=? AND store.organization_id=?`)
@@ -34,12 +35,13 @@ export function syncPageCondition(lease:SyncScope,token:string):SyncSQL {
 }
 export function syncLeaseCondition(lease:SyncLease):SyncSQL {
   sourceValue(lease.source);
+  const push=lease.push?pushJobCondition({...lease,...lease.push}):{sql:'1',values:[]};
   return {sql:`EXISTS (SELECT 1 FROM store_coordinator AS held JOIN store_sync_source AS authority
     ON authority.store_id=held.store_id AND authority.organization_id=held.organization_id AND authority.source=held.lease_source
     JOIN store ON store.id=held.store_id AND store.organization_id=held.organization_id
     WHERE held.store_id=? AND held.organization_id=? AND authority.source=? AND authority.epoch=? AND held.fence=?
-      AND held.lease_token=? AND held.lease_until>${nowSQL} AND ${validSource} AND store.revision=? AND store.credential_version=?)`,
-    values:[lease.storeId,lease.orgId,lease.source,lease.epoch,lease.fence,lease.token,lease.storeRevision,lease.credentialVersion]};
+      AND held.lease_token=? AND held.lease_until>${nowSQL} AND ${validSource} AND store.revision=? AND store.credential_version=?) AND (${push.sql})`,
+    values:[lease.storeId,lease.orgId,lease.source,lease.epoch,lease.fence,lease.token,lease.storeRevision,lease.credentialVersion,...push.values]};
 }
 export function prepareSyncPageGate(db:D1Database,lease:SyncLease,token:string,extra:SyncSQL={sql:'1',values:[]}) {
   const live=syncLeaseCondition(lease);
@@ -61,7 +63,7 @@ export function prepareSyncPageFinish(db:D1Database,lease:SyncLease,token:string
 export async function setSyncSourceEnabled(db:D1Database,actor:StoreActor,storeId:string,source:SyncSource,expectedEpoch:number,enabled:boolean):Promise<SyncSourceRecord|null> {
   sourceValue(source);
   const token=crypto.randomUUID(),scope={orgId:actor.orgId,storeId},accepted=syncPageCondition(scope,token);
-  const capability=source==='chat'?'chats_read':source==='products'?'products_read':'orders_fbs_read';
+  const capability=source==='chat'?'chats_read':source==='products'?'products_read':source==='fbs_postings'?'orders_fbs_read':source==='fbo_postings'?'orders_fbo_read':'orders_fbp_read';
   const capabilitySQL=enabled?`AND store.status IN ('verified','partial') AND store.credential_ciphertext IS NOT NULL AND store.expires_at>${nowSQL}
     AND (SELECT count(DISTINCT json_extract(value,'$.code')) FROM json_each(store.capabilities)
       WHERE json_extract(value,'$.status')='available' AND json_extract(value,'$.code') IN ('auth','${capability}'))=2`:'';
@@ -87,6 +89,8 @@ export async function setSyncSourceEnabled(db:D1Database,actor:StoreActor,storeI
     ON CONFLICT DO NOTHING`).bind(storeId,...accepted.values));
   if(enabled && source==='products') statements.push(...prepareProductSyncSeed(db,scope,expectedEpoch+1,accepted));
   if(enabled && source==='fbs_postings') statements.push(...prepareFbsSyncSeed(db,scope,expectedEpoch+1,accepted));
+  if(enabled && source==='fbo_postings') statements.push(...prepareFboSyncSeed(db,scope,expectedEpoch+1,accepted));
+  if(enabled && source==='fbp_postings') statements.push(...prepareFbpSyncSeed(db,scope,expectedEpoch+1,accepted));
   statements.push(db.prepare(`SELECT ${stateColumns} ${stateFrom} WHERE store.id=? AND store.organization_id=? AND coordinator.commit_token=?`)
     .bind(source,source,storeId,actor.orgId,token));
   statements.push(db.prepare('UPDATE store_coordinator SET commit_token=NULL WHERE store_id=? AND organization_id=? AND commit_token=?').bind(storeId,actor.orgId,token));
@@ -105,24 +109,26 @@ export async function getSyncRuntime(db:D1Database,scope:SyncScope,source:SyncSo
   return current?.enabled?{state:current,store}:null;
 }
 export async function getStoreCoordinatorRuntime(db:D1Database,scope:SyncScope):Promise<StoreCoordinatorRecord|null> {
+  const push=await pushCoordinatorRuntime(db,scope);if(push.handled)return push.runtime;
   return db.prepare(`SELECT store.organization_id AS orgId,store.id AS storeId,MAX(MIN(authority.due_at),COALESCE(coordinator.blocked_until,0)) AS dueAt,
     coordinator.lease_until AS leaseUntil,coordinator.blocked_until AS blockedUntil FROM store JOIN store_coordinator AS coordinator ON coordinator.store_id=store.id
     JOIN store_sync_source AS authority ON authority.store_id=store.id WHERE store.id=? AND store.organization_id=? AND ${validSource}
     GROUP BY store.id`).bind(scope.storeId,scope.orgId).first<StoreCoordinatorRecord>();
 }
-export async function claimSyncLease(db:D1Database,scope:SyncScope & {source?:SyncSource;token:string;leaseMs?:number}):Promise<SyncLease|null> {
+export async function claimSyncLease(db:D1Database,scope:SyncScope & {source?:SyncSource;token:string;leaseMs?:number;push?:SyncLease['push']}):Promise<SyncLease|null> {
   if(scope.source)sourceValue(scope.source);
   const duration=Math.max(1_000,Math.min(scope.leaseMs??20_000,60_000)),marker=crypto.randomUUID();
+  const gate=scope.push?pushJobCondition({...scope,...scope.push}):{sql:'NOT EXISTS(SELECT 1 FROM store_push_endpoint WHERE store_id=store_coordinator.store_id AND cutover_at IS NOT NULL)',values:[]};
   const candidate=`SELECT authority.source FROM store_sync_source AS authority JOIN store ON store.id=authority.store_id
     WHERE authority.store_id=store_coordinator.store_id AND authority.organization_id=store_coordinator.organization_id
-      AND ${validSource} AND authority.due_at<=${nowSQL} AND (? IS NULL OR authority.source=?)
+      AND ${validSource} AND (?=1 OR authority.due_at<=${nowSQL}) AND (? IS NULL OR authority.source=?) AND (${gate.sql})
     ORDER BY COALESCE(authority.last_attempt_at,-1),authority.due_at,authority.source LIMIT 1`;
   const wanted=scope.source??null;
   const results=await db.batch([
     db.prepare(`UPDATE store_coordinator SET fence=fence+1,lease_source=(${candidate}),lease_token=?,lease_until=${nowSQL}+?,commit_token=?
       WHERE store_id=? AND organization_id=? AND (blocked_until IS NULL OR blocked_until<=${nowSQL})
       AND (lease_until IS NULL OR lease_until<=${nowSQL}) AND EXISTS (${candidate})`)
-      .bind(wanted,wanted,scope.token,duration,marker,scope.storeId,scope.orgId,wanted,wanted),
+      .bind(scope.push?1:0,wanted,wanted,...gate.values,scope.token,duration,marker,scope.storeId,scope.orgId,scope.push?1:0,wanted,wanted,...gate.values),
     db.prepare(`UPDATE store_sync_source SET last_attempt_at=${nowSQL} WHERE store_id=? AND organization_id=? AND source=(
       SELECT lease_source FROM store_coordinator WHERE store_id=? AND organization_id=? AND commit_token=?)`).bind(scope.storeId,scope.orgId,scope.storeId,scope.orgId,marker),
     db.prepare(`SELECT coordinator.organization_id AS orgId,coordinator.store_id AS storeId,coordinator.lease_source AS source,authority.epoch,
@@ -132,14 +138,15 @@ export async function claimSyncLease(db:D1Database,scope:SyncScope & {source?:Sy
       .bind(scope.storeId,scope.orgId,marker),
     db.prepare('UPDATE store_coordinator SET commit_token=NULL WHERE store_id=? AND organization_id=? AND commit_token=?').bind(scope.storeId,scope.orgId,marker),
   ]);
-  return results[2]!.results[0] as unknown as SyncLease ?? null;
+  const lease=results[2]!.results[0] as unknown as SyncLease|undefined;
+  return lease?{...lease,...(scope.push?{push:scope.push}:{})}:null;
 }
 export async function getDueSyncCursor(db:D1Database,lease:SyncLease):Promise<SyncCursor|null> {
   if(lease.source!=='chat')return null;
   const live=syncLeaseCondition(lease);
   const row=await db.prepare(`SELECT store_id AS storeId,thread_id AS threadId,stream,cursor,recent_cursors AS recentCursors,revision,due_at AS dueAt,completed
     FROM sync_cursor WHERE store_id=? AND organization_id=? AND completed=0 AND due_at<=${nowSQL} AND ${live.sql}
-    ORDER BY CASE WHEN stream='discovery' THEN 0 ELSE 1 END,due_at,stream,thread_id LIMIT 1`)
+    ORDER BY CASE WHEN stream='discovery' THEN 0 WHEN stream='backfill' THEN 1 ELSE 2 END,due_at,stream,thread_id LIMIT 1`)
     .bind(lease.storeId,lease.orgId,...live.values).first<Omit<SyncCursor,'recentCursors'> & {recentCursors:string}>();
   return row?{...row,completed:!!row.completed,recentCursors:JSON.parse(row.recentCursors) as string[]}:null;
 }
@@ -149,6 +156,8 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
   const chats = page.chats ?? [], messages = page.messages ?? [], seeds = page.seeds ?? [];
   if (page.cursor.storeId!==lease.storeId || chats.length>100 || messages.length>100 || seeds.length>200
     || messages.some(message=>typeof message.platformMessageId!=='string' || message.platformThreadId!==page.cursor.threadId)
+    || (page.canonicalHead!==undefined&&page.canonicalHead!==null&&!messages.some(message=>message.platformMessageId===page.canonicalHead))
+    || (page.ingestAsHistory&&(!lease.push||messages.some(message=>message.liveObserved)))
     || (page.cursor.stream==='discovery' && messages.length>0)
     || (page.cursor.stream!=='discovery' && (chats.length>0 || seeds.length>0))
     || (page.bootstrapSnapshot && (page.cursor.stream!=='incremental' || page.cursor.cursor!==null || page.completed || page.continuing
@@ -161,7 +170,7 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
     .bind(lease.storeId,lease.orgId,page.cursor.threadId,page.cursor.stream,page.cursor.revision).first<{cursor:string|null;recentCursors:string}>();
   if (!current) return null;
   if (page.bootstrapSnapshot && current.cursor!==null) throw new Error('INVALID_SYNC_PAGE');
-  const ingestMode = page.bootstrapSnapshot ? 'backfill' : page.cursor.stream;
+  const ingestMode = page.bootstrapSnapshot||page.ingestAsHistory ? 'backfill' : page.cursor.stream;
   const recent = JSON.parse(current.recentCursors) as string[];
   if (page.continuing && (page.nextCursor===null || page.nextCursor===current.cursor)
     || page.nextCursor!==null && page.nextCursor!==current.cursor && recent.includes(page.nextCursor)) throw new Error('cursor_stalled');
@@ -169,7 +178,29 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
   const token = crypto.randomUUID();
   const condition=syncPageCondition(lease,token),accepted=condition.sql,acceptedValues=condition.values;
   const chatJSON = JSON.stringify(chats.map(chat=>({...chat,id:crypto.randomUUID()})));
+  // 本工作区发出的消息已经以 'sent:' 占位 id 落库（见 reply 投影）。平台把同一条
+  // 消息返回时，把真实平台 id 补到最早的匹配回显行上，而不是插入重复消息。
+  // 匹配按发送时间顺序逐条配对，时间相差超过 10 分钟视为不同消息。
+  let inboundMessages=messages,mergeClaims:{messageId:string;echoId:string;message:typeof messages[number]}[]=[];
+  if(messages.some(message=>message.direction==='outbound')){
+    const echoes=(await db.prepare(`SELECT message.id,message.content,message.event_at AS eventAt FROM message
+      JOIN conversation ON conversation.id=message.conversation_id AND conversation.organization_id=message.organization_id AND conversation.store_id=message.store_id
+      WHERE message.store_id=? AND message.organization_id=? AND conversation.platform_thread_id=?
+        AND message.direction='outbound' AND message.platform_message_id LIKE 'sent:%'
+      ORDER BY message.event_at,message.id LIMIT 100`).bind(lease.storeId,lease.orgId,page.cursor.threadId)
+      .all<{id:string;eventAt:number;content:string}>()).results;
+    const known=new Set((await db.prepare(`SELECT message.platform_message_id AS id FROM message JOIN conversation ON conversation.id=message.conversation_id AND conversation.store_id=message.store_id AND conversation.organization_id=message.organization_id
+      WHERE message.store_id=? AND message.organization_id=? AND conversation.platform_thread_id=? AND message.platform_message_id IN (SELECT value FROM json_each(?))`).bind(lease.storeId,lease.orgId,page.cursor.threadId,JSON.stringify(messages.map(message=>message.platformMessageId))).all<{id:string}>()).results.map(row=>row.id));
+    const pending=[...echoes];inboundMessages=[];mergeClaims=[];
+    for(const message of [...messages].sort((left,right)=>left.eventAt-right.eventAt)){
+      if(message.direction!=='outbound'||known.has(message.platformMessageId)){inboundMessages.push(message);continue;}
+      const index=pending.findIndex(echo=>echo.content===JSON.stringify(message.content)&&Math.abs(echo.eventAt-message.eventAt)<=600_000);
+      if(index<0){inboundMessages.push(message);continue;}
+      const [echo]=pending.splice(index,1);mergeClaims.push({messageId:message.platformMessageId,echoId:echo.id,message});
+    }
+  }
   const messageJSON = JSON.stringify(messages.map(message=>({...message,id:crypto.randomUUID()})));
+  const insertJSON = JSON.stringify(inboundMessages.map(message=>({...message,id:crypto.randomUUID()})));
   const results = await db.batch([
     // The transaction's first write is the only time-sensitive authorization gate.
     // Later statements share its unguessable token, so expiry cannot import half a page.
@@ -183,22 +214,54 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
     db.prepare(`INSERT INTO message (id,organization_id,store_id,conversation_id,platform_message_id,sender_id,sender_type,direction,content,is_image,is_read,order_number,sku,event_at,received_at,ingest_mode)
       SELECT json_extract(item.value,'$.id'),?,?,conversation.id,json_extract(item.value,'$.platformMessageId'),json_extract(item.value,'$.senderId'),
         json_extract(item.value,'$.senderType'),json_extract(item.value,'$.direction'),json_extract(item.value,'$.content'),json_extract(item.value,'$.isImage'),
-        json_extract(item.value,'$.isRead'),json_extract(item.value,'$.orderNumber'),json_extract(item.value,'$.sku'),json_extract(item.value,'$.eventAt'),${nowSQL},?
+        json_extract(item.value,'$.isRead'),json_extract(item.value,'$.orderNumber'),json_extract(item.value,'$.sku'),json_extract(item.value,'$.eventAt'),${nowSQL},CASE WHEN ?=1 AND COALESCE(json_extract(item.value,'$.liveObserved'),0)=0 THEN 'backfill' ELSE ? END
       FROM json_each(?) AS item JOIN conversation ON conversation.store_id=? AND conversation.organization_id=? AND conversation.channel_type='private'
         AND conversation.platform_thread_id=json_extract(item.value,'$.platformThreadId') WHERE ${accepted} ON CONFLICT DO NOTHING`)
-      .bind(lease.orgId,lease.storeId,ingestMode,messageJSON,lease.storeId,lease.orgId,...acceptedValues),
+      .bind(lease.orgId,lease.storeId,lease.push?1:0,ingestMode,insertJSON,lease.storeId,lease.orgId,...acceptedValues),
+    // 把平台返回的真实消息 id 补到本地回显行上；时间、已读与正文以平台为准。
+    ...mergeClaims.map(({messageId,echoId,message})=>db.prepare(
+      `UPDATE message SET platform_message_id=?,sender_id=?,sender_type=?,content=?,is_image=?,is_read=?,order_number=?,sku=?,event_at=?,received_at=MAX(received_at,${nowSQL}),ingest_mode='incremental'
+        WHERE id=? AND store_id=? AND organization_id=? AND platform_message_id LIKE 'sent:%' AND ${accepted}`)
+      .bind(messageId,message.senderId??null,message.senderType,JSON.stringify(message.content),message.isImage?1:0,message.isRead?1:0,
+        message.orderNumber??null,message.sku??null,message.eventAt,echoId,lease.storeId,lease.orgId,...acceptedValues)),
+    ...(page.canonicalHead!==undefined?[db.prepare(`INSERT INTO ozon_push_chat_head(conversation_id,organization_id,store_id,message_id,push_event_id,observed_at)
+      SELECT conversation.id,conversation.organization_id,conversation.store_id,(SELECT id FROM message WHERE conversation_id=conversation.id AND organization_id=conversation.organization_id AND store_id=conversation.store_id AND platform_message_id=?),?,${nowSQL}
+      FROM conversation WHERE organization_id=? AND store_id=? AND platform_thread_id=? AND ${accepted}
+      ON CONFLICT(conversation_id) DO UPDATE SET message_id=excluded.message_id,push_event_id=excluded.push_event_id,observed_at=excluded.observed_at`).bind(page.canonicalHead,lease.push?.id??null,lease.orgId,lease.storeId,page.cursor.threadId,...acceptedValues)]:[]),
+    ...(lease.push?[
+      db.prepare(`INSERT INTO ozon_push_live_message(message_id,organization_id,store_id,conversation_id,push_event_id,observed_at)
+        SELECT message.id,message.organization_id,message.store_id,message.conversation_id,event.id,${nowSQL} FROM json_each(?) AS item
+        JOIN conversation ON conversation.store_id=? AND conversation.organization_id=? AND conversation.platform_thread_id=json_extract(item.value,'$.platformThreadId')
+        JOIN message ON message.conversation_id=conversation.id AND message.store_id=conversation.store_id AND message.organization_id=conversation.organization_id AND message.platform_message_id=json_extract(item.value,'$.platformMessageId')
+        JOIN ozon_push_event AS event ON event.id=? AND event.store_id=message.store_id AND event.organization_id=message.organization_id
+        JOIN store_push_endpoint AS endpoint ON endpoint.store_id=event.store_id AND endpoint.organization_id=event.organization_id
+        WHERE ${accepted} AND json_extract(item.value,'$.liveObserved')=1 AND event.notification_type='TYPE_NEW_MESSAGE' AND event.simulated=0 AND event.source='chat'
+          AND json_extract(event.hint,'$.messageId')=message.platform_message_id AND json_extract(event.hint,'$.chatId')=conversation.platform_thread_id
+          AND message.direction='inbound' AND message.event_at>=endpoint.cutover_at AND message.event_at<=event.received_at+120000
+        ON CONFLICT(message_id) DO NOTHING`).bind(messageJSON,lease.storeId,lease.orgId,lease.push.id,...acceptedValues),
+      db.prepare(`UPDATE message SET ingest_mode='incremental' WHERE store_id=? AND organization_id=? AND ingest_mode='backfill'
+        AND EXISTS(SELECT 1 FROM ozon_push_live_message WHERE message_id=message.id AND push_event_id=?) AND ${accepted}`).bind(lease.storeId,lease.orgId,lease.push.id,...acceptedValues),
+    ]:[]),
     db.prepare(`INSERT INTO ingest_event (id,schema_version,organization_id,store_id,conversation_id,message_id,state,live_observed_at,trace_id,created_at)
       SELECT message.id,1,message.organization_id,message.store_id,message.conversation_id,message.id,
-        CASE WHEN json_extract(item.value,'$.liveObserved')=1 AND ?='incremental' AND message.platform_message_id IS NOT ? AND message.direction='inbound' THEN 'pending'
+        CASE WHEN json_extract(item.value,'$.liveObserved')=1 AND ?='incremental' AND (message.platform_message_id IS NOT ? OR EXISTS(SELECT 1 FROM ozon_push_live_message WHERE message_id=message.id AND push_event_id=?)) AND message.direction='inbound' THEN 'pending'
           WHEN message.ingest_mode='backfill' THEN 'historical' ELSE 'observed' END,
-        CASE WHEN json_extract(item.value,'$.liveObserved')=1 AND ?='incremental' AND message.platform_message_id IS NOT ? THEN ${nowSQL} ELSE NULL END,?,${nowSQL}
+        CASE WHEN json_extract(item.value,'$.liveObserved')=1 AND ?='incremental' AND (message.platform_message_id IS NOT ? OR EXISTS(SELECT 1 FROM ozon_push_live_message WHERE message_id=message.id AND push_event_id=?)) THEN ${nowSQL} ELSE NULL END,?,${nowSQL}
       FROM json_each(?) AS item JOIN conversation ON conversation.store_id=? AND conversation.organization_id=?
         AND conversation.platform_thread_id=json_extract(item.value,'$.platformThreadId')
       JOIN message ON message.conversation_id=conversation.id AND message.platform_message_id=json_extract(item.value,'$.platformMessageId')
       WHERE ${accepted} ON CONFLICT(message_id) DO UPDATE SET
-        state=CASE WHEN ingest_event.state='historical' AND excluded.state='pending' AND excluded.live_observed_at IS NOT NULL THEN 'pending' ELSE ingest_event.state END,
+        state=CASE WHEN ingest_event.state IN ('historical','observed') AND excluded.state='pending' AND excluded.live_observed_at IS NOT NULL
+          AND (ingest_event.state='historical' OR EXISTS(SELECT 1 FROM ozon_push_live_message WHERE message_id=ingest_event.message_id AND push_event_id=?)) THEN 'pending' ELSE ingest_event.state END,
         live_observed_at=COALESCE(ingest_event.live_observed_at,excluded.live_observed_at)`)
-      .bind(ingestMode,page.cursor.cursor,ingestMode,page.cursor.cursor,token,messageJSON,lease.storeId,lease.orgId,...acceptedValues),
+      .bind(ingestMode,page.cursor.cursor,lease.push?.id??null,ingestMode,page.cursor.cursor,lease.push?.id??null,token,messageJSON,lease.storeId,lease.orgId,...acceptedValues,lease.push?.id??null),
+    ...(lease.push?[db.prepare(`UPDATE ozon_push_event SET requires_review=0 WHERE store_id=? AND organization_id=? AND requires_review=1 AND json_extract(hint,'$.chatId')=?
+      AND json_extract(hint,'$.messageId') IN (SELECT json_extract(value,'$.platformMessageId') FROM json_each(?)) AND ${accepted}`).bind(lease.storeId,lease.orgId,page.cursor.threadId,messageJSON,...acceptedValues)]:[]),
+    db.prepare(`UPDATE message SET is_read=(SELECT json_extract(value,'$.isRead') FROM json_each(?) WHERE json_extract(value,'$.platformMessageId')=message.platform_message_id)
+      WHERE store_id=? AND organization_id=? AND conversation_id IN(SELECT id FROM conversation WHERE store_id=? AND organization_id=? AND platform_thread_id=?)
+      AND platform_message_id IN(SELECT json_extract(value,'$.platformMessageId') FROM json_each(?)) AND ${accepted}
+      AND is_read IS NOT (SELECT json_extract(value,'$.isRead') FROM json_each(?) WHERE json_extract(value,'$.platformMessageId')=message.platform_message_id)`)
+      .bind(messageJSON,lease.storeId,lease.orgId,lease.storeId,lease.orgId,page.cursor.threadId,messageJSON,...acceptedValues,messageJSON),
     db.prepare(`UPDATE conversation SET last_message_at=(SELECT MAX(event_at) FROM message WHERE message.conversation_id=conversation.id)
       WHERE store_id=? AND id IN (SELECT conversation_id FROM message WHERE store_id=? AND platform_message_id IN (SELECT json_extract(value,'$.platformMessageId') FROM json_each(?)))
       AND ${accepted}`).bind(lease.storeId,lease.storeId,messageJSON,...acceptedValues),
@@ -208,6 +271,17 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
       FROM json_each(?) AS item JOIN conversation ON conversation.store_id=? AND conversation.organization_id=?
         AND conversation.platform_thread_id=json_extract(item.value,'$.threadId') WHERE ${accepted} ON CONFLICT DO NOTHING`)
       .bind(lease.orgId,lease.storeId,JSON.stringify(seeds),lease.storeId,lease.orgId,...acceptedValues),
+    // The chat list states each chat's newest message id, so a chat whose newest id
+    // differs from the incremental cursor has something unread: pull its next history
+    // page forward to now instead of waiting for the idle sweep. Without this the
+    // per-chat interval has to stay short enough for every conversation, which with a
+    // few dozen chats exceeds the platform rate budget and delays genuinely new
+    // messages behind the backlog.
+    ...(seeds.length ? [db.prepare(`UPDATE sync_cursor SET due_at=${nowSQL}
+      WHERE store_id=? AND organization_id=? AND stream='incremental' AND completed=0 AND ${accepted}
+        AND EXISTS (SELECT 1 FROM conversation AS current WHERE current.id=sync_cursor.conversation_id
+          AND current.last_message_id IS NOT sync_cursor.cursor)`)
+      .bind(lease.storeId,lease.orgId,...acceptedValues)] : []),
     db.prepare(`INSERT INTO sync_cursor (organization_id,store_id,thread_id,stream,conversation_id,cursor,revision,due_at,completed)
       SELECT source.organization_id,source.store_id,source.thread_id,'backfill',source.conversation_id,?,0,${nowSQL}+1000,0
       FROM sync_cursor AS source WHERE source.store_id=? AND source.organization_id=? AND source.thread_id=? AND source.stream='incremental'
@@ -250,10 +324,14 @@ export async function releaseSyncLease(db:D1Database,lease:SyncLease,nextDueAt:n
   return !!results.at(-1)!.results.length;
 }
 export async function listDueSyncStores(db:D1Database,limit=50):Promise<SyncScope[]> {
-  const rows=await db.prepare(`SELECT store.organization_id AS orgId,store.id AS storeId FROM store
+  const rows=await db.prepare(`WITH due AS (
+    SELECT store.organization_id AS orgId,store.id AS storeId,MIN(authority.due_at) AS dueAt FROM store
     JOIN store_coordinator AS coordinator ON coordinator.store_id=store.id JOIN store_sync_source AS authority ON authority.store_id=store.id
     WHERE ${validSource} AND authority.due_at<=${nowSQL} AND (coordinator.blocked_until IS NULL OR coordinator.blocked_until<=${nowSQL})
-      AND (coordinator.lease_until IS NULL OR coordinator.lease_until<=${nowSQL}) GROUP BY store.id ORDER BY MIN(authority.due_at),store.id LIMIT ?`)
+      AND (coordinator.lease_until IS NULL OR coordinator.lease_until<=${nowSQL}) AND NOT EXISTS(SELECT 1 FROM store_push_endpoint WHERE store_id=store.id AND cutover_at IS NOT NULL) GROUP BY store.id
+    UNION ALL SELECT store.organization_id AS orgId,store.id AS storeId,MIN(${pushDue}) AS dueAt ${pushJobFrom}
+    WHERE ${runnablePush} AND ${pushDue}<=${nowSQL} AND COALESCE(coordinator.blocked_until,0)<=${nowSQL} AND COALESCE(coordinator.lease_until,0)<=${nowSQL} GROUP BY store.id)
+    SELECT orgId,storeId FROM due ORDER BY dueAt,storeId LIMIT ?`)
     .bind(Math.max(1,Math.min(limit,100))).all<SyncScope>();
   return rows.results;
 }

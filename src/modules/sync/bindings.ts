@@ -2,8 +2,9 @@ import { credentialConfig, type CredentialBindings } from '../stores/credentials
 import type { StoreCoordinator } from './coordinator.ts';
 import type { SyncScope } from './types.ts';
 
-export type SyncBucket = 'chat-list' | 'chat-history' | 'product-list' | 'product-details' | 'fbs-list' | 'fbs-detail' | 'chat-send';
+export type SyncBucket = 'chat-list' | 'chat-history' | 'product-list' | 'product-details' | 'fbs-list' | 'fbs-detail' | 'fbo-list' | 'fbo-detail' | 'fbp-list' | 'fbp-detail' | 'chat-send';
 export interface SyncBindings extends CredentialBindings {
+  OZON_PUSH_PUBLIC_BASE_URL?: string;
   DB?: D1Database;
   STORE_COORDINATOR?: DurableObjectNamespace<StoreCoordinator>;
 }

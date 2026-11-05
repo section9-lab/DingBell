@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import {latestCanonicalInput,noPushMessageReview} from '../ozon-push/barrier.ts';
 import {aiAdmissionSchema,aiStartSchema,aiScopeSchema,type AiStart} from './ai-state.ts';
 import type {ControlScope} from './control-types.ts';
 // Internal service admission: scope comes from the verified conversation directory,
@@ -12,9 +13,9 @@ export async function readAiAdmission(db:D1Database,scope:ControlScope,value:AiS
   JOIN reply_policy p ON p.organization_id=c.organization_id AND p.id=? AND p.enabled=1 AND p.kind='automatic'
   JOIN policy_version pv ON pv.organization_id=p.organization_id AND pv.policy_id=p.id AND pv.revision=p.published_revision AND pv.schema_version=1
   WHERE cc.controller_id=? AND cc.organization_id=? AND cc.store_id=? AND cc.conversation_id=? AND m.id=?
-  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND c.platform_status='Opened'
+  AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened'
   AND m.direction='inbound' AND m.is_image=0 AND length(CAST(m.content AS BLOB))<=15000
-  AND NOT EXISTS (SELECT 1 FROM message newer WHERE newer.organization_id=c.organization_id AND newer.conversation_id=c.id AND (newer.event_at>m.event_at OR (newer.event_at=m.event_at AND newer.id>m.id)))`)
+  AND ${latestCanonicalInput()} AND ${noPushMessageReview('m')}`)
   .bind(input.policyId,scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId,input.messageId).first<{inputRevision:number;content:string;policyRevision:number;config:string}>();
  if(!row)return null;
  try{

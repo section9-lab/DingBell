@@ -66,7 +66,7 @@ export function registerMembershipRoutes(app: Hono<ApplicationEnv>) {
       targetMemberId: input.memberId, beforeRole: input.expectedRole, afterRole: input.role,
     });
     const result = await auditedChange(record, async () => {
-      let changed;
+      let changed: Awaited<ReturnType<typeof changeMember>>;
       try { changed = await changeMember(c.env.DB!, input); }
       catch (error) {
         if (lastOwnerError(error)) return apiError(c, 'LAST_OWNER_REQUIRED', 'A company must retain at least one owner.', 409);

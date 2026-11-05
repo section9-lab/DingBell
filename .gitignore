@@ -11,3 +11,5 @@ data/
 backups/
 *.log
 .DS_Store
+product-costing/
+.workbuddy/
