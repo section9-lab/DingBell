@@ -7,8 +7,7 @@
   "vars": {
     "OUTBOUND_ENABLED": "false",
     "TRANSLATION_ENABLED": "false",
-    "AI_OUTBOUND_ENABLED": "false",
-    "AI_MODEL_ALLOWED_HOSTS": "opencode.ai"
+    "AI_OUTBOUND_ENABLED": "false"
   },
   "durable_objects": {
     "bindings": [

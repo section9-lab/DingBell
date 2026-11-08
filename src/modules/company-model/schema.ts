@@ -2,6 +2,7 @@ import { integer,primaryKey,sqliteTable,text } from 'drizzle-orm/sqlite-core';
 import { organization } from '../identity/schema.ts';
 export const companyAiModelRevision=sqliteTable('company_ai_model_revision',{
   organizationId:text('organization_id').notNull().references(()=>organization.id,{onDelete:'cascade'}),revision:integer('revision').notNull(),
+  provider:text('provider').notNull().default('custom'),api:text('api').notNull().default('openai-completions'),
   baseUrl:text('base_url').notNull(),model:text('model').notNull(),keyVersion:text('key_version').notNull(),nonce:text('nonce').notNull(),ciphertext:text('ciphertext').notNull(),
   execution:text('execution'),createdAt:integer('created_at').notNull(),
 },table=>[primaryKey({columns:[table.organizationId,table.revision]})]);

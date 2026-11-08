@@ -43,7 +43,7 @@ for(const mode of ['handoff','cancel-before-dispatch','company-model'] as const)
  if(company){
   const base='https://api.openai.com/v1',model='synthetic-customer-model',execution={maxInputTokens:32768,maxOutputTokens:512,...config.model.pricing};
   const {version:_version,currency:_currency,...limits}=execution;
-  assert.ok(await insertCompanyModel(db,actor,0,base,model,await sealModelKey(app.env,'org',1,base,model,'synthetic-company-key'),limits));
+  assert.ok(await insertCompanyModel(db,actor,0,'custom','openai-completions',base,model,await sealModelKey(app.env,'org',1,base,model,'synthetic-company-key'),limits));
  }
  const started=await controller.startAi(scope,{runId:id,expectedVersion:0,messageId:'message',policyId,stage:'presale',language:'ru'});assert.equal(started.outcome,'accepted',JSON.stringify(started));
  if(mode==='cancel-before-dispatch'){
@@ -56,7 +56,7 @@ for(const mode of ['handoff','cancel-before-dispatch','company-model'] as const)
    const cost=await resolveSupportConfiguration(app.env,'org');assert.ok(cost);assert.equal((await reserveAiExecution(db,aiRunReader(app.env),scope,id,budgetId,cost.config)).outcome,'reserved');
    if(mode==='company-model'){
     const base='https://api.deepseek.com/v1',model='synthetic-next-model';
-    assert.ok(await insertCompanyModel(db,actor,1,base,model,await sealModelKey(app.env,'org',2,base,model,'synthetic-next-key'),{maxInputTokens:32768,maxOutputTokens:512,inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}));
+    assert.ok(await insertCompanyModel(db,actor,1,'custom','openai-completions',base,model,await sealModelKey(app.env,'org',2,base,model,'synthetic-next-key'),{maxInputTokens:32768,maxOutputTokens:512,inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}));
     assert.equal((await resolveSupportConfiguration(app.env,'org'))?.config.model.model,model);
     assert.equal((await readAiExecution(db,scope,id))?.config.model.connection?.revision,1);
    }

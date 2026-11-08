@@ -8,7 +8,7 @@ import {sealModelKey} from '../src/modules/company-model/security.ts';
 import type {ModelRecord} from '../src/modules/company-model/storage.ts';
 const env={STORE_CREDENTIAL_KEYS:JSON.stringify({v1:Buffer.alloc(32,8).toString('base64')}),STORE_CREDENTIAL_ACTIVE_KEY:'v1'};
 const key='synthetic-private-probe-key',baseUrl='https://api.openai.com/v1',model='synthetic-chat';
-async function row():Promise<ModelRecord>{return {companyId:'company',revision:1,baseUrl,model,execution:null,...await sealModelKey(env,'company',1,baseUrl,model,key)};}
+async function row():Promise<ModelRecord>{return {companyId:'company',revision:1,provider:'custom',api:'openai-completions',baseUrl,model,execution:null,...await sealModelKey(env,'company',1,baseUrl,model,key)};}
 const stream=(choice:unknown,done=true)=>new Response(`data: ${JSON.stringify({choices:[choice]})}\n\n${done?'data: [DONE]\n\n':''}`,{headers:{'content-type':'text/event-stream'}});
 const tool=(name='connection_probe')=>({index:0,delta:{tool_calls:[{index:0,id:'probe',type:'function',function:{name,arguments:'{"ok":true}'}}]},finish_reason:'tool_calls'});
 

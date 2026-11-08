@@ -5,6 +5,7 @@ import { modelExecutionSchema, defaultModelGenerations } from '../../shared/comp
 import { SUPPORT_REPLY_V2, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
 import { credentialConfig } from '../stores/credentials.ts';
 import { modelBaseUrl, modelEndpoint, openModelKey } from './security.ts';
+import { providerRequestHeaders } from './providers.ts';
 import type { TranslationConfig } from '../translations/types.ts';
 import * as v from 'valibot';
 
@@ -35,10 +36,10 @@ export async function companySupportConfigurationView(env:SupportBindings,compan
   const enabled=modelConfigured&&!!cost&&(!isOutboundPromptVersion(cost.config.model.promptVersion)||env.AI_OUTBOUND_ENABLED==='true'&&env.OUTBOUND_ENABLED==='true');
   return {enabled,modelConfigured,pricesConfigured:!!cost,model:cost?row.model:null,maxGenerations:cost?.config.maxGenerations??null,perGenerationMicros:cost?.per??null,runReservationMicros:cost?.total??null};
 }
-export async function frozenCompanyProvider(env:SupportBindings,config:TranslationConfig,companyId:string){
+export async function frozenCompanyProvider(env:SupportBindings,config:TranslationConfig,companyId:string,sessionId:string){
   const connection=config.connection;
   if(config.provider!=='openai-compatible'||!connection||connection.companyId!==companyId||!env.DB||modelBaseUrl(connection.baseUrl,env)!==connection.baseUrl)throw new Error('MODEL_CONNECTION_UNAVAILABLE');
   const row=await readCompanyModel(env.DB,companyId,connection.revision);
   if(!row||row.baseUrl!==connection.baseUrl||row.model!==config.model)throw new Error('MODEL_CONNECTION_UNAVAILABLE');
-  return {endpoint:modelEndpoint(row.baseUrl),apiKey:await openModelKey(env,companyId,row.revision,row.baseUrl,row.model,row)};
+  return {endpoint:modelEndpoint(row.baseUrl),apiKey:await openModelKey(env,companyId,row.revision,row.baseUrl,row.model,row),headers:providerRequestHeaders(row.provider,sessionId)};
 }

@@ -1,8 +1,8 @@
 import { LoadingState } from './query-state';
 import { useEffect,useRef,useState } from 'react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
-import type { CompanyModelView,CompanyModelCommand,CompanyModelCatalog,CompanyModelTestFailure } from '../../shared/company-model';
-import { readCompanyModel,saveCompanyModel,testCompanyModel,listCompanyModels } from '../lib/company-model-api';
+import type { CompanyModelView,CompanyModelCommand,CompanyModelCatalog,CompanyModelProvider,CompanyModelTestFailure } from '../../shared/company-model';
+import { readCompanyModel,saveCompanyModel,testCompanyModel,listCompanyModels,listCompanyModelProviders } from '../lib/company-model-api';
 import { createModelExecutionDraft, modelExecutionFields, parseModelExecutionDraft } from '../lib/model-execution-form';
 import { ErrorNotice } from './identity-shared';
 import { Card,CardHeader,CardTitle,CardDescription,CardContent,CardFooter } from './ui/card';
@@ -36,11 +36,16 @@ const savedKeyMask='****************';
 function sameOrigin(baseUrl:string,savedUrl:string|null){try{return savedUrl!==null&&new URL(baseUrl.trim()).origin===new URL(savedUrl).origin;}catch{return false;}}
 export function CompanyModelPanel({companyId}:{companyId:string}){
   const query=useQuery({queryKey:['company-model',companyId],queryFn:({signal})=>readCompanyModel(companyId,signal),gcTime:0,refetchOnWindowFocus:false});
+  // The provider catalog is bundled with the deployment; it never depends on a company key.
+  const providers=useQuery({queryKey:['company-model-providers',companyId],queryFn:({signal})=>listCompanyModelProviders(companyId,signal),gcTime:Infinity,staleTime:Infinity,refetchOnWindowFocus:false});
   if(!query.data||query.isError)return <Card><CardHeader><CardTitle>AI 模型</CardTitle></CardHeader><CardContent>{query.isPending?<LoadingState>正在读取模型配置…</LoadingState>:<ErrorNotice error={query.error}/>}<Button variant="outline" disabled={query.isFetching} onClick={()=>void query.refetch()}>读取模型配置</Button></CardContent></Card>;
-  return <ModelForm key={`${companyId}:${query.data.version}`} data={query.data} fetching={query.isFetching} refresh={()=>query.refetch()}/>;
+  return <ModelForm key={`${companyId}:${query.data.version}`} data={query.data} providers={providers.data?.providers??[]} fetching={query.isFetching} refresh={()=>query.refetch()}/>;
 }
-function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boolean;refresh:()=>Promise<unknown>}){
+function ModelForm({data,providers,fetching,refresh}:{data:CompanyModelView;providers:CompanyModelProvider[];fetching:boolean;refresh:()=>Promise<unknown>}){
   const client=useQueryClient();
+  const selectable=providers.filter(entry=>entry.supported);
+  const [provider,setProvider]=useState(data.provider??'custom');
+  const providerEntry=selectable.find(entry=>entry.id===provider);
   const [baseUrl,setBaseUrl]=useState(data.baseUrl??''),[model,setModel]=useState(data.model??''),[apiKey,setApiKey]=useState(''),[replacingKey,setReplacingKey]=useState(false);
   const keyInput=useRef<HTMLInputElement>(null);
   const savedKeyVisible=data.hasKey&&!replacingKey,savedKeyReusable=data.hasKey&&sameOrigin(baseUrl,data.baseUrl);
@@ -54,11 +59,16 @@ function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boole
   useEffect(()=>()=>{catalogRequest.current?.abort();catalogRequest.current=null;},[]);
   function clearCatalog(){catalogRequest.current?.abort();catalogRequest.current=null;setListing(false);setCatalog(null);setCatalogSearch('');setCatalogError(undefined);}
   const visibleModels=catalog?.models.filter(id=>id.toLowerCase().includes(catalogSearch.trim().toLowerCase()))??[];
-  const dirty=baseUrl!==(data.baseUrl??'')||model!==(data.model??'')||!!apiKey||replacingKey
+  const dirty=provider!==(data.provider??'custom')||baseUrl!==(data.baseUrl??'')||model!==(data.model??'')||!!apiKey||replacingKey
     ||JSON.stringify(executionDraft)!==JSON.stringify(createModelExecutionDraft(data.execution));
   const disabled=busy||fetching||uncertain||!data.encryptionConfigured;
   async function discover(){
-    if(disabled||listing||!baseUrl.trim()||!hasUsableKey)return;
+    if(disabled||listing||!hasUsableKey)return;
+    if(provider!=='custom'){
+      const models=[...new Set((providerEntry?.models??[]).filter(entry=>entry.api==='openai-completions').map(entry=>entry.id))].sort();
+      setCatalog({companyId:data.companyId,version:data.version,baseUrl,models,truncated:false});return;
+    }
+    if(!baseUrl.trim())return;
     const controller=new AbortController();catalogRequest.current=controller;setListing(true);setCatalogError(undefined);setCatalog(null);setCatalogSearch('');
     try{
       const result=await listCompanyModels(data.companyId,{expectedVersion:data.version,baseUrl:baseUrl.trim(),...(apiKey.trim()?{apiKey:apiKey.trim()}: {})},controller.signal);
@@ -70,7 +80,7 @@ function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boole
     if(disabled||listing||!hasUsableKey)return;
     const parsed=parseModelExecutionDraft(executionDraft);
     if(!parsed.success){setExecutionError(parsed.message);return;}
-    const command:CompanyModelCommand={expectedVersion:data.version,baseUrl:baseUrl.trim(),model:model.trim(),
+    const command:CompanyModelCommand={expectedVersion:data.version,provider,baseUrl:baseUrl.trim(),model:model.trim(),
       ...(apiKey.trim()?{apiKey:apiKey.trim()}:{}),execution:parsed.execution};
     setBusy(true);setError(undefined);setExecutionError('');setMessage('');setApiKey('');setReplacingKey(false);
     try{const saved=await saveCompanyModel(data.companyId,command);client.setQueryData(['company-model',data.companyId],saved);void client.invalidateQueries({queryKey:['ai-budgets']});}
@@ -86,14 +96,15 @@ function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boole
     <CardContent className="flex flex-col gap-5">
       {!data.encryptionConfigured&&<p role="alert" className="text-sm text-destructive">部署尚未配置凭证加密，请联系部署管理员配置服务端加密密钥。</p>}
       <form id="company-model-form" className="flex flex-col gap-4" onSubmit={event=>{event.preventDefault();void save();}} aria-busy={busy||listing}>
-        <Field><FieldLabel htmlFor="company-model-url">API 地址（Base URL）</FieldLabel><Input id="company-model-url" type="url" value={baseUrl} placeholder="https://api.openai.com/v1" required maxLength={2048} disabled={disabled} onChange={event=>{clearCatalog();setBaseUrl(event.target.value);}}/><FieldDescription>OpenAI Chat Completions 兼容接口地址，不含 /chat/completions。</FieldDescription></Field>
+        <Field><FieldLabel htmlFor="company-model-provider">供应商</FieldLabel><NativeSelect id="company-model-provider" className="w-full min-w-0" value={provider} disabled={disabled} onChange={event=>{const next=event.target.value;setProvider(next);clearCatalog();setModel('');if(next==='custom')return;const entry=selectable.find(item=>item.id===next);setBaseUrl(entry?.models.find(item=>item.api==='openai-completions')?.baseUrl??'');}}><NativeSelectOption value="custom">自定义（OpenAI 兼容接口）</NativeSelectOption>{selectable.map(entry=><NativeSelectOption key={entry.id} value={entry.id}>{entry.name}</NativeSelectOption>)}</NativeSelect><FieldDescription>来自内嵌的 Pi 供应商目录；选择后自动确定接口地址和所需请求头。</FieldDescription></Field>
+        <Field><FieldLabel htmlFor="company-model-url">API 地址（Base URL）</FieldLabel><Input id="company-model-url" type="url" value={baseUrl} placeholder="https://api.openai.com/v1" required maxLength={2048} readOnly={provider!=='custom'} disabled={disabled} onChange={event=>{clearCatalog();setBaseUrl(event.target.value);}}/><FieldDescription>{provider==='custom'?'OpenAI Chat Completions 兼容接口地址，不含 /chat/completions。':'由供应商目录解析；切换供应商或模型时自动更新，无需手动输入。'}</FieldDescription></Field>
         <Field><FieldLabel htmlFor="company-model-key">API Key</FieldLabel><div className="flex flex-wrap items-center gap-2"><Input ref={keyInput} id="company-model-key" type={savedKeyVisible?'text':'password'} value={savedKeyVisible?savedKeyMask:apiKey} readOnly={savedKeyVisible} autoComplete="off" placeholder={replacingKey?'输入新的模型供应商 API Key':'输入模型供应商 API Key'} required={!savedKeyVisible} maxLength={4096} disabled={disabled} className="min-w-0 flex-1 basis-60" aria-describedby="company-model-key-help" onChange={event=>{if(!savedKeyVisible){clearCatalog();setApiKey(event.target.value);}}}/>{data.hasKey&&<Button type="button" variant="outline" disabled={disabled} onClick={()=>{clearCatalog();setApiKey('');setReplacingKey(value=>!value);}}>{replacingKey?'取消更换':'更换 API Key'}</Button>}</div><FieldDescription id="company-model-key-help">{data.hasKey?'Key 已加密保存，星号仅表示保存状态，刷新或测试时会自动复用。':'保存后在服务端加密存储，不会回传浏览器。'}</FieldDescription>{data.hasKey&&!savedKeyReusable&&<p role="status" className="text-xs text-muted-foreground">已保存的 Key 属于原供应商，原 Key 不会被发往新域名；如需切换，请更换 API Key。</p>}</Field>
         <div className="flex flex-col gap-3">
           <div><Button type="button" variant="outline" disabled={disabled||listing||!baseUrl.trim()||!hasUsableKey} onClick={()=>void discover()}>{listing&&<Spinner/>}{listing?'正在获取模型列表…':'获取模型列表'}</Button></div>
           {catalogError!=null&&<ErrorNotice error={catalogError}/>}
           {catalog&&(catalog.models.length?<>
             {catalog.models.length>20&&<Field><FieldLabel htmlFor="company-model-search">搜索模型</FieldLabel><Input id="company-model-search" value={catalogSearch} disabled={disabled} placeholder="按模型名称筛选" onChange={event=>setCatalogSearch(event.target.value)}/></Field>}
-            <Field><FieldLabel htmlFor="company-model-options">可用模型</FieldLabel><NativeSelect id="company-model-options" className="w-full min-w-0" value={visibleModels.includes(model)?model:''} disabled={disabled} onChange={event=>{if(event.target.value)setModel(event.target.value);}}><NativeSelectOption value="">请选择模型，或在下方手动填写</NativeSelectOption>{visibleModels.map(id=><NativeSelectOption key={id} value={id}>{id}</NativeSelectOption>)}</NativeSelect><FieldDescription>共 {catalog.models.length} 个模型{catalogSearch.trim()?`，匹配 ${visibleModels.length} 个`:''}；选择后填入 Model ID，不会自动保存。{catalog.truncated&&'列表较大，仅显示部分。'}</FieldDescription></Field>
+            <Field><FieldLabel htmlFor="company-model-options">可用模型</FieldLabel><NativeSelect id="company-model-options" className="w-full min-w-0" value={visibleModels.includes(model)?model:''} disabled={disabled} onChange={event=>{const id=event.target.value;if(!id)return;setModel(id);const resolved=providerEntry?.models.find(entry=>entry.id===id);if(resolved)setBaseUrl(resolved.baseUrl);}}><NativeSelectOption value="">请选择模型，或在下方手动填写</NativeSelectOption>{visibleModels.map(id=><NativeSelectOption key={id} value={id}>{id}</NativeSelectOption>)}</NativeSelect><FieldDescription>共 {catalog.models.length} 个模型{catalogSearch.trim()?`，匹配 ${visibleModels.length} 个`:''}；选择后填入 Model ID，不会自动保存。{catalog.truncated&&'列表较大，仅显示部分。'}</FieldDescription></Field>
           </>:<p role="status" className="text-sm text-muted-foreground">供应商未返回可用模型。请核对 Key 权限，或从供应商控制台复制 Model ID 手动填写。</p>)}
         </div>
         <Field><FieldLabel htmlFor="company-model-name">模型名称（Model ID）</FieldLabel><Input id="company-model-name" value={model} placeholder="供应商提供的模型 ID" required maxLength={256} disabled={disabled} onChange={event=>setModel(event.target.value)}/><FieldDescription>可手动填写；客服模型需支持流式输出与工具调用，保存后请测试连接。</FieldDescription></Field>

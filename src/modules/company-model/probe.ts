@@ -2,6 +2,7 @@ import type {ApplicationEnv} from '../../http.ts';
 import type {CompanyModelTestFailure} from '../../shared/company-model.ts';
 import {previewFetch,type PreviewEvidence} from '../translations/transport.ts';
 import {modelBaseUrl,modelEndpoint,openModelKey} from './security.ts';
+import {providerRequestHeaders} from './providers.ts';
 import type {ModelRecord} from './storage.ts';
 export type ModelProbeResult={status:'passed'|'failed';failureCode:CompanyModelTestFailure|null;providerStatus:number|null};
 /** Only fixed diagnostic enums and HTTP status escape this one-shot provider request. */
@@ -17,7 +18,7 @@ export async function probeCompanyModel(env:ApplicationEnv['Bindings'],row:Model
     const response=await send(input,init);providerStatus=response.status;return response;
   },{endpoint:modelEndpoint(row.baseUrl),allowedTool:'connection_probe'});
   try{
-    await transport(modelEndpoint(row.baseUrl),{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${key}`},
+    await transport(modelEndpoint(row.baseUrl),{method:'POST',headers:{'content-type':'application/json',...providerRequestHeaders(row.provider,crypto.randomUUID()),authorization:`Bearer ${key}`},
       signal:AbortSignal.any([signal,timeout]),body:JSON.stringify({model:row.model,stream:true,stream_options:{include_usage:true},
         messages:[{role:'user',content:'This is an installation connectivity test, not a customer conversation. Call connection_probe with ok=true.'}],
         tools:[{type:'function',function:{name:'connection_probe',description:'Confirm model tool support.',parameters:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false}}}],

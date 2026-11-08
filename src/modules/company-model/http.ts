@@ -9,19 +9,26 @@ import { auditedChange,type AuditOutcome } from '../audit/operation.ts';
 import { readCompanyModel,insertCompanyModel,claimModelTest,readModelTest,claimModelCatalog } from './storage.ts';
 import { modelBaseUrl,sealModelKey,openModelKey } from './security.ts';
 import {listProviderModels,ModelCatalogError} from './catalog.ts';
+import { providerCatalog,resolveProviderModel } from './providers.ts';
 import {probeCompanyModel} from './probe.ts';
 export interface CompanyModelDependencies { modelFetch?:typeof fetch }
 const versionSchema=v.strictObject({expectedVersion:v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(Number.MAX_SAFE_INTEGER-1))});
 async function manager(db:D1Database,actor:SettingsActor){const row=await readCompanySettings(db,actor);return row&&['owner','admin'].includes(row.role);}
 async function view(env:ApplicationEnv['Bindings'],companyId:string):Promise<CompanyModelView>{
   const row=await readCompanyModel(env.DB!,companyId),test=row?await readModelTest(env.DB!,companyId,row.revision):null;
-  return {companyId,version:row?.revision??0,baseUrl:row?.baseUrl??null,model:row?.model??null,hasKey:!!row,
+  return {companyId,version:row?.revision??0,provider:row?.provider??'custom',baseUrl:row?.baseUrl??null,model:row?.model??null,hasKey:!!row,
     encryptionConfigured:!!credentialConfig(env),runtimeEnabled:!!env.CONVERSATION_CONTROLLER&&!!env.AGENT_RUNTIME,
     execution:row?.execution?v.parse(modelExecutionSchema,JSON.parse(row.execution)):null,
     test:test?{status:test.status,testedAt:new Date(test.testedAt).toISOString(),failureCode:test.failureCode,providerStatus:test.providerStatus}:null};
 }
 export function registerCompanyModelRoutes(app:Hono<ApplicationEnv>,deps:CompanyModelDependencies={}){
   const base='/api/companies/:companyId/settings/ai-model';
+  app.get(`${base}/providers`,configured,signedIn,async c=>{
+    const identity=c.get('identitySession'),actor={orgId:c.req.param('companyId')!,actorUserId:identity.user.id,sessionId:identity.session.id},db=c.env.DB!;
+    if(new URL(c.req.url).search)return apiError(c,'INVALID_REQUEST','Unexpected query parameters.',400);
+    const company=await readCompanySettings(db,actor);if(!company||!['owner','admin'].includes(company.role))return apiError(c,'NOT_FOUND','The company model configuration is not available.',404);
+    return jsonResponse(c,{companyId:actor.orgId,providers:providerCatalog().map(entry=>({...entry,models:entry.supported?entry.models.filter(model=>model.api==='openai-completions'):[]}))});
+  });
   app.post(`${base}/models`,configured,limitedBody,signedIn,async c=>{
     const identity=c.get('identitySession'),actor={orgId:c.req.param('companyId')!,actorUserId:identity.user.id,sessionId:identity.session.id},db=c.env.DB!;
     const missing=()=>apiError(c,'NOT_FOUND','The company model configuration is not available.',404);
@@ -88,7 +95,15 @@ export function registerCompanyModelRoutes(app:Hono<ApplicationEnv>,deps:Company
         });
         return result.auditComplete?result.response:apiError(c,'OPERATION_UNCONFIRMED','Read the saved configuration and original test status before continuing.',503);
       }
-      const command=v.parse(companyModelCommandSchema,body),baseUrl=modelBaseUrl(command.baseUrl,c.env);
+      const command=v.parse(companyModelCommandSchema,body),provider=command.provider??'custom';
+      let baseUrl:string|null,api='openai-completions';
+      if(provider==='custom'){
+        baseUrl=modelBaseUrl(command.baseUrl,c.env);
+      }else{
+        const resolved=resolveProviderModel(provider,command.model);
+        if(!resolved)return apiError(c,'MODEL_PROVIDER_UNSUPPORTED','Choose a model that the selected provider offers for OpenAI Chat Completions.',400);
+        api=resolved.model.api;baseUrl=modelBaseUrl(resolved.model.baseUrl,c.env);
+      }
       if(!baseUrl)return apiError(c,'MODEL_URL_REJECTED','Use an approved HTTPS Base URL. Custom gateway hosts require AI_MODEL_ALLOWED_HOSTS at deployment.',400);
       let key=command.apiKey;
       if(!key){
@@ -98,7 +113,7 @@ export function registerCompanyModelRoutes(app:Hono<ApplicationEnv>,deps:Company
       }
       const secret=await sealModelKey(c.env,actor.orgId,expectedVersion+1,baseUrl,command.model,key);
       const result=await auditedChange(audit,async()=>{
-        const saved=await insertCompanyModel(db,actor,expectedVersion,baseUrl,command.model,secret,command.execution);
+        const saved=await insertCompanyModel(db,actor,expectedVersion,provider,api,baseUrl,command.model,secret,command.execution);
         if(!await manager(db,actor))return missing();
         if(!saved)return conflict();
         const latest=await view(c.env,actor.orgId);if(latest.version!==saved.revision)return conflict();

@@ -150,15 +150,15 @@ export class BusinessAgentAuthority implements AgentAuthority {
   }
   async provider(uid: string, input: string, init: { body: string; headers: Record<string,string> }, signal?: AbortSignal): Promise<Response> {
     const row = this.row(uid), definition = await this.describe(uid), body = JSON.parse(init.body) as Record<string,unknown>;
-    let key=this.env.NVAPI_KEY,endpoint=PREVIEW_ENDPOINT;
+    let key=this.env.NVAPI_KEY,endpoint=PREVIEW_ENDPOINT,providerHeaders:Record<string,string>={};
     if(row.kind==='support'){
       const support=this.support(row.run_id).inspect();if(!support)throw new Error('AGENT_AUTHORITY_UNAVAILABLE');
       if(support.run.config.model.provider==='openai-compatible'){
         const config=support.run.config.model;
         if(definition.modelConnection?.baseUrl!==config.connection?.baseUrl||definition.modelId!==config.model
           ||new TextEncoder().encode(init.body).length+4096>config.maxInputTokens)throw new Error('AGENT_MODEL_UNSUPPORTED');
-        const connection=await frozenCompanyProvider(this.env,config,support.run.payload.run.scope.organizationId);
-        key=connection.apiKey;endpoint=connection.endpoint;
+        const connection=await frozenCompanyProvider(this.env,config,support.run.payload.run.scope.organizationId,support.run.payload.run.scope.conversationId);
+        key=connection.apiKey;endpoint=connection.endpoint;providerHeaders=connection.headers;
       }
     } else {
       // 翻译没有独立的部署密钥时，复用公司在「AI 模型」里保存的 NVIDIA 连接。
@@ -196,7 +196,7 @@ export class BusinessAgentAuthority implements AgentAuthority {
         else this.preview(row.run_id).record(evidence);
       },
     },this.send,{ allowedTools: definition.tools.map(tool => tool.name), endpoint });
-    const response = await transport(input,{ method: 'POST', body: init.body, headers: { ...init.headers, authorization: `Bearer ${key}` }, signal });
+    const response = await transport(input,{ method: 'POST', body: init.body, headers: { ...init.headers, ...providerHeaders, authorization: `Bearer ${key}` }, signal });
     if (row.kind === 'support') this.support(row.run_id).deliver(sequence);
     return response;
   }

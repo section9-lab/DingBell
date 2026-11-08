@@ -1,5 +1,4 @@
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
-import type { Model } from '@earendil-works/pi-ai';
 
 /** A model that this deployment can address through the Pi provider catalog. */
 export interface ProviderModel {
@@ -22,19 +21,24 @@ export interface ProviderEntry {
 
 const EXECUTABLE_API = 'openai-completions';
 
-function isChat(model: Model): boolean {
-  return model.type === undefined || model.type === 'chat';
+function displayName(id: string, name: string | undefined): string {
+  const value = typeof name === 'string' ? name.trim() : '';
+  return value && value.isWellFormed() && !/[\u0000-\u001f\u007f]/.test(value) ? value : id;
 }
 
 function buildCatalog(): ProviderEntry[] {
   const entries: ProviderEntry[] = [];
   for (const provider of builtinProviders()) {
     try {
-      const models = provider.getModels().filter(isChat).flatMap(model => {
+      // `getModels()` already reports chat models only.
+      const models = provider.getModels().flatMap(model => {
         if (typeof model.baseUrl !== 'string' || !model.baseUrl || typeof model.id !== 'string' || !model.id) return [];
+        // Account/deployment placeholders (Cloudflare account ID, Azure deployment) are not
+        // executable without extra deployment configuration, so they stay out of the catalog.
+        if (model.baseUrl.includes('{') || model.baseUrl.includes('}')) return [];
         return [{
           id: model.id,
-          name: typeof model.name === 'string' && model.name ? model.name : model.id,
+          name: displayName(model.id, model.name),
           api: model.api,
           baseUrl: model.baseUrl,
           contextWindow: model.contextWindow,

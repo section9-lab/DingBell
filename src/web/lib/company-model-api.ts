@@ -1,9 +1,10 @@
 import * as v from 'valibot';
-import { companyModelViewSchema,companyModelCatalogSchema,type CompanyModelCommand,type CompanyModelCatalogCommand } from '../../shared/company-model.ts';
+import { companyModelViewSchema,companyModelCatalogSchema,companyModelProvidersSchema,type CompanyModelCommand,type CompanyModelCatalogCommand } from '../../shared/company-model.ts';
 import { request,ApiError } from './api.ts';
 const path=(companyId:string)=>`/api/companies/${encodeURIComponent(companyId)}/settings/ai-model`;
 const schema=(companyId:string)=>v.pipe(companyModelViewSchema,v.check(data=>data.companyId===companyId));
 export function readCompanyModel(companyId:string,signal?:AbortSignal){return request(path(companyId),schema(companyId),{signal});}
+export function listCompanyModelProviders(companyId:string,signal?:AbortSignal){return request(path(companyId)+'/providers',v.pipe(companyModelProvidersSchema,v.check(data=>data.companyId===companyId)),{signal});}
 export function saveCompanyModel(companyId:string,body:CompanyModelCommand){return request(path(companyId),schema(companyId),{method:'POST',body:JSON.stringify(body)});}
 export async function listCompanyModels(companyId:string,body:CompanyModelCatalogCommand,signal?:AbortSignal){
   try{return await request(path(companyId)+'/models',v.pipe(companyModelCatalogSchema,v.check(data=>data.companyId===companyId&&data.version===body.expectedVersion&&data.baseUrl===body.baseUrl.replace(/\/$/,''))),{method:'POST',body:JSON.stringify(body),signal});}

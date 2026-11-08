@@ -141,3 +141,30 @@ test('company models require reviewed prices before new direct-reply execution',
  assert.equal((await resolveSupportConfiguration(env,'company'))?.config.model.promptVersion,'support-reply-v2');
  assert.equal((await resolveSupportConfiguration(env,'company'))?.config.maxGenerations,2);
 });
+
+test('pi providers resolve their bundled endpoint and add provider routing headers',{timeout:30000},async t=>{
+ let headers:Headers|undefined;
+ const f=await fixture(async(_input,init)=>{headers=new Headers(init?.headers);return success();});t.after(f.close);
+ const providers=await(await f.request('/providers')).json() as any;
+ const go=providers.providers.find((entry:any)=>entry.id==='opencode-go');
+ assert.ok(go,'the bundled catalog must expose opencode-go');assert.equal(go.supported,true);
+ assert.ok(go.models.some((entry:any)=>entry.id==='deepseek-v4-pro'));
+ const expectedBaseUrl=go.models.find((entry:any)=>entry.id==='deepseek-v4-pro').baseUrl;
+ const providerCommand={expectedVersion:0,provider:'opencode-go',baseUrl:'https://draft.invalid/v1',model:'deepseek-v4-pro',apiKey:'synthetic-private-model-key',execution:null};
+ const saved=await f.request('',providerCommand);assert.equal(saved.status,200,await saved.clone().text());
+ const row=(await readCompanyModel(f.DB,'company'))!;
+ assert.equal(row.provider,'opencode-go');assert.equal(row.api,'openai-completions');
+ assert.equal(row.baseUrl,expectedBaseUrl);
+ assert.equal((await f.request('',providerCommand)).status,409);
+ const probe=await f.request('/test',{expectedVersion:1});assert.equal(probe.status,200,await probe.clone().text());
+ assert.equal((await probe.json() as any).test.status,'passed');
+ assert.match(headers?.get('x-opencode-session')??'',/^[0-9a-f-]{36}$/);
+});
+
+test('providers without an executable OpenAI-compatible surface are rejected before any write',{timeout:30000},async t=>{
+ const f=await fixture();t.after(f.close);
+ const response=await f.request('',{expectedVersion:0,provider:'anthropic',baseUrl:'https://api.anthropic.com',model:'claude-sonnet-4-5',apiKey:'synthetic-private-model-key',execution:null});
+ assert.equal(response.status,400);
+ assert.equal((await response.json() as any).error.code,'MODEL_PROVIDER_UNSUPPORTED');
+ assert.equal(await f.DB.prepare('SELECT COUNT(*) AS n FROM company_ai_model_revision').first('n'),0);
+});
