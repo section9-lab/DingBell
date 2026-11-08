@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Languages, Send, X } from 'lucide-react';
+import { REPLY_BODY_MAX } from '../../shared/reply-body.ts';
 import { ApiError } from '../lib/api';
 import {
   isValidConversationReplyBody, readConversationReplies, readConversationReply,
@@ -66,7 +67,7 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
   const replies = useQuery({
     queryKey: ['conversation-replies', companyId, conversationId],
     queryFn: ({ signal }) => readConversationReplies(companyId, conversationId, signal),
-    enabled: !pending, gcTime: 0, retry: false, refetchInterval: 5_000,
+    enabled: !pending, gcTime: 0, refetchInterval: 5_000,
   });
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   useEffect(() => {
@@ -89,8 +90,8 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
   const exhausted = [view.state.version, view.state.sequence].some(value => value >= Number.MAX_SAFE_INTEGER);
   // composing：可以在这里写草稿、翻译。sendable：还满足对外发送的全部条件。
   const composing = !!data && identityConfirmed && current && data.historyReady && view.state.lifecycle === 'open' && !exhausted
-    && (view.state.reception === 'human' || view.state.reception === 'paused');
-  const ready = composing && view.state.reception === 'human' && data!.readiness.allowed;
+    && view.state.reception === 'human';
+  const ready = composing && data!.readiness.allowed;
   const valid = isValidConversationReplyBody(body);
   const translationMatches = !!translation && translation.status === 'ready' && translation.source === body;
   const usingTranslation = translationMatches && isValidConversationReplyBody(translationText);
@@ -101,10 +102,9 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
     : exhausted ? '会话版本已达到上限，请联系部署管理员。'
       : !data ? '正在确认回复条件。' : !current ? '会话状态已变化，请刷新回复状态。'
         : !data.historyReady ? '正在整理已有发送记录，完成后可继续回复。'
-          : view.state.reception === 'paused' ? '会话当前处于暂停状态。点上方「开始人工回复」后即可发送。'
-            : data.readiness.code === 'OUTBOUND_DISABLED' ? '尚未开启对外发送，消息发不出去；草稿和译文可以正常保留。'
-              : data.readiness.code === 'CAPABILITY_UNVERIFIED' ? '店铺的回复能力尚未验证或已过期，请在店铺管理检查。'
-                : data.readiness.code === 'REPLY_UNAVAILABLE' ? '当前店铺或会话暂时无法回复，请检查连接与会话状态。' : null;
+          : data.readiness.code === 'OUTBOUND_DISABLED' ? '尚未开启对外发送，消息发不出去；草稿和译文可以正常保留。'
+            : data.readiness.code === 'CAPABILITY_UNVERIFIED' ? '店铺的回复能力尚未验证或已过期，请在店铺管理检查。'
+              : data.readiness.code === 'REPLY_UNAVAILABLE' ? '当前店铺或会话暂时无法回复，请检查连接与会话状态。' : null;
 
   async function enableOutbound() {
     if (!storeId || outboundBusy) return;
@@ -257,9 +257,7 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
   return <div role="group" aria-label="回复编辑器" className="flex shrink-0 flex-col gap-2 border-t px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <span className="text-sm font-medium">回复消费者</span>
-      <span className="text-xs text-muted-foreground">{view.state.reception === 'paused'
-        ? '可以在这里起草并翻译；点上方「开始人工回复」后即可发送。'
-        : '消息会直接发送给 Ozon，发送前可翻译成俄语。'}</span>
+      <span className="text-xs text-muted-foreground">消息会直接发送给 Ozon，发送前可翻译成俄语。</span>
     </div>
     {!identityConfirmed ? <p role="status" className="text-xs text-muted-foreground">正在确认当前成员身份，暂不展示本机提交内容。</p>
       : journal.state === 'blocked' ? <Alert variant="destructive"><AlertDescription>本机提交记录无法读取，已暂停新发送。请联系管理员核对已有消息，避免重复发送。</AlertDescription></Alert>
@@ -273,9 +271,9 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
         </AlertDescription></Alert>
           : <form onSubmit={event => { event.preventDefault(); send(); }}>
             <Textarea ref={draftInput} id="conversation-reply-body" aria-label="回复原文" value={body} onChange={event => changeBody(event.target.value)}
-              disabled={pending || checking || !composing} aria-invalid={!!body && !valid} maxLength={1000} rows={3} className="max-h-40 min-h-20" placeholder="输入要发送给消费者的内容…" />
+              disabled={pending || checking || !composing} aria-invalid={!!body && !valid} maxLength={REPLY_BODY_MAX} rows={3} className="max-h-40 min-h-20" placeholder="输入要发送给消费者的内容…" />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">{body.length} / 1000 字符</span>
+              <span className="text-xs text-muted-foreground">{body.length} / {REPLY_BODY_MAX} 字符</span>
               <div className="flex flex-wrap items-center gap-2">
                 <Button type="button" size="sm" variant="outline" disabled={translationDisabled || !valid || translationJournal.state !== 'none' || usingTranslation}
                   onClick={() => void translate({ requestId: crypto.randomUUID(), source: body, sourceRevision: draft.current.revision }, 'new')}>
@@ -292,7 +290,7 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
                 <Button type="button" size="xs" variant="ghost" onClick={resetTranslation}><X data-icon="inline-start" />改用原文</Button>
               </div>
               <Textarea lang="ru" aria-label="俄语译文" value={translationText} onChange={event => setTranslationText(event.target.value)}
-                disabled={pending || checking} maxLength={1000} rows={3} className="mt-2 max-h-40 min-h-20 border-0 bg-transparent shadow-none" />
+                disabled={pending || checking} maxLength={REPLY_BODY_MAX} rows={3} className="mt-2 max-h-40 min-h-20 border-0 bg-transparent shadow-none" />
             </div>}
             {!!translation && !translationMatches && <p role="status" className="mt-2 text-xs text-muted-foreground">原文已修改，译文未更新。请重新翻译，或直接发送原文。</p>}
             {translationMatches && !usingTranslation && <p role="status" className="mt-2 text-xs text-muted-foreground">译文为空，将发送原文。</p>}

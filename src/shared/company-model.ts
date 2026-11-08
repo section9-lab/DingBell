@@ -8,14 +8,15 @@ export type CompanyModelCatalogCommand=v.InferOutput<typeof companyModelCatalogC
 export type CompanyModelCatalog=v.InferOutput<typeof companyModelCatalogSchema>;
 const amount=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(1_000_000_000_000));
 export const modelExecutionLimits={input:{min:16384,max:1_000_000},output:{min:1,max:2048},generations:{min:1,max:8}} as const;
-export const defaultModelGenerations=3;
+export const defaultModelGenerations=6;
 export const modelExecutionSchema=v.strictObject({
   maxInputTokens:v.pipe(v.number(),v.integer(),v.minValue(modelExecutionLimits.input.min),v.maxValue(modelExecutionLimits.input.max)),
   maxOutputTokens:v.pipe(v.number(),v.integer(),v.minValue(modelExecutionLimits.output.min),v.maxValue(modelExecutionLimits.output.max)),
   maxGenerations:v.optional(v.pipe(v.number(),v.integer(),v.minValue(modelExecutionLimits.generations.min),v.maxValue(modelExecutionLimits.generations.max))),
   inputMicrosPerMillion:amount,outputMicrosPerMillion:amount,cacheReadMicrosPerMillion:amount,cacheWriteMicrosPerMillion:amount,
-  // A saved connection and reviewed prices never silently authorize customer delivery.
-  autoReply:v.optional(v.boolean(),false),
+  // Deprecated compatibility field for historical rows. New runs always use support-reply-v2;
+  // the runtime ignores this value and the UI no longer exposes a draft mode.
+  autoReply:v.optional(v.boolean()),
 });
 export const companyModelCommandSchema=v.strictObject({expectedVersion:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1)),
   baseUrl:v.pipe(v.string(),v.minLength(1),v.maxLength(2048)),model:label,

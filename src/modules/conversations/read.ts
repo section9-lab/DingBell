@@ -1,9 +1,11 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import { storeAccess, type StoreActor } from '../stores/storage.ts';
 import type { ConversationDetail, ConversationListOptions, ConversationListResult, ConversationSummary, ConversationWorkflow, MessageListOptions, MessageListResult, MessagePreview, MessageUpdatesResult, MessageView } from './read-types.ts';
 
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
-const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 const searchSchema=v.strictObject({field:v.picklist(['all','thread','order']),value:identifier});
 const queueSchema=v.picklist(['all','mine','unassigned']);
 const stateFilterSchema=v.picklist(['all','needs_reply','waiting_customer','waiting_internal','resolved']);
@@ -113,7 +115,7 @@ export async function listConversations(db:D1Database,actor:StoreActor,options:C
   // Counts and the page share one snapshot. Expand message bodies and member names only after the page limit.
   const rows=(await db.prepare(`WITH viewer AS (
       SELECT member.id AS viewerMemberId FROM member JOIN user ON user.id=member.user_id JOIN session ON session.user_id=member.user_id
-      WHERE member.organization_id=? AND member.user_id=? AND session.id=? AND user.email_verified=1 AND session.expires_at>CAST(unixepoch('subsecond')*1000 AS INTEGER)
+      WHERE member.organization_id=? AND member.user_id=? AND session.id=? AND user.email_verified=1 AND session.expires_at>${NOW_MS}
     ),totals AS (
       SELECT COUNT(*) AS allCount,COUNT(CASE WHEN control.assigned_member_id=viewer.viewerMemberId THEN 1 END) AS mineCount,
         COUNT(CASE WHEN control.assigned_member_id IS NULL THEN 1 END) AS unassignedCount ${scopedFrom} WHERE ${where.join(' AND ')}

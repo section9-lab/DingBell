@@ -1,3 +1,4 @@
+import { LoadingState } from './query-state';
 import { useEffect,useRef,useState } from 'react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../lib/api';
@@ -20,11 +21,11 @@ const budgetDescription='用于消费者会话中的 AI 接待。金额为 USD �
 const dayText=(ms:number)=>new Date(ms).toISOString().slice(0,10);
 const auditKindName={ai:'AI 接待',translation:'回复翻译'};
 function BudgetReconciliationOverview({companyId,memberId,date}:{companyId:string;memberId:string;date:(value:string)=>string}){
- const query=useQuery({queryKey:['budget-reconciliation-summary',companyId,memberId],queryFn:({signal})=>readBudgetReconciliationSummary(companyId,memberId,signal),retry:false,gcTime:0,refetchInterval:30000});
+ const query=useQuery({queryKey:['budget-reconciliation-summary',companyId,memberId],queryFn:({signal})=>readBudgetReconciliationSummary(companyId,memberId,signal),gcTime:0,refetchInterval:30000});
  const data=query.data;
  return <Card><CardHeader><CardTitle>预算核对监控</CardTitle><CardDescription>汇总 AI 接待与回复翻译的后台账本核对。仅显示财务状态，不包含客户正文。</CardDescription></CardHeader>
   <CardContent className="flex flex-col gap-4">
-   {!data?(query.isPending?<p role="status" className="flex items-center gap-2 text-sm"><Spinner />正在读取核对状态…</p>:<ErrorNotice error={query.error} />):<>
+   {!data?(query.isPending?<LoadingState>正在读取核对状态…</LoadingState>:<ErrorNotice error={query.error} />):<>
     <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">{[['已跟踪',data.totals.tracked],['账本一致',data.totals.balanced],['待首次核对',data.totals.pending],['存在差异',data.totals.mismatch],['后台不可用',data.totals.unavailable]].map(([label,value])=><div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 text-sm font-medium">{value}</dd></div>)}</dl>
     {data.totals.alerting>0&&<Alert variant="destructive" role="alert"><AlertTitle>有 {data.totals.alerting} 个预算需要复核</AlertTitle><AlertDescription>异常会按退避计划继续核对，但不会自动修改账本、释放预留或重发供应商请求。</AlertDescription></Alert>}
     {!!data.items.length&&<ul className="flex flex-col gap-2" aria-label="待核对预算">{data.items.map(item=><li key={`${item.kind}:${item.budgetId}`} className="rounded-md border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span>{auditKindName[item.kind]} · <span className="break-all font-mono text-xs">{item.budgetId}</span></span><Badge variant="outline">{item.consecutiveFailures>0?'后台不可用':item.status==='mismatch'?(item.consecutiveMismatches>1?'持续差异':'发现差异'):'待首次核对'}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{item.observedAt===null?'尚无成功快照':`最近成功：${date(new Date(item.observedAt).toISOString())}`} · 下次计划：{date(new Date(item.nextDueAt).toISOString())}</p></li>)}</ul>}
@@ -37,18 +38,18 @@ function BudgetReconciliationOverview({companyId,memberId,date}:{companyId:strin
 export function BudgetPanel({companyId}:{companyId:string}){
   const settings=useCompanySettings(),[pages,setPages]=useState<string[]>([]),client=useQueryClient(),cursor=pages.at(-1);
   const key=['ai-budgets',...settings.queryKey,cursor??''];
-  const query=useQuery<AiBudgetWorkspace>({queryKey:key,queryFn:({signal})=>readAiBudgets(companyId,cursor,signal),retry:false,gcTime:0,refetchInterval:10000});
+  const query=useQuery<AiBudgetWorkspace>({queryKey:key,queryFn:({signal})=>readAiBudgets(companyId,cursor,signal),gcTime:0,refetchInterval:10000});
   async function refresh(){await client.cancelQueries({queryKey:key});return (await query.refetch()).isSuccess;}
   if(!query.data||query.isError)return <Card><CardHeader><CardTitle>{budgetTitle}</CardTitle><CardDescription>{budgetDescription}</CardDescription></CardHeader><CardContent>
-    {query.isPending?<p role="status" className="flex items-center gap-2 text-sm"><Spinner />正在读取预算…</p>:<ErrorNotice error={query.error} />}
+    {query.isPending?<LoadingState>正在读取预算…</LoadingState>:<ErrorNotice error={query.error} />}
   </CardContent><CardFooter><Button variant="outline" disabled={query.isFetching} onClick={()=>void refresh()}>读取当前预算</Button></CardFooter></Card>;
   return <BudgetWorkspace key={query.data.viewerMemberId} data={query.data} fetching={query.isFetching} refresh={refresh} date={settings.date}
     page={pages.length+1} previous={pages.length?()=>setPages(p=>p.slice(0,-1)):undefined} next={query.data.nextBefore?()=>setPages(p=>[...p,query.data!.nextBefore!]):undefined} />;
 }
 function BudgetReconciliation({companyId,memberId,budgetId,date}:{companyId:string;memberId:string;budgetId:string;date:(value:string)=>string}){
- const query=useQuery({queryKey:['budget-reconciliation',companyId,memberId,'ai',budgetId],queryFn:({signal})=>readBudgetAudit(companyId,memberId,'ai',budgetId,signal),retry:false,gcTime:0,refetchInterval:30000});
+ const query=useQuery({queryKey:['budget-reconciliation',companyId,memberId,'ai',budgetId],queryFn:({signal})=>readBudgetAudit(companyId,memberId,'ai',budgetId,signal),gcTime:0,refetchInterval:30000});
  if(!query.data)return <section className="flex flex-col gap-2 rounded-lg border p-4" aria-label="预算账本核对"><h3 className="text-sm font-medium">账本核对</h3>
-  {query.isPending?<p role="status" className="flex items-center gap-2 text-sm"><Spinner />正在核对预算账本…</p>:<ErrorNotice error={query.error} />}
+  {query.isPending?<LoadingState>正在核对预算账本…</LoadingState>:<ErrorNotice error={query.error} />}
   <Button className="self-start" variant="outline" size="sm" disabled={query.isFetching} onClick={()=>void query.refetch()}>重新核对</Button></section>;
  const a=query.data,m=a.monitoring,repeated=a.status==='mismatch'&&(m?.consecutiveMismatches??0)>=2;
  return <section className="flex flex-col gap-3 rounded-lg border p-4" aria-label="预算账本核对">

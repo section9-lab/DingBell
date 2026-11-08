@@ -2,11 +2,12 @@ import * as v from 'valibot';
 import { readAiExecution } from './storage.ts';
 import type { ControlScope } from '../conversations/control-types.ts';
 import { safeImage } from '../conversations/context.ts';
+import { SUPPORT_KNOWLEDGE_VERSIONS } from '../../shared/ai-versions.ts';
 
 const identifier = v.pipe(v.string(), v.minLength(1), v.maxLength(256));
 const snapshotTime = v.pipe(v.string(), v.maxLength(64));
 /** Product facts are merchant data, not instructions; scope and identity are resolved by the application. */
-const productVersions = ['support-knowledge-v1', 'support-reply-v1'] as const;
+const productVersions = SUPPORT_KNOWLEDGE_VERSIONS;
 
 export const aiProductContextSchema = v.pipe(v.strictObject({
   status: v.picklist(['matched', 'not_provided', 'not_imported', 'ambiguous', 'unavailable', 'unconfirmed']),
@@ -44,11 +45,12 @@ const at = (value: number | null) => value === null ? null : new Date(value).toI
  * because Ozon attaches a SKU only to the message a chat was opened from, from the most
  * recent inbound message in the same conversation. Order status stays out of this tool.
  */
-export async function readAiProductContext(env: { DB?: D1Database }, scope: ControlScope, runId: string): Promise<AiProductContext> {
+export async function readAiProductContext(env: { DB?: D1Database }, scope: ControlScope, runId: string, options: { allowClosed?: boolean } = {}): Promise<AiProductContext> {
   const db = env.DB;
   if (!db) return nothing('unavailable');
   const execution = await readAiExecution(db, scope, runId);
-  if (!execution || execution.closure) return nothing('unavailable');
+  if (!execution || (execution.closure && !options.allowClosed)) return nothing('unavailable');
+  if (!options.allowClosed && Date.now() >= execution.payload.run.deadlineAt) return nothing('unavailable');
   if (execution.payload.run.schemaVersion === 2) return nothing('unavailable');
   if (!productVersions.includes(execution.config.model.promptVersion as typeof productVersions[number])) return nothing('unavailable');
   if (JSON.stringify(execution.payload.run.scope) !== JSON.stringify(scope)) return nothing('unconfirmed');

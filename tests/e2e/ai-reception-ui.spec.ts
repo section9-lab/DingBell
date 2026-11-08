@@ -22,13 +22,13 @@ const host=(page:Page)=>page.getByRole('button',{name:'开启 AI 托管',exact:t
 const unhost=(page:Page)=>page.getByRole('button',{name:'取消 AI 托管',exact:true});
 const draft=(page:Page)=>page.getByRole('textbox',{name:'回复原文',exact:true});
 test('hosting toggles between AI and a human composer without sending anything',async({page,reception})=>{
- await expect(page.getByText('AI 托管已暂停',{exact:true})).toBeVisible();await expect(draft(page)).toHaveCount(0);
+ await expect(page.getByText('未接管',{exact:true})).toBeVisible();await expect(draft(page)).toHaveCount(0);
  await page.getByRole('button',{name:'开始人工回复',exact:true}).click();
- await expect(page.getByText('AI 托管已关闭',{exact:true})).toBeVisible();await expect(draft(page)).toBeEnabled();
+ await expect(page.getByText('人工回复中',{exact:true})).toBeVisible();await expect(draft(page)).toBeEnabled();
  await host(page).click();await expect(page.getByText('AI 托管中',{exact:true})).toBeVisible();
  await expect(page.getByText('AI 已开始托管，只处理此后的新消息。',{exact:true})).toBeVisible();
  await expect(draft(page)).toHaveCount(0);
- await unhost(page).click();await expect(page.getByText('AI 托管已关闭',{exact:true})).toBeVisible();await expect(draft(page)).toBeEnabled();
+ await unhost(page).click();await expect(page.getByText('人工回复中',{exact:true})).toBeVisible();await expect(draft(page)).toBeEnabled();
  await page.setViewportSize({width:1366,height:768});
  await page.screenshot({path:test.info().outputPath('hosting-human-laptop.png'),fullPage:true,animations:'disabled'});
  await page.setViewportSize({width:390,height:844});
@@ -41,7 +41,7 @@ test('refresh recovers a lost acknowledgement without resubmission or undoing a 
  await host(page).click();await expect(page.getByRole('button',{name:'核对结果',exact:true})).toBeEnabled();expect(posts).toBe(1);
  await reception.post(`${reception.path}/commands`,{commandId:crypto.randomUUID(),expectedVersion:1,action:'takeover'});await page.reload();
  await expect(page.getByText('已确认；会话随后有更新，以当前状态为准。',{exact:true})).toBeVisible();
- await expect(page.getByText('AI 托管已关闭',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'核对结果',exact:true})).toHaveCount(0);expect(posts).toBe(1);
+ await expect(page.getByText('人工回复中',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'核对结果',exact:true})).toHaveCount(0);expect(posts).toBe(1);
 });
 test('an unreceived operation survives reload and retries only on explicit action with its original ID',async({page,reception})=>{
  const bodies:string[]=[];await page.route('**/ai-resumptions',async route=>{bodies.push(route.request().postData()!);if(bodies.length===1)await route.abort();else await route.continue();});

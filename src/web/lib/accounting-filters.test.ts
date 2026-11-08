@@ -9,5 +9,6 @@ test('dates, lane and explicit cost basis survive refresh and retain the store s
  const params=accountingSearch(selected,new URLSearchParams('tab=overview'));assert.equal(params.get('store'),'store');assert.equal(params.get('tab'),'overview');assert.deepEqual(resolveAccountingFilter('store','2026-11-02',params),selected);
 });
 test('invalid periods or modes fall back to a bounded date range',()=>{
- for(const input of ['fromDate=2026-02-30','fromDate=2026-01-01&toDate=2027-11-01','costMode=not-a-mode'])assert.equal(resolveAccountingFilter('store','2026-11-02',new URLSearchParams(input)).fromDate,'2026-10-04');
+ for(const input of ['fromDate=2026-02-30','fromDate=1900-01-01&toDate=2026-11-02','costMode=not-a-mode'])assert.equal(resolveAccountingFilter('store','2026-11-02',new URLSearchParams(input)).fromDate,'2026-10-04');
+ const wide=resolveAccountingFilter('store','2026-11-02',new URLSearchParams('fromDate=2025-01-01&toDate=2026-11-02'));assert.equal(wide.fromDate,'2025-01-01','ranges longer than one year are supported');
 });

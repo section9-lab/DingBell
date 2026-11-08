@@ -4,6 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Skeleton } from './ui/skeleton';
 import { Spinner } from './ui/spinner';
 import { ApiError } from '../lib/api';
+import { parseRoles } from '../lib/roles';
 import { DingBellLogo } from './dingbell-logo';
 
 export function Brand() {
@@ -136,8 +137,9 @@ export function roleLabel(role: string) {
     admin: '管理员',
     member: '成员',
   };
-  return role
-    .split(',')
-    .map((value) => labels[value.trim()] ?? '自定义角色')
-    .join('、');
+  return (
+    parseRoles(role)
+      .map((value) => labels[value] ?? '自定义角色')
+      .join('、') || '自定义角色'
+  );
 }

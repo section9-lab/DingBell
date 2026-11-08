@@ -1,3 +1,4 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 import type {PushView} from '../../shared/ozon-push.ts';
 import {storeAccess,type StoreActor} from '../stores/storage.ts';
 import type {StoreCoordinatorRecord,SyncScope} from '../sync/types.ts';
@@ -59,7 +60,7 @@ export async function claimPushJob(db:D1Database,scope:SyncScope):Promise<PushJo
  return row?{...row,hint:JSON.parse(row.hint) as PushHint,progress:JSON.parse(row.progress) as PushJob['progress'],simulated:!!row.simulated}:null;
 }
 export function pushJobCondition(job:SyncScope&Pick<PushJob,'id'|'generation'|'token'>){return {sql:`EXISTS(SELECT 1 FROM ozon_push_event AS event JOIN store_push_endpoint AS endpoint ON endpoint.store_id=event.store_id AND endpoint.organization_id=event.organization_id
- WHERE event.id=? AND event.organization_id=? AND event.store_id=? AND event.generation=? AND event.state='processing' AND event.lease_token=? AND event.lease_until>CAST(unixepoch('subsecond')*1000 AS INTEGER) AND endpoint.mode='active' AND endpoint.cutover_at IS NOT NULL)`,values:[job.id,job.orgId,job.storeId,job.generation,job.token]};}
+ WHERE event.id=? AND event.organization_id=? AND event.store_id=? AND event.generation=? AND event.state='processing' AND event.lease_token=? AND event.lease_until>${NOW_MS} AND endpoint.mode='active' AND endpoint.cutover_at IS NOT NULL)`,values:[job.id,job.orgId,job.storeId,job.generation,job.token]};}
 export async function finishPushJob(db:D1Database,job:PushJob,state:'completed'|'pending'|'retry'|'ignored'|'failed',options:{code?:string;nextAt?:number;progress?:PushJob['progress'];attempts?:number}={}){
  const guard=pushJobCondition(job),now=Date.now();
  const update=db.prepare(`UPDATE ozon_push_event SET state=?,lease_token=NULL,lease_until=NULL,next_attempt_at=?,progress=?,attempts=?,last_error=?,requires_review=CASE WHEN ?='completed' THEN 0 WHEN ?='message_content_changed' THEN 1 ELSE requires_review END,finished_at=? WHERE id=? AND ${guard.sql} RETURNING id`)
@@ -74,6 +75,17 @@ export async function enqueueReconcile(db:D1Database,actor:StoreActor,storeId:st
   JOIN store_sync_source AS authority ON authority.store_id=store.id AND authority.source=?
   WHERE endpoint.store_id=? AND endpoint.organization_id=? AND endpoint.revision=? AND endpoint.mode='active' AND endpoint.cutover_at IS NOT NULL AND authority.enabled=1 AND authority.credential_version=store.credential_version AND store.status NOT IN ('paused','disconnected') AND ${storeAccess('store.organization_id')}
   ON CONFLICT DO NOTHING RETURNING id`).bind(commandId,`manual:${commandId}`,source,JSON.stringify(hint),now,now,source,storeId,actor.orgId,expectedRevision,actor.actorUserId,actor.sessionId).first();
+}
+/** Internal startup bootstrap: enqueue one explicit reconcile for an eligible source. */
+export async function enqueueBootstrapReconcile(db:D1Database,scope:SyncScope,source:Exclude<PushHint['source'],'none'>){
+ const hint:PushHint={kind:'reconcile',source},now=Date.now();
+ return db.prepare(`INSERT INTO ozon_push_event(id,organization_id,store_id,generation,dedupe_key,notification_type,source,hint,state,next_attempt_at,received_at)
+  SELECT ?,endpoint.organization_id,endpoint.store_id,endpoint.generation,?,'BOOTSTRAP_RECONCILE',?,?,'pending',?,? FROM store_push_endpoint AS endpoint
+  JOIN store ON store.id=endpoint.store_id AND store.organization_id=endpoint.organization_id
+  JOIN store_sync_source AS authority ON authority.store_id=endpoint.store_id AND authority.organization_id=endpoint.organization_id AND authority.source=?
+  WHERE endpoint.store_id=? AND endpoint.organization_id=? AND endpoint.mode='active' AND endpoint.cutover_at IS NOT NULL
+   AND store.status NOT IN ('paused','disconnected') AND authority.enabled=1 AND authority.credential_version=store.credential_version
+  ON CONFLICT DO NOTHING RETURNING id`).bind(crypto.randomUUID(),`bootstrap:${source}`,source,JSON.stringify(hint),now,now,source,scope.storeId,scope.orgId).first<{id:string}>();
 }
 export async function retryPush(db:D1Database,actor:StoreActor,storeId:string,expectedRevision:number,eventId:string){
  return db.prepare(`UPDATE ozon_push_event SET state='pending',attempts=0,last_error=NULL,next_attempt_at=?,lease_token=NULL,lease_until=NULL,finished_at=NULL

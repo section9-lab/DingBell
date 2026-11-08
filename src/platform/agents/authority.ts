@@ -22,12 +22,13 @@ import { replyBodySchema } from '../../modules/conversations/control-state.ts';
 import { getConversationController } from '../../modules/conversations/control-bindings.ts';
 import { createHandoffTool } from '../../modules/conversations/handoff-tool.ts';
 import { createClassificationTool } from '../../modules/conversations/classification-tool.ts';
-import { createKnowledgeTool, createKnowledgeReadTool } from '../../modules/conversations/knowledge-tool.ts';
-import { createProductTool } from '../../modules/conversations/product-tool.ts';
-import { readAiProductContext } from '../../modules/ai-runs/product.ts';
-import { createReplyTool } from '../../modules/conversations/reply-tool.ts';
-import { grepAiKnowledge, readAiKnowledge, reviewAiTextEvidence } from '../../modules/ai-runs/text-knowledge.ts';
-import { prepareAiReply } from '../../modules/ai-runs/reply-intent.ts';
+import { discoverAiKnowledge, readAiKnowledgeFile } from '../../modules/ai-runs/text-knowledge.ts';
+import { createBashTool, createReadTool } from '../../modules/conversations/knowledge-agent-tool.ts';
+import { createProductInfoTool, createOrderInfoTool } from '../../modules/conversations/fact-tool.ts';
+import { createSendMessageTool } from '../../modules/conversations/send-message-tool.ts';
+import { prepareAiMessage } from '../../modules/ai-runs/message-intent.ts';
+import { recordAiProductFact, recordAiOrderFact } from '../../modules/ai-runs/fact-evidence.ts';
+import { SUPPORT_REPLY_V2, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
 import { frozenCompanyProvider } from '../../modules/company-model/runtime.ts';
 
 type Row = { instance_id: string; kind: AgentKind; run_id: string; uid: string; definition: string; fingerprint: string; receipt: string | null };
@@ -129,11 +130,13 @@ export class BusinessAgentAuthority implements AgentAuthority {
     if (work.schemaVersion === 2) return [createClassificationTool(work,controller)] as unknown as CommonTool[];
     const read = (scope: ControlScope, runId: string) => controller.readAiRun(scope,runId);
     const tools: CommonTool[] = [createHandoffTool(work,controller)] as unknown as CommonTool[];
-    if (version && ['support-knowledge-v1','support-reply-v1'].includes(version)) {
-      tools.push(createKnowledgeTool(work,{ search: (scope,runId,query) => grepAiKnowledge(this.env,read,scope,runId,{query:query??work.admission.question}), review: (scope,runId,evidence) => reviewAiTextEvidence(this.env,read,scope,runId,evidence) }) as unknown as CommonTool);
-      tools.push(createKnowledgeReadTool(work,{ read: (scope,runId,documentId) => readAiKnowledge(this.env,read,scope,runId,{documentId}) }) as unknown as CommonTool);
-      tools.push(createProductTool(work,{ read: (scope,runId) => readAiProductContext(this.env,scope,runId) }) as unknown as CommonTool);
-      if (version === 'support-reply-v1') tools.push(createReplyTool(work,{ prepare: (scope,runId,input) => prepareAiReply(this.env,read,scope,runId,input), wakeAiReply: (...args) => controller.wakeAiReply(...args), requestHandoff: (...args) => controller.requestHandoff(...args) }) as unknown as CommonTool);
+    if (version === SUPPORT_REPLY_V2) {
+      tools.push(createBashTool(work,{ run: (scope,runId,command,signal) => discoverAiKnowledge(this.env,read,scope,runId,{command},signal) }) as unknown as CommonTool);
+      tools.push(createReadTool(work,{ read: (scope,runId,input,signal) => readAiKnowledgeFile(this.env,read,scope,runId,input,signal) }) as unknown as CommonTool);
+      tools.push(createProductInfoTool(work,{ read: (scope,runId) => recordAiProductFact(this.env,scope,runId) }) as unknown as CommonTool);
+      tools.push(createOrderInfoTool(work,{ read: (scope,runId) => recordAiOrderFact(this.env,scope,runId) }) as unknown as CommonTool);
+      tools.push(createSendMessageTool(work,{ prepare: (scope,runId,input) => prepareAiMessage(this.env,read,scope,runId,input), wakeAiReply: (...args) => controller.wakeAiReply(...args), requestHandoff: (...args) => controller.requestHandoff(...args) }) as unknown as CommonTool);
+      return tools;
     }
     return tools;
   }
@@ -181,7 +184,7 @@ export class BusinessAgentAuthority implements AgentAuthority {
     let sequence = 0;
     if (row.kind === 'support') {
       const s = this.support(row.run_id).inspect()!;
-      if (s.cancellation || Date.now() >= s.run.payload.run.deadlineAt || (s.run.config.model.promptVersion === 'support-reply-v1' && (this.env.AI_OUTBOUND_ENABLED !== 'true' || this.env.OUTBOUND_ENABLED !== 'true'))) throw new Error('AGENT_AUTHORITY_REVOKED');
+      if (s.cancellation || Date.now() >= s.run.payload.run.deadlineAt || (isOutboundPromptVersion(s.run.config.model.promptVersion) && (this.env.AI_OUTBOUND_ENABLED !== 'true' || this.env.OUTBOUND_ENABLED !== 'true'))) throw new Error('AGENT_AUTHORITY_REVOKED');
       sequence = this.support(row.run_id).begin();
     } else this.preview(row.run_id).spend('generation');
     const transport = previewFetch({

@@ -76,7 +76,7 @@ test('manual reply sends the exact edited body once and records one real control
   expect(control.status()).toBe(200);
   expect((await control.json()).control.state).toMatchObject({ version: 1, lifecycle: 'open', reception: 'human', assignedMemberId: 'owner-a' });
   await page.goto(messageURL(application, history.storeId, history.id));
-  await expect(page.getByText('AI 托管已关闭', { exact: true })).toBeVisible();
+  await expect(page.getByText('人工回复中', { exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: '回复原文', exact: true })).toBeVisible();
   const sent = submissions(page), body = '  Здравствуйте!\n请确认规格。\n<img src="https://example.invalid/no-image">  ';
   const draft = page.getByRole('textbox', { name: '回复原文', exact: true });
@@ -103,7 +103,7 @@ test('manual reply sends the exact edited body once and records one real control
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('textbox', { name: '回复原文', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '发送', exact: true })).toHaveCount(0);
-  await expect(page.getByText('AI 托管已关闭', { exact: true })).toBeInViewport();
+  await expect(page.getByText('人工回复中', { exact: true })).toBeInViewport();
   await screenshot(page, 'reply-composer-ready-mobile');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await screenshot(page, 'reply-sent-mobile');

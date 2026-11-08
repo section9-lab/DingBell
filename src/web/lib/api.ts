@@ -113,7 +113,7 @@ const messages: Record<string, string> = {
   POLICY_OVERLAP: '同一店铺和业务阶段已有相同优先级的自动回复策略，请调整范围或优先级。',
   POLICY_STORE_UNAVAILABLE: '策略中的店铺已不可用，请重新选择店铺后保存。',
   INVALID_REQUEST: '填写的信息不完整或格式不正确，请检查后重试。',
-  ACCOUNTING_LIMIT: '当前范围超过 1000 个包裹或费用记录，请缩短日期范围后重试。',
+  ACCOUNTING_LIMIT: '当前范围超过 5000 个包裹或费用记录，请缩短日期范围后重试。',
   ACCOUNTING_CONFLICT: '请检查商品 ID 是否属于当前店铺、生效日期是否晚于已有版本，或费用记录是否重复/已作废。请刷新核对；首次录入可以选择历史日期。',
   MAIL_NOT_CONFIGURED: '邮件服务尚未配置，请联系部署管理员。',
   MAIL_DELIVERY_FAILED: '邮件服务暂未确认接收，请稍后重试。',

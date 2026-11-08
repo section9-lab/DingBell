@@ -14,7 +14,8 @@ import {
   useQuery,
 } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
-import { ApiError, activateCompany, readIdentity, signOut } from './lib/api';
+import { ApiError, activateCompany, readIdentity, signOut, type Company } from './lib/api';
+import { isWorkspacePath, workspaceRoutes, workspaceSection, type WorkspaceSection } from './lib/routes';
 import {
   AuthFrame,
   ErrorNotice,
@@ -22,6 +23,7 @@ import {
   WorkspaceLoadingPage,
 } from './components/identity-shared';
 import { CompanySettingsProvider } from './components/company-settings-provider';
+import { ToastProvider } from './components/ui/toast';
 import { Button } from './components/ui/button';
 import { LoginPage } from './pages/login';
 import { invitationReturnTo } from './lib/account-links';
@@ -29,7 +31,6 @@ import { clearPendingReplies } from './lib/conversation-reply-pending';
 import { clearPendingPreviews } from './lib/conversation-preview-pending';
 import { clearAiResumptions } from './lib/ai-reception-pending';
 import { clearReplyDrafts } from './lib/conversation-draft';
-import { clearConversationPositions } from './lib/conversation-position';
 
 const loadBootstrap = () => import('./pages/bootstrap');
 const loadAccountEmail = () => import('./pages/account-email');
@@ -64,9 +65,17 @@ const InvitationPage = lazy(async () => ({ default: (await loadInvitation()).Inv
 const CompanySelection = lazy(async () => ({ default: (await loadWorkspace()).CompanySelection }));
 const WorkspacePage = lazy(async () => ({ default: (await loadWorkspace()).WorkspacePage }));
 const workspaceLoaders: Record<string, () => Promise<unknown>> = {
-  '/workspace/team': loadTeam, '/workspace/stores': loadStores, '/workspace/settings': loadCompanySettings,
-  '/workspace/knowledge': loadKnowledge, '/workspace/capabilities': loadCapabilities, '/workspace/reply-policies': loadReplyPolicies, '/workspace/messages': loadMessages,
-  '/workspace/products': loadProducts, '/workspace/orders': loadOrders, '/workspace/accounting': loadAccounting, '/workspace/activity': loadActivity,
+  [workspaceRoutes.team]: loadTeam,
+  [workspaceRoutes.stores]: loadStores,
+  [workspaceRoutes.settings]: loadCompanySettings,
+  [workspaceRoutes.knowledge]: loadKnowledge,
+  [workspaceRoutes.capabilities]: loadCapabilities,
+  [workspaceRoutes.policies]: loadReplyPolicies,
+  [workspaceRoutes.messages]: loadMessages,
+  [workspaceRoutes.products]: loadProducts,
+  [workspaceRoutes.orders]: loadOrders,
+  [workspaceRoutes.accounting]: loadAccounting,
+  [workspaceRoutes.activity]: loadActivity,
 };
 function preloadWorkspaceRoute(pathname: string) {
   return Promise.allSettled([loadWorkspace(), workspaceLoaders[pathname]?.() ?? Promise.resolve()]);
@@ -90,7 +99,7 @@ function createClient() {
 
 export function App() {
   const location = useLocation();
-  const workspaceRoute = location.pathname === '/' || location.pathname === '/workspace' || location.pathname.startsWith('/workspace/');
+  const workspaceRoute = isWorkspacePath(location.pathname);
   useEffect(() => { if (workspaceRoute) void preloadWorkspaceRoute(location.pathname); }, [workspaceRoute, location.pathname]);
   const [boundary, setBoundary] = useState(() => ({
     client: createClient(),
@@ -108,16 +117,18 @@ export function App() {
   }
   return (
     <QueryClientProvider client={boundary.client}>
-      <Suspense fallback={workspaceRoute ? <WorkspaceLoadingPage /> : <LoadingPage />}>
-        <Routes>
-          <Route path="/setup" element={<BootstrapPage reset={reset} />} />
-          <Route path="/verify-email" element={<ConfirmAccountPage key="verify" kind="verification" />} />
-          <Route path="/reset-password" element={<ConfirmAccountPage key="reset" kind="password" />} />
-          <Route path="/forgot-password" element={<AccountEmailPage key="forgot" kind="password" />} />
-          <Route path="/resend-verification" element={<AccountEmailPage key="resend" kind="verification" />} />
-          <Route path="*" element={<IdentityPages key={boundary.version} reset={reset} notice={boundary.notice} />} />
-        </Routes>
-      </Suspense>
+      <ToastProvider>
+        <Suspense fallback={workspaceRoute ? <WorkspaceLoadingPage /> : <LoadingPage />}>
+          <Routes>
+            <Route path="/setup" element={<BootstrapPage reset={reset} />} />
+            <Route path="/verify-email" element={<ConfirmAccountPage key="verify" kind="verification" />} />
+            <Route path="/reset-password" element={<ConfirmAccountPage key="reset" kind="password" />} />
+            <Route path="/forgot-password" element={<AccountEmailPage key="forgot" kind="password" />} />
+            <Route path="/resend-verification" element={<AccountEmailPage key="resend" kind="verification" />} />
+            <Route path="*" element={<IdentityPages key={boundary.version} reset={reset} notice={boundary.notice} />} />
+          </Routes>
+        </Suspense>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -130,7 +141,7 @@ function IdentityPages({
   notice?: unknown;
 }) {
   const location = useLocation();
-  const workspaceRoute = location.pathname === '/' || location.pathname === '/workspace' || location.pathname.startsWith('/workspace/');
+  const workspaceRoute = isWorkspacePath(location.pathname);
   const online = useSyncExternalStore(subscribeOnline, () =>
     onlineManager.isOnline(),
   );
@@ -165,7 +176,7 @@ function IdentityPages({
     const userId = identity.data?.session?.user.id;
     void change(async () => {
       await signOut();
-      if (userId) { try { clearPendingReplies(window.sessionStorage, { userId }); clearPendingPreviews(window.sessionStorage, { userId }); clearAiResumptions(window.sessionStorage, { userId }); clearReplyDrafts(window.sessionStorage, { userId }); clearConversationPositions(window.sessionStorage, { userId }); } catch { /* Storage may be unavailable. */ } }
+      if (userId) { try { clearPendingReplies(window.sessionStorage, { userId }); clearPendingPreviews(window.sessionStorage, { userId }); clearAiResumptions(window.sessionStorage, { userId }); clearReplyDrafts(window.sessionStorage, { userId }); } catch { /* Storage may be unavailable. */ } }
     });
   }
   if (!online || identity.isPaused)
@@ -200,6 +211,7 @@ function IdentityPages({
       </AuthFrame>
     );
   const data = identity.data;
+  const section = workspaceSection(location.pathname);
   const active = data.companies?.companies.find(
     (company) => company.id === data.companies?.activeCompanyId,
   );
@@ -216,9 +228,11 @@ function IdentityPages({
       }}
       logout={logout}
       notice={notice}
-      section={location.pathname === '/workspace/accounting' ? 'accounting' : location.pathname === '/workspace/capabilities' ? 'capabilities' : location.pathname === '/workspace/knowledge' ? 'knowledge' : location.pathname === '/workspace/reply-policies' ? 'policies' : location.pathname === '/workspace/settings' ? 'settings' : location.pathname === '/workspace/team' ? 'team' : location.pathname === '/workspace/stores' ? 'stores' : location.pathname === '/workspace/messages' ? 'messages' : location.pathname === '/workspace/products' ? 'products' : location.pathname === '/workspace/orders' ? 'orders' : location.pathname === '/workspace/activity' ? 'activity' : 'home'}
+      section={section}
     >
-      {location.pathname === '/workspace/accounting' ? <AccountingPage key={active.id} company={active} /> : location.pathname === '/workspace/capabilities' ? <CapabilitiesPage company={active} refresh={reset} /> : location.pathname === '/workspace/knowledge' ? <KnowledgePage company={active} refresh={reset} /> : location.pathname === '/workspace/reply-policies' ? <ReplyPoliciesPage company={active} refresh={reset} /> : location.pathname === '/workspace/settings' ? <CompanySettingsPage /> : location.pathname === '/workspace/team' ? <TeamPage company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/stores' ? <StoresPage company={active} refresh={reset} /> : location.pathname === '/workspace/messages' ? <MessagesPage company={active} userId={data.session.user.id} refresh={reset} /> : location.pathname === '/workspace/products' ? <ProductsPage company={active} /> : location.pathname === '/workspace/orders' ? <OrdersPage company={active} /> : location.pathname === '/workspace/activity' ? <ActivityPage company={active} refresh={reset} /> : undefined}
+      {section === 'home' ? undefined : (
+        <WorkspaceRouteView section={section} company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} reset={reset} />
+      )}
     </WorkspacePage>
     </CompanySettingsProvider>
   ) : (
@@ -257,18 +271,18 @@ function IdentityPages({
           )
         }
       />
-      <Route path="/workspace" element={workspaceView} />
-      <Route path="/workspace/team" element={workspaceView} />
-      <Route path="/workspace/stores" element={workspaceView} />
-      <Route path="/workspace/settings" element={workspaceView} />
-      <Route path="/workspace/reply-policies" element={workspaceView} />
-      <Route path="/workspace/knowledge" element={workspaceView} />
-      <Route path="/workspace/capabilities" element={workspaceView} />
-      <Route path="/workspace/messages" element={workspaceView} />
-      <Route path="/workspace/products" element={workspaceView} />
-      <Route path="/workspace/orders" element={workspaceView} />
-      <Route path="/workspace/accounting" element={workspaceView} />
-      <Route path="/workspace/activity" element={workspaceView} />
+      <Route path={workspaceRoutes.home} element={workspaceView} />
+      <Route path={workspaceRoutes.team} element={workspaceView} />
+      <Route path={workspaceRoutes.stores} element={workspaceView} />
+      <Route path={workspaceRoutes.settings} element={workspaceView} />
+      <Route path={workspaceRoutes.policies} element={workspaceView} />
+      <Route path={workspaceRoutes.knowledge} element={workspaceView} />
+      <Route path={workspaceRoutes.capabilities} element={workspaceView} />
+      <Route path={workspaceRoutes.messages} element={workspaceView} />
+      <Route path={workspaceRoutes.products} element={workspaceView} />
+      <Route path={workspaceRoutes.orders} element={workspaceView} />
+      <Route path={workspaceRoutes.accounting} element={workspaceView} />
+      <Route path={workspaceRoutes.activity} element={workspaceView} />
       <Route path="/invite/:id" element={<InvitationPage identity={data} reset={reset} logout={logout} />} />
       <Route
         path="*"
@@ -296,4 +310,56 @@ function IdentityPages({
       />
     </Routes>
   );
+}
+
+/**
+ * Maps a workspace section to its page. Keeping this in one switch replaces the
+ * previous nested ternary and makes route additions a single-line change.
+ */
+function WorkspaceRouteView({
+  section,
+  company,
+  emailConfigured,
+  userId,
+  reset,
+}: {
+  section: WorkspaceSection;
+  company: Company;
+  emailConfigured: boolean;
+  userId: string;
+  reset: (notice?: unknown) => Promise<void>;
+}) {
+  switch (section) {
+    case 'accounting':
+      return <AccountingPage key={company.id} company={company} />;
+    case 'capabilities':
+      return <CapabilitiesPage company={company} refresh={reset} />;
+    case 'knowledge':
+      return <KnowledgePage company={company} refresh={reset} />;
+    case 'policies':
+      return <ReplyPoliciesPage company={company} refresh={reset} />;
+    case 'settings':
+      return <CompanySettingsPage />;
+    case 'team':
+      return (
+        <TeamPage
+          company={company}
+          emailConfigured={emailConfigured}
+          userId={userId}
+          refresh={reset}
+        />
+      );
+    case 'stores':
+      return <StoresPage company={company} refresh={reset} />;
+    case 'messages':
+      return <MessagesPage company={company} userId={userId} refresh={reset} />;
+    case 'products':
+      return <ProductsPage company={company} />;
+    case 'orders':
+      return <OrdersPage company={company} />;
+    case 'activity':
+      return <ActivityPage company={company} refresh={reset} />;
+    default:
+      return null;
+  }
 }

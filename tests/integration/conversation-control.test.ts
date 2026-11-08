@@ -104,7 +104,7 @@ test('D1 projection failure keeps accepted authority and native alarms recover a
   assert.equal((await f.call('read')).body.view.projectionPending,false);
 });
 
-test('Cron repairs a lost alarm independently of a failing store-sync branch', {timeout:30_000},async t=>{
+test('Cron repairs a lost alarm without a store-sync branch', {timeout:30_000},async t=>{
   const f=await conversationControlFixture();t.after(()=>f.close());await f.call('faults',{value:{project:true}});
   assert.equal((await f.call('execute',{command:command('takeover')})).body.outcome,'accepted');
   await f.call('clearAlarm');await f.restart();await f.call('faults',{value:{}});
@@ -180,7 +180,7 @@ test('Cron limits a repair batch to fifty and persistent deferral lets other dir
   assert.equal(new Set([...first.repairs,...next.repairs]).size,51);
 });
 
-test('a failing control-directory query cannot prevent the independent store-sync Cron branch', {timeout:30_000},async t=>{
+test('Cron never wakes a store for Ozon synchronization even when control repair fails', {timeout:30_000},async t=>{
   const f=await conversationControlFixture();t.after(()=>f.close());
   await f.db.batch([
     f.db.prepare("UPDATE store SET status='verified' WHERE id='store'"),
@@ -188,7 +188,7 @@ test('a failing control-directory query cannot prevent the independent store-syn
     f.db.prepare("INSERT INTO store_sync_source (store_id,organization_id,source,enabled,epoch,credential_version,due_at,updated_at) VALUES ('store','org','chat',1,1,1,0,1)"),
   ]);
   const result=await f.call('cron',{failControls:true,recordWakes:true});assert.equal(result.status,200);
-  assert.deepEqual(result.body.wakes,[JSON.stringify(['org','store'])]);
+  assert.deepEqual(result.body.wakes,[]);
 });
 
 for(const setup of ['paused-unassigned','human-unassigned','human-assigned'] as const) {

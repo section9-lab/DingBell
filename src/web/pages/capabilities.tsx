@@ -1,3 +1,7 @@
+import { workspaceRoutes } from '../lib/routes';
+import { LoadingState } from '../components/query-state';
+import { useToast } from '../components/ui/toast';
+import { canManageCompany } from '../lib/roles';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -54,9 +58,9 @@ type Step = { name: string; detail: string; ready: boolean; blocked?: 'unconfigu
 export function CapabilitiesPage({ company, refresh }: { company: Company; refresh: (notice?: unknown) => Promise<void> }) {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<unknown>();
-  const [copied, setCopied] = useState(false);
+  const toast = useToast();
   const query = useQuery({ queryKey: ['readiness', company.id], queryFn: ({ signal }) => readReadiness(company.id, signal) });
-  const management = ['owner', 'admin'].includes(company.role);
+  const management = canManageCompany(company.role);
 
   async function toggle(store: ReadinessStore, sync: ReadinessSync) {
     if (pending) return;
@@ -71,7 +75,7 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
     } finally { setPending(null); }
   }
 
-  if (query.isPending) return <p role="status" className="flex items-center gap-2 text-sm"><Spinner aria-hidden="true" />正在读取能力状态…</p>;
+  if (query.isPending) return <LoadingState>正在读取能力状态…</LoadingState>;
   if (query.isError || !query.data) return <div className="flex flex-col gap-3"><ErrorNotice error={query.error} /><Button className="w-fit" variant="outline" onClick={() => void query.refetch()}>重新读取能力状态</Button></div>;
   const data: Readiness = query.data;
   const deployment = data.deployment;
@@ -82,7 +86,7 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
     { name: '人工回复发送', detail: deployment.outbound ? '可以在消息中心直接发送回复。' : '消息中心可以撰写与翻译，但发送开关未开。', ready: deployment.outbound, blocked: 'disabled', env: ['OUTBOUND_ENABLED'] },
     { name: '翻译成俄语', detail: !deployment.translation.enabled ? '译文预览未启用。' : !deployment.translation.configured || !deployment.translation.model ? '已启用，但独立翻译配置或模型密钥不完整；不能仅靠保存客服连接启用，请联系部署管理员核查。' : '可在回复编辑器里把中文译成俄语。', ready: deployment.translation.enabled && deployment.translation.configured && deployment.translation.model, blocked: deployment.translation.enabled ? 'unconfigured' : 'disabled', env: ['TRANSLATION_ENABLED', 'TRANSLATION_CONFIG_JSON'] },
     { name: 'AI 托管接待', detail: !deployment.ai.modelConfigured ? '还没有在「公司设置 > AI 模型」保存可用连接，或缺少运行绑定。' : !deployment.ai.pricesConfigured ? '模型连接已保存，但价格或执行限制不完整。' : '执行配置已保存；每次接待仍需可用预算、已发布策略及当前店铺权限。', ready: deployment.ai.enabled && deployment.ai.pricesConfigured, blocked: 'unconfigured', to: '/workspace/settings', action: '配置模型' },
-    { name: 'AI 自动发送', detail: deployment.aiOutbound && deployment.outbound ? '部署发送开关已开；仍需公司显式授权、预算、策略与店铺发送许可。' : '部署不允许 AI 自动外发；内部草稿不是已发送消息。', ready: deployment.aiOutbound && deployment.outbound, blocked: 'disabled', env: ['AI_OUTBOUND_ENABLED', 'OUTBOUND_ENABLED'] },
+    { name: 'AI 自动发送', detail: deployment.aiOutbound && deployment.outbound ? '部署发送开关已开；仍需公司显式授权、预算、策略与店铺发送许可。' : '部署不允许 AI 自动外发；AI 不会直接回复买家。', ready: deployment.aiOutbound && deployment.outbound, blocked: 'disabled', env: ['AI_OUTBOUND_ENABLED', 'OUTBOUND_ENABLED'] },
   ];
   const readySteps = steps.filter(step => step.ready).length;
   const syncs = data.stores.flatMap(store => store.sync);
@@ -111,13 +115,13 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
         <h2 id="data-sync" className="text-base font-semibold">数据同步</h2>
         <p className="text-xs text-muted-foreground">四类数据独立开关，停止会保留已导入内容与断点</p>
       </div>
-      {!data.stores.length ? <p className="text-sm text-muted-foreground">还没有店铺。<Button variant="link" className="h-auto p-0" render={<Link to="/workspace/stores" />}>去连接店铺</Button></p>
+      {!data.stores.length ? <p className="text-sm text-muted-foreground">还没有店铺。<Button variant="link" className="h-auto p-0" render={<Link to={workspaceRoutes.stores} />}>去连接店铺</Button></p>
         : data.stores.map(store => <Card key={store.id}>
           <CardHeader>
             <CardTitle><h3 className="text-base">{store.name}</h3></CardTitle>
             <CardAction className="flex items-center gap-2">
               <Badge variant="outline">{storeStatuses[store.status] ?? store.status}</Badge>
-              <Button size="sm" variant="ghost" render={<Link to={`/workspace/stores?store=${store.id}`} />}>店铺详情<ArrowRight data-icon="inline-end" /></Button>
+              <Button size="sm" variant="ghost" render={<Link to={`${workspaceRoutes.stores}?store=${store.id}`} />}>店铺详情<ArrowRight data-icon="inline-end" /></Button>
             </CardAction>
             <CardDescription>Ozon · Client ID {store.platformStoreId}{!store.hasCredentials && ' · 未保存凭证'}</CardDescription>
           </CardHeader>
@@ -164,7 +168,7 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
       <p className="text-sm leading-6 text-muted-foreground">下面这些能力不会在界面里出现开关：它们决定消息能否真正发到 Ozon、模型能否被调用。本地写在 <code className="rounded bg-muted px-1 py-0.5 text-xs">.dev.vars</code>，线上配置为 Worker 变量或密钥，修改后需要重启或重新部署。</p>
       <div className="relative overflow-x-auto rounded-xl border bg-muted/40 p-4">
         <pre className="text-xs leading-6"><code>{variables}</code></pre>
-        <Button size="sm" variant="outline" className="absolute right-3 top-3" onClick={() => { void navigator.clipboard?.writeText(variables).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }, () => setCopied(false)); }}>{copied ? '已复制' : <><Copy data-icon="inline-start" />复制</>}</Button>
+        <Button size="sm" variant="outline" className="absolute right-3 top-3" onClick={() => { const clipboard = navigator.clipboard; if (!clipboard) { toast.error('无法复制', '当前浏览器不允许访问剪贴板，请手动选择文本复制。'); return; } void clipboard.writeText(variables).then(() => toast.success('已复制', '部署配置片段已复制到剪贴板。'), () => toast.error('无法复制', '浏览器拒绝了剪贴板访问，请手动选择文本复制。')); }}><Copy data-icon="inline-start" />复制</Button>
       </div>
       <p className="text-xs leading-5 text-muted-foreground">开启后仍需逐项核对：翻译需要已审核的翻译配置与预算，AI 接待需要已审核的模型价格与回复策略，自动发送还需要店铺的聊天回复能力。任何一项缺失时，界面会显示「缺少配置」而不是「已就绪」。</p>
     </section>

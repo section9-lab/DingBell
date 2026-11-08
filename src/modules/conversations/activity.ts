@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import {conversationActivityActionSchema,conversationActivityEntrySchema,type ConversationActivityEntry} from '../../shared/conversation-activity.ts';
 import {storeAccess} from '../stores/storage.ts';
@@ -5,7 +6,7 @@ import {checkedControlReceipt,readControlAccess} from './control-storage.ts';
 import type {ControlActor} from './control-types.ts';
 
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
-const categorySchema=v.picklist(['all','human_action','ai_action','customer_event']),millis=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const categorySchema=v.picklist(['all','human_action','ai_action','customer_event']),millis=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 const cursorSchema=v.strictObject({v:v.literal(2),kind:v.literal('conversation-activity'),orgId:identifier,conversationId:identifier,controllerId:identifier,viewerMemberId:identifier,snapshot:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER)),before:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER)),category:categorySchema,action:v.nullable(conversationActivityActionSchema),from:v.nullable(millis),to:v.nullable(millis)});
 type Cursor=v.InferOutput<typeof cursorSchema>;
 export type ConversationActivityRow={sequence:number;commandId:string;action:ConversationActivityEntry['action'];receipt:string;projectedAt:number;actorMemberId:string|null;actorName:string|null;intentId:string|null;intentSchemaVersion:number|null;deliveryState:string|null;attemptState:string|null;httpStatus:number|null;providerResult:string|null;executionRunId:string|null;executionPayload:string|null;executionClosure:string|null;aiReplyRunId:string|null};

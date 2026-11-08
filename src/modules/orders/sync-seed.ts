@@ -1,5 +1,6 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 import type { SyncScope, SyncSQL } from '../sync/types.ts';
-const nowSQL="CAST(unixepoch('subsecond') * 1000 AS INTEGER)";
+const nowSQL = NOW_MS;
 function preparePostingSyncSeed(mode:'fbs'|'fbo'|'fbp',db:D1Database,scope:SyncScope,epoch:number,condition:SyncSQL):D1PreparedStatement[] {
   const windowTable=`${mode}_sync_window`,postingTable=`${mode}_posting`;
   return [

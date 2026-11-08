@@ -20,10 +20,17 @@ test('能力与数据总览列出部署开关、四类同步与接待准备，�
     await expect(page.getByRole('heading',{name:'能力与数据',exact:true})).toBeVisible();
     const main=page.locator('#main-content');
     for (const name of ['会话同步','商品同步','FBS 包裹同步','FBO 包裹同步']) await expect(main.getByText(name,{exact:true})).toBeVisible();
-    for (const name of ['回复策略','知识库发布','人工回复发送','翻译成俄语','AI 托管接待','AI 自动发送','内部回复测试','知识索引与检索']) await expect(main.getByText(name,{exact:true})).toBeVisible();
+    for (const name of ['回复策略','知识库发布','人工回复发送','翻译成俄语','AI 托管接待','AI 自动发送']) await expect(main.getByText(name,{exact:true})).toBeVisible();
     // Deployment switches state their variable names instead of offering an in-app toggle.
     await expect(page.getByText('OUTBOUND_ENABLED',{exact:false}).first()).toBeVisible();
     await expect(page.getByRole('button',{name:'复制',exact:true})).toBeVisible();
+    // Copying reports through the global toast live region instead of a transient label.
+    await page.context().grantPermissions(['clipboard-read','clipboard-write'],{origin:app.baseURL});
+    await page.getByRole('button',{name:'复制',exact:true}).click();
+    const notifications=page.getByRole('region',{name:'通知',exact:true});
+    await expect(notifications).toContainText('部署配置片段已复制到剪贴板。');
+    await notifications.locator('button[aria-label="关闭通知"]').click();
+    await expect(notifications).not.toContainText('部署配置片段已复制到剪贴板。');
 
     // Enabling one stream is a real write; the row reflects the new state without leaving the page.
     await page.getByRole('button',{name:'启用',exact:true}).first().click();

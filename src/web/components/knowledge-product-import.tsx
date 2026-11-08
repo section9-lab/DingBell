@@ -1,3 +1,4 @@
+import { LoadingState } from './query-state';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ProductImportScope } from '../../shared/knowledge';
@@ -23,8 +24,8 @@ export function KnowledgeProductImport({ companyId, stores, unavailable, onOpen,
   const [storeId,setStoreId]=useState(''),[productId,setProductId]=useState(''),[language,setLanguage]=useState<ProductImportScope['language']>('ru'),[after,setAfter]=useState('');
   const [confirmation,setConfirmation]=useState<KnowledgeProductPreview|null>(null),[pending,setPending]=useState(false),busy=useRef(false),active=useRef(false);
   const [error,setError]=useState<unknown>(),[review,setReview]=useState(false),[result,setResult]=useState<(Awaited<ReturnType<typeof importKnowledgeProduct>>&{snapshotId:string})|null>(null);
-  const catalog=useQuery({queryKey:['knowledge-products',companyId,storeId,after],queryFn:({signal})=>readKnowledgeProducts(companyId,storeId,after,signal),enabled:!!storeId,retry:false,gcTime:0});
-  const preview=useQuery({queryKey:['knowledge-product-preview',companyId,storeId,productId,language],queryFn:({signal})=>readKnowledgeProductPreview(companyId,{storeId,productId,language},signal),enabled:!!storeId&&!!productId,retry:false,gcTime:0});
+  const catalog=useQuery({queryKey:['knowledge-products',companyId,storeId,after],queryFn:({signal})=>readKnowledgeProducts(companyId,storeId,after,signal),enabled:!!storeId,gcTime:0});
+  const preview=useQuery({queryKey:['knowledge-product-preview',companyId,storeId,productId,language],queryFn:({signal})=>readKnowledgeProductPreview(companyId,{storeId,productId,language},signal),enabled:!!storeId&&!!productId,gcTime:0});
   useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
   useEffect(()=>{const failure=catalog.error??preview.error;if(denied(failure))void refresh(failure);},[catalog.error,preview.error,refresh]);
   const data=preview.data,disabled=unavailable||pending||settings.isPending||settings.isError;
@@ -49,13 +50,13 @@ export function KnowledgeProductImport({ companyId, stores, unavailable, onOpen,
       <Field><FieldLabel htmlFor="product-import-language">知识语言</FieldLabel><NativeSelect id="product-import-language" value={language} disabled={disabled} onChange={event=>choose(()=>setLanguage(event.target.value as ProductImportScope['language']))}>{Object.entries(knowledgeLanguages).map(([key,label])=><NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}</NativeSelect><p className="text-xs text-muted-foreground">用于限定知识检索范围，不会自动翻译商品原文。</p></Field></div>
     <div className="grid min-w-0 items-start gap-5 xl:grid-cols-2">
       <Card><CardHeader><CardTitle>已同步商品</CardTitle><CardDescription>按商品 ID 区分商品。同一个货号或履约 SKU 不会合并为一条知识。</CardDescription></CardHeader><CardContent className="flex min-w-0 flex-col gap-3">
-        {!storeId?<p className="text-sm text-muted-foreground">选择店铺后查看已同步的商品。</p>:catalog.isError?<ErrorNotice error={catalog.error}/>:catalog.isPending?<p role="status" className="flex items-center gap-2"><Spinner/>正在读取商品…</p>:catalog.data?.products.length?catalog.data.products.map(product=><div key={product.productId} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
+        {!storeId?<p className="text-sm text-muted-foreground">选择店铺后查看已同步的商品。</p>:catalog.isError?<ErrorNotice error={catalog.error}/>:catalog.isPending?<LoadingState>正在读取商品…</LoadingState>:catalog.data?.products.length?catalog.data.products.map(product=><div key={product.productId} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
           <div className="flex flex-wrap items-center gap-2"><p className="min-w-0 break-words text-sm font-medium">{product.name??product.offerId}</p><Badge variant="outline">{sourceStates[product.state]}</Badge></div>
           <p className="break-words text-xs text-muted-foreground">Ozon ID：{product.productId} · 货号：{product.offerId}</p><Button variant={productId===product.productId?'secondary':'outline'} className="self-start" aria-label={`预览商品 ${product.productId}`} disabled={disabled||product.state!=='ready'} onClick={()=>choose(()=>setProductId(product.productId))}>查看资料</Button>
         </div>):<p className="text-sm text-muted-foreground">没有已同步商品。请先在店铺管理中完成商品同步。</p>}
       </CardContent>{storeId&&<CardFooter className="flex flex-wrap gap-2"><Button variant="ghost" disabled={disabled||catalog.isFetching} onClick={()=>void catalog.refetch()}>刷新商品</Button>{after&&<Button variant="outline" disabled={disabled} onClick={()=>setAfter('')}>第一页</Button>}{catalog.data?.nextAfter&&<Button variant="outline" disabled={disabled||catalog.isFetching} onClick={()=>setAfter(catalog.data!.nextAfter!)}>下一页</Button>}</CardFooter>}</Card>
       <Card data-testid="product-import-preview"><CardHeader><CardTitle>导入预览</CardTitle><CardDescription>核对来源与内容后，再保存到当前公司的知识库。</CardDescription></CardHeader><CardContent className="flex min-w-0 flex-col gap-4">
-        {!productId?<p className="text-sm text-muted-foreground">从左侧选择一个已同步商品。</p>:preview.isError?<ErrorNotice error={preview.error}/>:preview.isPending?<p role="status" className="flex items-center gap-2"><Spinner/>正在准备预览…</p>:data&&<>
+        {!productId?<p className="text-sm text-muted-foreground">从左侧选择一个已同步商品。</p>:preview.isError?<ErrorNotice error={preview.error}/>:preview.isPending?<LoadingState>正在准备预览…</LoadingState>:data&&<>
           <p className="break-words font-medium">{data.draft.title}</p><p className="text-xs text-muted-foreground">来源快照：{date(new Date(data.source.observedAt).toISOString())}</p><KnowledgeSource source={data.draft.source}/>
           {review&&<Alert><AlertTitle>{error instanceof ApiError&&error.code==='OPERATION_UNCONFIRMED'?'导入结果尚未确认':'请重新核对来源'}</AlertTitle><AlertDescription>请读取当前来源和导入记录后再操作。系统不会自动重新提交。<Button variant="outline" className="self-start" disabled={disabled||preview.isFetching} onClick={()=>void verify()}>核对导入结果</Button></AlertDescription></Alert>}
           {error!=null&&!(error instanceof ApiError&&error.code==='OPERATION_UNCONFIRMED')&&<ErrorNotice error={error}/>}

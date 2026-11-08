@@ -24,7 +24,7 @@ export function KnowledgeEditor({ companyId, id, isNew, stores, unavailable, onS
   const client = useQueryClient(), { date: formatDate, query: settings } = useCompanySettings();
   const date = (ms: number) => formatDate(new Date(ms).toISOString());
   const key = ['knowledge-document', companyId, id];
-  const query = useQuery({ queryKey: key, queryFn: ({ signal }) => readKnowledge(companyId, id, signal), enabled: !isNew, retry: false, gcTime: 0 });
+  const query = useQuery({ queryKey: key, queryFn: ({ signal }) => readKnowledge(companyId, id, signal), enabled: !isNew, gcTime: 0 });
   const [local, setLocal] = useState<LocalDraft | null>(() => isNew ? { version: 0, scope: { kind: 'faq', language: 'ru', storeId: null, productRef: null }, content: { title: '', source: { format: 'text', content: '' } } } : null);
   const [tab, setTab] = useState('draft'), [pending, setPending] = useState(false), busy = useRef(false), mounted = useRef(false);
   const writing = useRef(false), interrupted = useRef(false);
@@ -39,7 +39,7 @@ export function KnowledgeEditor({ companyId, id, isNew, stores, unavailable, onS
   const parsed = content ? v.safeParse(knowledgeDraftSchema, content) : null;
   const valid = parsed?.success && !!scope && v.safeParse(knowledgeScopeSchema, scope).success && validKnowledgeScope(scope, parsed.output);
   const historyBefore = before ?? (document ? Math.min(document.draftRevision + 1, Number.MAX_SAFE_INTEGER - 1) : 1);
-  const history = useQuery({ queryKey: ['knowledge-versions', companyId, id, historyBefore], queryFn: ({ signal }) => readKnowledgeVersions(companyId, id, historyBefore, signal), enabled: !isNew && tab === 'versions', retry: false, gcTime: 0 });
+  const history = useQuery({ queryKey: ['knowledge-versions', companyId, id, historyBefore], queryFn: ({ signal }) => readKnowledgeVersions(companyId, id, historyBefore, signal), enabled: !isNew && tab === 'versions', gcTime: 0 });
   useEffect(() => {
     mounted.current = true;
     if (!busy.current) setPending(false);

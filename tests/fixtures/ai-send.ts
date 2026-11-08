@@ -2,18 +2,19 @@ import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 import {aiAnswerFixture} from './ai-answer.ts';
 import {encryptCredentials} from '../../src/modules/stores/credentials.ts';
-import {prepareAiReply} from '../../src/modules/ai-runs/reply-intent.ts';
+import {readAiKnowledgeFile} from '../../src/modules/ai-runs/text-knowledge.ts';
+import {prepareAiMessage} from '../../src/modules/ai-runs/message-intent.ts';
 import {bindAiExecutionReceipt,claimAiGeneration,closeAiExecution,settleAiGeneration} from '../../src/modules/ai-runs/storage.ts';
 
 export async function aiSendFixture(config:{outboundEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}){
- const x=await aiAnswerFixture('support-reply-v1',{outboundEnabled:'true',aiOutboundEnabled:'true',...config});
+ const x=await aiAnswerFixture('support-reply-v2',{outboundEnabled:'true',aiOutboundEnabled:'true',...config});
  try{
   const key=await encryptCredentials(x.f.credentialEnv,{orgId:'org',storeId:'store',platformStoreId:'1',credentialVersion:1},{apiKey:'synthetic-api-key'});
   await x.f.db.prepare("UPDATE store SET outbound_enabled=1,credential_key_version=?,credential_nonce=?,credential_ciphertext=?,capabilities=?,checked_at=?,expires_at=? WHERE id='store'")
    .bind(key.keyVersion,key.nonce,key.ciphertext,JSON.stringify([{code:'auth',status:'available'},{code:'reply',status:'available'}]),Date.now(),Date.now()+3600000).run();
   const env={...x.env,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'},runId=x.run.request.runId,intentId='ai-reply:'+runId;
   const receipt={submissionId:runId,uid:crypto.randomUUID(),acceptedAt:new Date().toISOString()};
-  async function prepare(){assert.equal((await prepareAiReply(env,x.read,x.scope,runId,x.input)).status,'prepared');}
+  async function prepare(){const read=await readAiKnowledgeFile(env,x.read,x.scope,runId,{path:`/knowledge/${x.documentId}.md`});assert.equal(read.status,'found');assert.equal((await prepareAiMessage(env,x.read,x.scope,runId,x.input)).status,'prepared');}
   async function finish(outcome:'completed'|'failed'|'aborted'='completed',settled=true){
    await bindAiExecutionReceipt(x.f.db,x.scope,runId,receipt);
    assert.equal(await claimAiGeneration(x.f.db,x.read,x.scope,runId,1),true);

@@ -1,3 +1,5 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import type { OzonFbsPosting } from './ozon.ts';
 import type { FbsCounts, FbsDetailsWork, FbsListWork, FbsWork } from './types.ts';
 import { storeAccess,type StoreActor } from '../stores/storage.ts';
@@ -8,9 +10,9 @@ import {duePostingHistory,historyPageGuard,historyPageUpdate,historyTurn,readHis
 // Identifiers come only from this closed factory, never from request input.
 function postingStorage(mode:'fbs'|'fbo'|'fbp') {
 const postingTable=`${mode}_posting`,windowTable=`${mode}_sync_window`,observationTable=`${mode}_posting_observation`,source=`${mode}_postings`;
-const nowSQL="CAST(unixepoch('subsecond') * 1000 AS INTEGER)";
+const nowSQL = NOW_MS;
 const hour=3_600_000,windowMaximum=31*86_400_000,roundInterval=300_000,detailInterval=900_000;
-function validTime(now:number){if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000)throw new Error('INVALID_FBS_TIME');}
+function validTime(now:number){if(!Number.isSafeInteger(now)||now<0||now>MAX_TIMESTAMP_MS)throw new Error('INVALID_FBS_TIME');}
 function bounded(value:unknown){if(new TextEncoder().encode(JSON.stringify(value)).length>1_048_576)throw new Error('FBS_PAGE_TOO_LARGE');}
 function facts(value:OzonFbsPosting){
   if(typeof value.postingNumber!=='string'||!value.postingNumber.trim()||value.postingNumber.length>256||typeof value.orderId!=='string'||!/^(0|[1-9][0-9]{0,39})$/.test(value.orderId)||!Array.isArray(value.products))throw new Error('INVALID_FBS_PAGE');

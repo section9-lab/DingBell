@@ -1,3 +1,4 @@
+import { sqlManagesCompany, NOW_MS_WHOLE_SECONDS } from '../../platform/database/sql.ts';
 import * as v from 'valibot';
 import { knowledgeSourceSchema, type KnowledgeCitationRequest, type KnowledgeScope, type KnowledgeFilters } from '../../shared/knowledge.ts';
 import type { SettingsActor } from '../company-settings/storage.ts';
@@ -7,8 +8,8 @@ import { isTextPublication } from './text-profile-id.ts';
 
 export type KnowledgeActor = SettingsActor;
 export const knowledgeAccess = `SELECT 1 FROM member actor JOIN user caller ON caller.id=actor.user_id JOIN session login ON login.user_id=caller.id
-  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>unixepoch()*1000
-  AND caller.email_verified=1 AND actor.role IN ('owner','admin')`;
+  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>${NOW_MS_WHOLE_SECONDS}
+  AND caller.email_verified=1 AND ${sqlManagesCompany('actor.role')}`;
 export const knowledgeActorValues = (actor: KnowledgeActor) => [actor.orgId, actor.actorUserId, actor.sessionId];
 type DocumentRow = { id: string; kind: KnowledgeScope['kind']; store_id: string | null; product_ref: string | null; language: KnowledgeScope['language'];
   version: number; draft_revision: number; active_revision: number | null; updated_at: number; mutation_id: string };
@@ -71,15 +72,15 @@ export async function writeKnowledge(db: D1Database, actor: KnowledgeActor, id: 
   const sourceValues = productSource ? [actor.orgId, scope.storeId, scope.productRef, productSource.snapshotId, productSource.facts] : [];
   const head = expectedVersion === 0
     ? db.prepare(`INSERT INTO knowledge_document (organization_id,id,kind,store_id,product_ref,language,version,draft_revision,mutation_id,updated_at)
-        SELECT ?,?,?,?,?,?,1,1,?,unixepoch()*1000 WHERE EXISTS (${knowledgeAccess})
+        SELECT ?,?,?,?,?,?,1,1,?,${NOW_MS_WHOLE_SECONDS} WHERE EXISTS (${knowledgeAccess})
         AND (? IS NULL OR EXISTS (SELECT 1 FROM store WHERE organization_id=? AND id=?))${sourceGuard} ON CONFLICT DO NOTHING RETURNING version`)
       .bind(actor.orgId, id, scope.kind, scope.storeId, scope.productRef, scope.language, mutationId, ...knowledgeActorValues(actor), scope.storeId, actor.orgId, scope.storeId, ...sourceValues)
-    : db.prepare(`UPDATE knowledge_document SET version=version+1,draft_revision=draft_revision+1,mutation_id=?,updated_at=unixepoch()*1000
+    : db.prepare(`UPDATE knowledge_document SET version=version+1,draft_revision=draft_revision+1,mutation_id=?,updated_at=${NOW_MS_WHOLE_SECONDS}
         WHERE organization_id=? AND id=? AND version=? AND version<9007199254740991 AND EXISTS (${knowledgeAccess})${sourceGuard} RETURNING version`)
       .bind(mutationId, actor.orgId, id, expectedVersion, ...knowledgeActorValues(actor), ...sourceValues);
   const results = await db.batch([head,
     db.prepare(`INSERT INTO knowledge_revision (organization_id,document_id,revision,title,source_json,content_hash,markdown,status,created_at,created_by,rollback_of)
-      SELECT organization_id,id,draft_revision,?,?,?,?,'draft',unixepoch()*1000,?,? FROM knowledge_document WHERE organization_id=? AND id=? AND mutation_id=?`)
+      SELECT organization_id,id,draft_revision,?,?,?,?,'draft',${NOW_MS_WHOLE_SECONDS},?,? FROM knowledge_document WHERE organization_id=? AND id=? AND mutation_id=?`)
       .bind(draft.title, JSON.stringify(draft.source), draft.contentHash, draft.markdown, actor.actorUserId, rollbackOf, actor.orgId, id, mutationId),
     db.prepare(`INSERT INTO knowledge_chunk (organization_id,document_id,revision,id,ordinal,body,body_hash)
       SELECT doc.organization_id,doc.id,doc.draft_revision,json_extract(c.value,'$.id'),json_extract(c.value,'$.ordinal'),json_extract(c.value,'$.body'),json_extract(c.value,'$.bodyHash')
@@ -92,7 +93,7 @@ export async function writeKnowledge(db: D1Database, actor: KnowledgeActor, id: 
   return results[0].results.length > 0;
 }
 export function withdrawKnowledge(db: D1Database, actor: KnowledgeActor, id: string, expectedVersion: number) {
-  return db.prepare(`UPDATE knowledge_document SET active_revision=NULL,version=version+1,updated_at=unixepoch()*1000
+  return db.prepare(`UPDATE knowledge_document SET active_revision=NULL,version=version+1,updated_at=${NOW_MS_WHOLE_SECONDS}
     WHERE organization_id=? AND id=? AND version=? AND version<9007199254740991 AND EXISTS (${knowledgeAccess}) RETURNING version`)
     .bind(actor.orgId, id, expectedVersion, ...knowledgeActorValues(actor)).first();
 }

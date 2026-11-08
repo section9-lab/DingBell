@@ -40,6 +40,16 @@ test('period totals retain known sales, leave unknown profit blank, and subtract
   assert.deepEqual(trend.map(row=>row.profit),[1968,-2000,0]);assert.equal(trend.reduce((sum,row)=>sum+(row.profit??0),0),totals.profit);
 });
 
+test('long ranges roll the trend up by month while keeping totals',()=>{
+  const first={...calculatePosting(sale,[cost],rule),date:'2026-01-15'};
+  const second={...calculatePosting({...sale,postingNumber:'q',orderNumber:'q'},[cost],rule),date:'2026-03-02'};
+  const {totals,trend,trendGranularity}=summarize([first,second],[],'2026-01-01','2026-06-30');
+  assert.equal(trendGranularity,'month');
+  assert.deepEqual(trend.map(row=>row.date),['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06']);
+  assert.equal(totals.revenue,8000);assert.equal(trend.reduce((sum,row)=>sum+row.revenue,0),totals.revenue);
+  assert.equal(trend[0]?.revenue,4000);assert.equal(trend[2]?.revenue,4000);
+});
+
 test('CNY sales and imported commission remain visible without unrelated FX or freight rules',()=>{
   const cny={...sale,products:sale.products.map(line=>({...line,currency:'CNY',price:'20'}))};
   const posting=calculatePosting(cny,[{...cost,commissionRate:'0.15'}],null);

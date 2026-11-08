@@ -1,4 +1,4 @@
-import type { AgentDriver, AgentReceipt, AgentResult } from '../../../packages/agent-runtime/contracts.ts';
+import type { AgentDriver, AgentLoop, AgentReceipt, AgentResult } from '../../../packages/agent-runtime/contracts.ts';
 
 /** Vercel's business backend delegates execution to Functions/World; SQLite remains business authority. */
 export function createWorldDriver(origin: string, secret: string): AgentDriver {
@@ -9,5 +9,5 @@ export function createWorldDriver(origin: string, secret: string): AgentDriver {
     if(!response.ok)throw new Error('VERCEL_EXECUTION_UNCONFIRMED');return await response.json() as T;
   }
   return {create:()=>operation<string>('create',[]),dispatch:uid=>operation<AgentReceipt>('dispatch',[uid]),read:(uid,id)=>operation<AgentResult>('read',[uid,id]),
-    abort:uid=>operation<void>('abort',[uid]),async resumeAll(){},async close(){}};
+    abort:uid=>operation<void>('abort',[uid]),activity:uid=>operation<AgentLoop|null>('activity',[uid]),async resumeAll(){},async close(){}};
 }

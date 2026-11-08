@@ -1,16 +1,18 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import type { OzonProductDetails, OzonProductListItem } from './ozon.ts';
 import type { ProductCounts, ProductDetailsWork, ProductListWork, ProductWork } from './types.ts';
 import { storeAccess, type StoreActor } from '../stores/storage.ts';
 import { prepareSyncPageFinish, prepareSyncPageGate, syncLeaseCondition, syncPageCondition } from '../sync/storage.ts';
 import type { SyncLease, SyncSQL } from '../sync/types.ts';
 
-const nowSQL = "CAST(unixepoch('subsecond') * 1000 AS INTEGER)";
+const nowSQL = NOW_MS;
 const decimalId = /^(0|[1-9][0-9]{0,39})$/;
 function bounded(value: unknown) {
   if (new TextEncoder().encode(JSON.stringify(value)).length > 1_048_576) throw new Error('PRODUCT_PAGE_TOO_LARGE');
 }
 function future(value: number) {
-  if (!Number.isSafeInteger(value) || value < 0 || value > 8_640_000_000_000_000) throw new Error('INVALID_PRODUCT_PAGE');
+  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMESTAMP_MS) throw new Error('INVALID_PRODUCT_PAGE');
   return Math.max(value, Date.now() + 1000);
 }
 function due(lease: SyncLease): SyncSQL {

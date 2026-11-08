@@ -1,3 +1,4 @@
+import { canManageCompany } from '../lib/roles';
 import { useCallback, useEffect, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
@@ -20,18 +21,18 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from '../components/ui/empty';
 import { Field, FieldGroup, FieldLabel } from '../components/ui/field';
 import { NativeSelect, NativeSelectOption } from '../components/ui/native-select';
-import { Spinner } from '../components/ui/spinner';
+import { QueryState } from '../components/query-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 
 export function KnowledgePage({ company, refresh }: { company: Company; refresh: (notice?: unknown) => Promise<void> }) {
   const [search, setSearch] = useSearchParams(), [newId, setNewId] = useState<string | null>(null);
   const [filters, setFilters] = useState<KnowledgeFilters>({}), [after, setAfter] = useState('');
   const { setDirty, confirmExit: navigate } = useWorkspaceExit();
-  const management = ['owner', 'admin'].includes(company.role), selectedId = newId ?? search.get('document');
+  const management = canManageCompany(company.role), selectedId = newId ?? search.get('document');
   const importing = ['products', 'files'].includes(search.get('import') ?? '') ? search.get('import') : null;
-  const list = useQuery({ queryKey: ['knowledge', company.id, filters, after], queryFn: ({ signal }) => readKnowledgeList(company.id, filters, after, signal), enabled: management, retry: false });
+  const list = useQuery({ queryKey: ['knowledge', company.id, filters, after], queryFn: ({ signal }) => readKnowledgeList(company.id, filters, after, signal), enabled: management });
   const stores = useInfiniteQuery({ queryKey: storesInfiniteQueryKey(company.id), queryFn: ({ pageParam, signal }) => readStores(company.id, pageParam, signal),
-    initialPageParam: 0, getNextPageParam: page => page.nextOffset ?? undefined, enabled: management, retry: false });
+    initialPageParam: 0, getNextPageParam: page => page.nextOffset ?? undefined, enabled: management });
   const storeRows = stores.data?.pages.flatMap(page => page.stores) ?? [];
   const resetEditor = useCallback(async (error?: unknown) => {
     if (error instanceof ApiError && error.code === 'NOT_FOUND') { setDirty(false); setNewId(null); setSearch({}, { replace: true }); }
@@ -63,9 +64,9 @@ export function KnowledgePage({ company, refresh }: { company: Company; refresh:
             <Field><FieldLabel htmlFor="knowledge-filter-language">语言筛选</FieldLabel><NativeSelect id="knowledge-filter-language" value={filters.language ?? ''} onChange={e => filter('language', e.target.value as KnowledgeFilters['language'] || undefined)}><NativeSelectOption value="">全部语言</NativeSelectOption>{Object.entries(knowledgeLanguages).map(([value, label]) => <NativeSelectOption key={value} value={value}>{label}</NativeSelectOption>)}</NativeSelect></Field>
             <Field><FieldLabel htmlFor="knowledge-filter-publication">发布状态筛选</FieldLabel><NativeSelect id="knowledge-filter-publication" value={filters.publication ?? ''} onChange={e => filter('publication', e.target.value as KnowledgeFilters['publication'] || undefined)}><NativeSelectOption value="">全部状态</NativeSelectOption><NativeSelectOption value="published">已发布</NativeSelectOption><NativeSelectOption value="unpublished">未发布</NativeSelectOption></NativeSelect></Field>
           </FieldGroup>
-          {list.isError ? <ErrorNotice error={list.error}/> : list.isPending ? <p role="status" className="flex items-center gap-2"><Spinner/>正在读取知识…</p> : list.data?.documents.length ? <Table><TableHeader><TableRow><TableHead>知识</TableHead><TableHead>适用范围</TableHead><TableHead>草稿状态</TableHead><TableHead>生效版本</TableHead></TableRow></TableHeader><TableBody>
-            {list.data.documents.map(row => <TableRow key={row.id}><TableCell><Button variant="link" className="h-auto max-w-64 justify-start whitespace-normal p-0 text-left" aria-label={`编辑知识：${row.title}`} onClick={() => setSearch({ document: row.id })}>{row.title}</Button><p className="mt-1 text-xs text-muted-foreground">{knowledgeKinds[row.kind]} · {knowledgeLanguages[row.language]}</p></TableCell><TableCell className="max-w-52 whitespace-normal break-words">{row.storeId ? storeRows.find(store => store.id === row.storeId)?.name ?? '店铺资料' : '公司通用'}{row.productRef && <p className="text-xs text-muted-foreground">商品：{row.productRef}</p>}</TableCell><TableCell><Badge variant="outline">v{row.draftRevision} · {knowledgeStates[row.status]}</Badge></TableCell><TableCell><Badge variant={row.activeRevision ? 'secondary' : 'outline'}>{row.activeRevision ? `已发布 v${row.activeRevision}` : '未发布'}</Badge></TableCell></TableRow>)}
-          </TableBody></Table> : <Empty><EmptyHeader><EmptyMedia variant="icon"><BookOpen/></EmptyMedia><EmptyTitle>没有匹配的知识</EmptyTitle><EmptyDescription>调整筛选，或新建一条商品资料、使用说明或店铺政策。</EmptyDescription></EmptyHeader></Empty>}
+          <QueryState {...list} loading="正在读取知识…" retry="重新读取知识库">{(data)=>data.documents.length ? <Table><TableHeader><TableRow><TableHead>知识</TableHead><TableHead>适用范围</TableHead><TableHead>草稿状态</TableHead><TableHead>生效版本</TableHead></TableRow></TableHeader><TableBody>
+            {data.documents.map(row => <TableRow key={row.id}><TableCell><Button variant="link" className="h-auto max-w-64 justify-start whitespace-normal p-0 text-left" aria-label={`编辑知识：${row.title}`} onClick={() => setSearch({ document: row.id })}>{row.title}</Button><p className="mt-1 text-xs text-muted-foreground">{knowledgeKinds[row.kind]} · {knowledgeLanguages[row.language]}</p></TableCell><TableCell className="max-w-52 whitespace-normal break-words">{row.storeId ? storeRows.find(store => store.id === row.storeId)?.name ?? '店铺资料' : '公司通用'}{row.productRef && <p className="text-xs text-muted-foreground">商品：{row.productRef}</p>}</TableCell><TableCell><Badge variant="outline">v{row.draftRevision} · {knowledgeStates[row.status]}</Badge></TableCell><TableCell><Badge variant={row.activeRevision ? 'secondary' : 'outline'}>{row.activeRevision ? `已发布 v${row.activeRevision}` : '未发布'}</Badge></TableCell></TableRow>)}
+          </TableBody></Table> : <Empty><EmptyHeader><EmptyMedia variant="icon"><BookOpen/></EmptyMedia><EmptyTitle>没有匹配的知识</EmptyTitle><EmptyDescription>调整筛选，或新建一条商品资料、使用说明或店铺政策。</EmptyDescription></EmptyHeader></Empty>}</QueryState>
         </CardContent><CardFooter className="flex flex-wrap gap-2"><Button variant="ghost" disabled={list.isFetching} onClick={() => void list.refetch()}>刷新列表</Button>{after && <Button variant="outline" onClick={() => setAfter('')}>第一页</Button>}{list.data?.nextAfter && <Button variant="outline" disabled={list.isFetching} onClick={() => setAfter(list.data!.nextAfter!)}>下一页</Button>}</CardFooter>
       </Card>}
     </>}

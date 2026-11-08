@@ -54,9 +54,14 @@ test('numeric ID tokens retain exact digits in both Node and the deployed worker
   const fetcher = (async () => new Response(body)) as typeof fetch;
   const result = await readOzonMessages(credentials, { chatId: 'synthetic-chat', direction: 'Backward' }, fetcher);
   assert.equal(result.messages[0].id, message.message_id); assert.equal(result.messages[0].senderId, message.user.id); assert.equal(result.messages[0].sku, message.context.sku);
-  const source = stripTypeScriptTypes(readFileSync(new URL('../src/modules/conversations/ozon.ts', import.meta.url), 'utf8')).replaceAll('../ozon/read.ts', './read.mjs');
-  const shared = stripTypeScriptTypes(readFileSync(new URL('../src/modules/ozon/read.ts', import.meta.url), 'utf8'));
-  const mf = new Miniflare({ modules: [{ type: 'ESModule', path: 'entry.mjs', contents: source + `\nexport default {async fetch(){return Response.json(await readOzonMessages(${JSON.stringify(credentials)}, {chatId:'synthetic-chat',direction:'Backward'}, async()=>new Response(${JSON.stringify(body)})))}}` }, { type: 'ESModule', path: 'read.mjs', contents: shared }], compatibilityDate: '2026-06-01' });
+  const moduleSource = (path: string) => stripTypeScriptTypes(readFileSync(new URL(path, import.meta.url), 'utf8'));
+  // The parser now shares the chat-type normalization module, so the workerd fixture must
+  // register it too; an unregistered specifier fails the whole runtime at startup.
+  const source = moduleSource('../src/modules/conversations/ozon.ts')
+    .replaceAll('../ozon/read.ts', './read.mjs').replaceAll('../ozon/chat-type.ts', './chat-type.mjs');
+  const shared = moduleSource('../src/modules/ozon/read.ts');
+  const chatType = moduleSource('../src/modules/ozon/chat-type.ts');
+  const mf = new Miniflare({ modules: [{ type: 'ESModule', path: 'entry.mjs', contents: source + `\nexport default {async fetch(){return Response.json(await readOzonMessages(${JSON.stringify(credentials)}, {chatId:'synthetic-chat',direction:'Backward'}, async()=>new Response(${JSON.stringify(body)})))}}` }, { type: 'ESModule', path: 'read.mjs', contents: shared }, { type: 'ESModule', path: 'chat-type.mjs', contents: chatType }], compatibilityDate: '2026-06-01' });
   context.after(() => mf.dispose());
   const remote = await (await mf.dispatchFetch('https://fixture.invalid')).json();
   assert.deepEqual(remote, result);
@@ -122,6 +127,20 @@ test('known chat IDs still reject fractional, negative and exponent tokens while
   }
   const page = await listOzonChats(credentials, {}, response({ chats: [{ ...chat, unknown: { id: 1.25 } }], has_next: false }));
   assert.equal(page.chats[0].id, chat.chat.chat_id);
+});
+
+test('chat type and nesting follow Ozon changes instead of one frozen shape', async () => {
+  // Documented nesting, PascalCase type.
+  const nested = await listOzonChats(credentials, {}, response({ chats: [{ chat: { ...chat.chat, chat_type: 'Buyer_Seller' }, unread_count: 0 }], has_next: false }));
+  assert.equal(nested.chats[0]!.type, 'BUYER_SELLER');
+  // Recorded flat responses, mixed case and the documented "Buyer_Sueller" spelling.
+  for (const chatType of ['BUYER_SELLER', 'Buyer_Sueller', 'buyer_seller']) {
+    const flat = await listOzonChats(credentials, {}, response({ chats: [{ ...chat.chat, chat_type: chatType, unread_count: 0 }], has_next: false }));
+    assert.equal(flat.chats[0]!.type, 'BUYER_SELLER', chatType);
+    assert.equal(flat.chats[0]!.id, chat.chat.chat_id);
+  }
+  const support = await listOzonChats(credentials, {}, response({ chats: [{ chat: { ...chat.chat, chat_type: 'Seller_Support' }, unread_count: 0 }], has_next: false }));
+  assert.equal(support.chats[0]!.type, 'SELLER_SUPPORT');
 });
 
 test('the eight-second deadline also bounds a response whose stream never settles', async t => {

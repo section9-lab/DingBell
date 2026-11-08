@@ -2,6 +2,7 @@ import type { SupportBindings } from '../ai-runs/execution.ts';
 import { parseSupportConfiguration, supportConfigurationView } from '../ai-runs/configuration.ts';
 import { readCompanyModel } from './storage.ts';
 import { modelExecutionSchema, defaultModelGenerations } from '../../shared/company-model.ts';
+import { SUPPORT_REPLY_V2, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
 import { credentialConfig } from '../stores/credentials.ts';
 import { modelBaseUrl, modelEndpoint, openModelKey } from './security.ts';
 import type { TranslationConfig } from '../translations/types.ts';
@@ -18,7 +19,7 @@ export async function resolveSupportConfiguration(env:SupportBindings,companyId:
   try{
     if(!row.execution)return null;
     const execution=v.parse(modelExecutionSchema,JSON.parse(row.execution));
-    const promptVersion=execution.autoReply?'support-reply-v1':'support-knowledge-v1';
+    const promptVersion=SUPPORT_REPLY_V2;
     const maxGenerations=execution.maxGenerations??defaultModelGenerations;
     return parseSupportConfiguration({maxGenerations,model:{provider:'openai-compatible',model:row.model,modelConfigVersion:'company-model-v1',promptVersion,
       connection:{companyId,revision:row.revision,baseUrl:row.baseUrl},maxInputTokens:execution.maxInputTokens,maxOutputTokens:execution.maxOutputTokens,
@@ -31,7 +32,7 @@ export async function companySupportConfigurationView(env:SupportBindings,compan
   if(!row)return supportConfigurationView(env);
   const cost=await resolveSupportConfiguration(env,companyId);
   const modelConfigured=!!env.AGENT_RUNTIME&&!!env.CONVERSATION_CONTROLLER&&!!credentialConfig(env)&&modelBaseUrl(row.baseUrl,env)===row.baseUrl;
-  const enabled=modelConfigured&&!!cost&&(cost.config.model.promptVersion!=='support-reply-v1'||env.AI_OUTBOUND_ENABLED==='true'&&env.OUTBOUND_ENABLED==='true');
+  const enabled=modelConfigured&&!!cost&&(!isOutboundPromptVersion(cost.config.model.promptVersion)||env.AI_OUTBOUND_ENABLED==='true'&&env.OUTBOUND_ENABLED==='true');
   return {enabled,modelConfigured,pricesConfigured:!!cost,model:cost?row.model:null,maxGenerations:cost?.config.maxGenerations??null,perGenerationMicros:cost?.per??null,runReservationMicros:cost?.total??null};
 }
 export async function frozenCompanyProvider(env:SupportBindings,config:TranslationConfig,companyId:string){

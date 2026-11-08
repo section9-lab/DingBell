@@ -6,6 +6,7 @@ import { AccountField, passwordRules } from './account-field';
 import { ErrorNotice, roleLabel } from './identity-shared';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { useToast } from './ui/toast';
 import { Field, FieldGroup, FieldLabel } from './ui/field';
 import { NativeSelect, NativeSelectOption } from './ui/native-select';
 import { Spinner } from './ui/spinner';
@@ -18,6 +19,7 @@ export function MemberAction({ companyId, member, action, owner, self, close, re
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>();
+  const toast = useToast();
   const busy = useRef(false);
   const { register, handleSubmit, watch, resetField, formState: { errors } } = useForm<{ role: MemberRole; password: string }>({
     defaultValues: { role: member.role, password: '' }, shouldUnregister: true,
@@ -31,6 +33,7 @@ export function MemberAction({ companyId, member, action, owner, self, close, re
     setError(undefined);
     try {
       await changeMember(companyId, member.id, member.role, action === 'remove' ? null : values.role, needsPassword ? values.password : undefined);
+      toast.success(action === 'remove' ? '成员已移除' : '成员角色已更新', `${member.name} 的访问权限已更新。`);
       await refresh();
     } catch (cause) {
       resetField('password');

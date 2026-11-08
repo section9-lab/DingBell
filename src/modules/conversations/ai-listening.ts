@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import {aiScopeSchema} from './ai-state.ts';
 import {storedControlStateSchema} from './control-state.ts';
@@ -6,7 +7,7 @@ import {selectReplyPolicy} from '../reply-policies/matching.ts';
 import type {ControlScope} from './control-types.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256)),uuid=v.pipe(v.string(),v.uuid());
 const counter=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1));
-const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 export const aiListeningRequestSchema=v.strictObject({commandId:uuid,expectedVersion:counter,previousRunId:v.nullable(uuid)});
 export const aiListeningSchema=v.strictObject({schemaVersion:v.literal(1),scope:aiScopeSchema,request:aiListeningRequestSchema,afterSequence:counter,createdAt:time,controlEpoch:counter});
 export const aiListeningReceiptSchema=v.pipe(v.strictObject({action:v.literal('ai_listen'),origin:v.literal('human'),commandId:id,expectedVersion:counter,

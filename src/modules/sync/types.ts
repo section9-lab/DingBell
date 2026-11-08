@@ -22,6 +22,8 @@ export interface CursorSeed {
 }
 export interface NormalizedChat {
   platformThreadId: string; type: string; status: string; createdAt: number; lastMessageId: string | null;
+  /** Platform unread facts; discovery uses them to catch up local read flags. */
+  firstUnreadMessageId?: string | null; unreadCount?: number;
 }
 export interface NormalizedMessage {
   platformThreadId: string; platformMessageId: string; senderId: string | null; senderType: string;

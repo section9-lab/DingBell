@@ -1,11 +1,12 @@
+import { sqlManagesCompany, NOW_MS_WHOLE_SECONDS } from '../../platform/database/sql.ts';
 import * as v from 'valibot';
 import { replyPolicyConfigSchema, type ReplyPolicyConfig } from '../../shared/reply-policy.ts';
 import type { SettingsActor } from '../company-settings/storage.ts';
 
 export type PolicyActor=SettingsActor;
 const access=`SELECT 1 FROM member actor JOIN user caller ON caller.id=actor.user_id JOIN session login ON login.user_id=caller.id
-  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>unixepoch()*1000
-  AND caller.email_verified=1 AND actor.role IN ('owner','admin')`;
+  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>${NOW_MS_WHOLE_SECONDS}
+  AND caller.email_verified=1 AND ${sqlManagesCompany('actor.role')}`;
 const params=(actor:PolicyActor)=>[actor.orgId,actor.actorUserId,actor.sessionId];
 const storesAvailable=(config:string)=>`NOT EXISTS (SELECT 1 FROM json_each(${config},'$.storeIds') requested
   WHERE NOT EXISTS (SELECT 1 FROM store WHERE store.id=requested.value AND store.organization_id=reply_policy.organization_id))`;
@@ -55,7 +56,7 @@ export async function ownsPolicyStores(db:D1Database,actor:PolicyActor,config:Re
 }
 export function createPolicy(db:D1Database,actor:PolicyActor,id:string,config:ReplyPolicyConfig) {
   return db.prepare(`INSERT INTO reply_policy (organization_id,id,kind,version,draft_revision,draft_config,enabled,updated_at)
-    SELECT ?,?,?,1,1,?,0,unixepoch()*1000 WHERE EXISTS (${access}) AND NOT EXISTS (SELECT 1 FROM json_each(?) requested
+    SELECT ?,?,?,1,1,?,0,${NOW_MS_WHOLE_SECONDS} WHERE EXISTS (${access}) AND NOT EXISTS (SELECT 1 FROM json_each(?) requested
     WHERE NOT EXISTS (SELECT 1 FROM store WHERE store.organization_id=? AND store.id=requested.value))
     ON CONFLICT(organization_id,id) DO NOTHING RETURNING version`)
     .bind(actor.orgId,id,config.kind,JSON.stringify(config),...params(actor),JSON.stringify(config.storeIds),actor.orgId).first();
@@ -91,15 +92,15 @@ export function savePolicy(db:D1Database,actor:PolicyActor,id:string,expectedVer
   if(expectedVersion===0) return db.prepare(`WITH candidate(config) AS (SELECT ?)
     INSERT INTO reply_policy (organization_id,id,kind,version,draft_revision,draft_config,tested_revision,tested_time_zone,
       draft_base_revision,published_revision,enabled,published_by,published_at,published_request_id,published_time_zone,updated_at)
-    SELECT ?,?,?,1,1,${candidate},1,${zone},1,1,1,?,unixepoch()*1000,?,${zone},unixepoch()*1000
+    SELECT ?,?,?,1,1,${candidate},1,${zone},1,1,1,?,${NOW_MS_WHOLE_SECONDS},?,${zone},${NOW_MS_WHOLE_SECONDS}
     WHERE EXISTS (${access}) AND ${scope} ON CONFLICT(organization_id,id) DO NOTHING RETURNING version`)
     .bind(JSON.stringify(config),actor.orgId,id,config.kind,actor.orgId,actor.actorUserId,requestId,actor.orgId,
       ...params(actor),actor.orgId,actor.orgId,id).first();
   return db.prepare(`WITH candidate(config) AS (SELECT ?)
     UPDATE reply_policy SET draft_config=${candidate},draft_revision=draft_revision+1,tested_revision=draft_revision+1,
       tested_time_zone=${zone},draft_base_revision=COALESCE(published_revision,0)+1,draft_rollback_of=NULL,
-      published_revision=COALESCE(published_revision,0)+1,enabled=1,published_by=?,published_at=unixepoch()*1000,
-      published_request_id=?,published_time_zone=${zone},version=version+1,updated_at=unixepoch()*1000
+      published_revision=COALESCE(published_revision,0)+1,enabled=1,published_by=?,published_at=${NOW_MS_WHOLE_SECONDS},
+      published_request_id=?,published_time_zone=${zone},version=version+1,updated_at=${NOW_MS_WHOLE_SECONDS}
     WHERE organization_id=? AND id=? AND version=? AND version<9007199254740991 AND kind=?
       AND EXISTS (${access}) AND ${scope} RETURNING version`)
     .bind(JSON.stringify(config),actor.orgId,actor.actorUserId,requestId,actor.orgId,actor.orgId,id,expectedVersion,config.kind,
@@ -123,11 +124,11 @@ export function changePolicy(db:D1Database,actor:PolicyActor,id:string,expectedV
     setValues.push(change.revision,change.revision);guard='AND published_revision>=?';guardValues.push(change.revision);
   } else {
     set=`published_revision=COALESCE(published_revision,0)+1,draft_base_revision=COALESCE(published_revision,0)+1,enabled=1,
-      published_by=?,published_at=unixepoch()*1000,published_request_id=?,
+      published_by=?,published_at=${NOW_MS_WHOLE_SECONDS},published_request_id=?,
       published_time_zone=tested_time_zone`;
     setValues.push(actor.actorUserId,requestId);guard=`AND tested_revision=draft_revision AND tested_time_zone=${currentTimeZone} AND ${storesAvailable('draft_config')} AND ${noOverlap}`;
   }
-  return db.prepare(`UPDATE reply_policy SET ${set},version=version+1,updated_at=unixepoch()*1000
+  return db.prepare(`UPDATE reply_policy SET ${set},version=version+1,updated_at=${NOW_MS_WHOLE_SECONDS}
     WHERE organization_id=? AND id=? AND version=? AND version<9007199254740991 AND EXISTS (${access}) ${guard} RETURNING version`)
     .bind(...setValues,actor.orgId,id,expectedVersion,...params(actor),...guardValues).first();
 }

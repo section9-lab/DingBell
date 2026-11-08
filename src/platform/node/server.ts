@@ -49,7 +49,9 @@ export async function serveNode(options:{dataDirectory:string;migrationsDirector
  const server=createServer(listener);server.requestTimeout=60000;server.headersTimeout=20000;
  const ticker=setInterval(()=>{app.tick().catch(()=>undefined);},1000);ticker.unref();
  let closing:Promise<void>|undefined;
- const close=()=>closing??=(async()=>{clearInterval(ticker);if(server.listening)await new Promise<void>(done=>server.close(()=>done()));await app.close();})();
+ const close=()=>closing??=(async()=>{clearInterval(ticker);if(server.listening)await new Promise<void>(done=>{server.close(()=>done());
+ // SSE and long-lived reads never end on their own; close them so shutdown/deploy cannot hang.
+ server.closeAllConnections();});await app.close();})();
  try{await new Promise<void>((done,reject)=>{server.once('error',reject);server.listen(options.port,options.hostname,done);});await app.tick();}catch(error){await close();throw error;}
  return {server,app,close};
 }

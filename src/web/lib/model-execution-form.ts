@@ -29,13 +29,13 @@ export function createModelExecutionDraft(execution: ModelExecution | null): Mod
 }
 
 type Parsed = { success: true; execution: ModelExecution | null } | { success: false; message: string };
-export function parseModelExecutionDraft(draft: ModelExecutionDraft, autoReply: boolean): Parsed {
-  if (!autoReply && modelExecutionFields.every(field => !draft[field.name].trim())) return { success: true, execution: null };
+export function parseModelExecutionDraft(draft: ModelExecutionDraft): Parsed {
+  if (modelExecutionFields.every(field => !draft[field.name].trim())) return { success: true, execution: null };
   const values = Object.fromEntries(modelExecutionFields.map(field => {
     const raw = draft[field.name].trim();
     return [field.name, field.price ? usdToMicros(raw) : /^\d+$/.test(raw) ? Number(raw) : null];
   }));
-  const parsed = v.safeParse(modelExecutionSchema, { ...values, autoReply });
+  const parsed = v.safeParse(modelExecutionSchema, values);
   return parsed.success ? { success: true, execution: parsed.output } : {
     success: false,
     message: '启用 AI 前请填写完整的 token 上限、生成轮数和四项供应商价格。未知价格请留空；只有已确认免费的项目才能填 0。',

@@ -1,3 +1,5 @@
+import { LoadingState } from '../components/query-state';
+import { canManageCompany } from '../lib/roles';
 import { useCallback, useEffect, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
@@ -27,11 +29,11 @@ export function ReplyPoliciesPage({ company, refresh }: { company: Company; refr
   const [dirty, setDirty] = useState(false);
   const [next, setNext] = useState<(() => void) | null>(null);
   const { date } = useCompanySettings();
-  const management = ['owner', 'admin'].includes(company.role);
+  const management = canManageCompany(company.role);
   const selectedId = newId ?? search.get('policy');
-  const list = useQuery({ queryKey: ['reply-policies', company.id, kind, after], queryFn: ({ signal }) => readReplyPolicies(company.id, kind, after, signal), enabled: management, retry: false });
+  const list = useQuery({ queryKey: ['reply-policies', company.id, kind, after], queryFn: ({ signal }) => readReplyPolicies(company.id, kind, after, signal), enabled: management });
   const stores = useInfiniteQuery({ queryKey: storesInfiniteQueryKey(company.id), queryFn: ({ pageParam, signal }) => readStores(company.id, pageParam, signal), initialPageParam: 0,
-    getNextPageParam: page => page.nextOffset ?? undefined, enabled: management && !!selectedId, retry: false });
+    getNextPageParam: page => page.nextOffset ?? undefined, enabled: management && !!selectedId });
   const storeRows = stores.data?.pages.flatMap(page => page.stores) ?? [];
   const resetEditor = useCallback(async (error?: unknown) => {
     if (error instanceof ApiError && error.code === 'NOT_FOUND') { setNewId(null); setSearch({ kind }, { replace: true }); }
@@ -83,7 +85,7 @@ export function ReplyPoliciesPage({ company, refresh }: { company: Company; refr
         <SheetContent className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-3xl">
           <SheetHeader className="shrink-0 gap-1 border-b px-6 py-5 pr-14"><SheetTitle>{newId ? '新建策略' : '编辑策略'}</SheetTitle><SheetDescription>{kind === 'automatic' ? '自动回复' : '主动通知'} · 保存即生效，历史版本自动保留</SheetDescription></SheetHeader>
           <div className="flex min-h-0 flex-1 flex-col">
-            {stores.isPending && <p role="status" className="flex items-center gap-2 border-b px-6 py-3 text-sm text-muted-foreground"><Spinner />正在读取适用店铺…</p>}
+            {stores.isPending && <LoadingState className="border-b px-6 py-3 text-muted-foreground">正在读取适用店铺…</LoadingState>}
             {(stores.isError || stores.hasNextPage) && <div className="shrink-0 border-b p-4">
               {stores.isError && <Alert><AlertTitle>店铺读取失败</AlertTitle><AlertDescription><p>策略操作已暂时锁定，请先重新读取店铺。</p><Button variant="outline" onClick={() => void stores.refetch()}>重新读取店铺</Button></AlertDescription></Alert>}
               {stores.hasNextPage && <Button variant="outline" disabled={stores.isFetchingNextPage} onClick={() => void stores.fetchNextPage()}>载入更多店铺</Button>}

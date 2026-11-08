@@ -1,3 +1,4 @@
+import { sqlManagesCompany, NOW_MS } from '../../platform/database/sql.ts';
 import type { Context, Hono } from 'hono';
 import { apiError, jsonResponse, type ApplicationEnv } from '../../http.ts';
 import type { DegradationView } from '../../shared/degradation.ts';
@@ -16,11 +17,11 @@ export function registerDegradationRoutes(app: Hono<ApplicationEnv>) {
     // Configuration and budget describe current admission, not historical fallback
     // ledgers. An ambiguous budget set is unavailable rather than chosen arbitrarily.
     const row = await c.env.DB!.prepare(`WITH viewer AS (
-      SELECT actor.organization_id AS organizationId,CAST(unixepoch('subsecond')*1000 AS INTEGER) AS snapshotAt
+      SELECT actor.organization_id AS organizationId,${NOW_MS} AS snapshotAt
       FROM member actor JOIN user caller ON caller.id=actor.user_id JOIN session login ON login.user_id=actor.user_id
       WHERE actor.organization_id=? AND actor.user_id=? AND login.id=?
-        AND login.expires_at>CAST(unixepoch('subsecond')*1000 AS INTEGER)
-        AND caller.email_verified=1 AND actor.role IN ('owner','admin')
+        AND login.expires_at>${NOW_MS}
+        AND caller.email_verified=1 AND ${sqlManagesCompany('actor.role')}
     ), budgets AS (
       SELECT budget.* FROM ai_budget budget JOIN viewer ON viewer.organizationId=budget.organization_id
       WHERE budget.enabled=1 AND budget.starts_at<=viewer.snapshotAt AND budget.ends_at>viewer.snapshotAt

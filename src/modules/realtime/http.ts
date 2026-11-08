@@ -1,3 +1,4 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { apiError, type ApplicationEnv } from '../../http.ts';
@@ -32,7 +33,7 @@ export function registerRealtimeRoutes(app: Hono<ApplicationEnv>) {
       stream.onAbort(() => { aborted = true; });
       await stream.writeSSE({ event: 'connected', data: '{}', retry: RECONNECT_DELAY_MS });
       while (!aborted && Date.now() < expires) {
-        const access = await db.prepare(`SELECT member.id AS memberId,member.role FROM member JOIN user ON user.id=member.user_id JOIN session ON session.user_id=user.id WHERE member.organization_id=? AND user.id=? AND session.id=? AND session.expires_at>CAST(unixepoch('subsecond')*1000 AS INTEGER) AND user.email_verified=1`)
+        const access = await db.prepare(`SELECT member.id AS memberId,member.role FROM member JOIN user ON user.id=member.user_id JOIN session ON session.user_id=user.id WHERE member.organization_id=? AND user.id=? AND session.id=? AND session.expires_at>${NOW_MS} AND user.email_verified=1`)
           .bind(orgId, actorId, sessionId).first<{ memberId: string; role: string }>();
         if (!access) {
           await stream.writeSSE({ event: 'access_revoked', data: '{}' });

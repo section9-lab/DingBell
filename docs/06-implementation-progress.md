@@ -3242,3 +3242,50 @@ Cloudflare 最新真云检查使用全新 D1、全部 54 份迁移、实际 Pi W
 改法：摘要查询里把 `buyerSenderId` 子查询改成 `json_object('senderId',...,'orderNumber',...)`，`orderNumber` 仅当 `order_number` 以 `sender_id || '-'` 开头时取值，仍是同一次索引查找。`ConversationSummary` 增加 `buyerOrderNumber`，HTTP DTO 与前端 `summaryFields`（`v.nullable(id)`）同步。界面按 `buyerOrderNumber` → `buyerSenderId` → `platformThreadId` 依次显示「订单 86910324-0074」「买家 294329708」「会话 <平台会话 ID>」，完整标识直接展示（容器 `truncate` 截断），完整值放 title；不再截取后四位。
 
 验证：`tsc --noEmit`（根 + `src/web`）通过；`tests/conversations-read.test.ts` 新增「sender id 是订单号时报告为订单」「同一条消息的无关订单号不算」两条断言，与 `conversations-http`、`conversations-queue-read`、前端合同合计 42/42；`src/web/lib/*.test.ts` 193/193。用 Node 适配器播种三条会话（纯买家 ID、订单号型 ID、无消息）截图核对：首行分别为「买家 294329708」「订单 86910324-0074」「会话 acf4a862-…」，旧的「…后四位」不再出现，第三行 UUID 由容器截断且时间列不被挤压。
+
+
+## 139. support-reply-v2：read/bash、商品/订单事实与 send_message（2026-11-06）
+
+按 `docs/17-agent-tool-redesign.md` 的目标合同落地新的自动回复工具面，旧 `support-reply-v1` 已由 v2 取代并删除。
+
+- **版本隔离**：新增 `support-reply-v2`。新的 AI 接待运行始终使用 v2，默认最多 6 轮生成；`support-reply-v1`、`support-knowledge-v1` 及其旧工具已删除；`support-v1` 保留为只转人工的最小兜底。
+- **只读发现**：`bash` 每次调用重建 `/knowledge` 内存快照，仅开放 `grep`/`cat`/`ls`/`head`/`tail`/`wc`，有命令数、输出、时间和文件上限；无网络、宿主文件或环境变量。stdout 不是证据，也不产生发送权限。
+- **有界读取**：`read` 只接受 `/knowledge/<documentId>.md` 和行范围；成功读取把文档修订、内容哈希、标题与摘录写入 `ai_document_evidence`，后续 `send_message` 的 `citations` 只能引用这里实际读过的文档。
+- **商品/订单事实**：`get_product_info` 和 `get_order_status` 继续由应用从冻结运行与会话元数据解析，模型不能传 SKU/订单号；成功读取把快照哈希和快照正文冻结到迁移 `0074_ai_fact_evidence.sql` 的 append-only 表，返回不可猜测的证据 ID。
+- **提交而非直发**：`send_message` 接受文档 `citations` 和/或事实 `facts`，至少一项且分别最多 10 个；工具写入 `ai_execution.reply` 后唤醒观察器，不直接调用 Ozon。最终入队与发送前再次核对证据当前值、运行完成/结算、期限、店铺凭据、预算、会话接管与三项外发开关；unknown 仍不自动重发。
+- **验证**：新增 `tests/ai-agent-v2.test.ts`，覆盖工具输入边界、bash 不产生证据、read 冻结文档、事实证据、文档/事实变更后拒绝、未读文档拒绝、v2 完成后一次共享发送；`tests/node-support.test.ts` 增加 Pi 运行时 v2 工具面断言；`tests/knowledge-virtual-files.test.ts` 补齐虚拟文件标题。`npm test` 1189/1189 通过，`tsc --noEmit`（根与 web）通过，Biome lint 通过，`tests/integration/ai-handoff.test.ts` 10/10、`tests/integration/portable-runtime.test.ts` 1/1 通过。
+- **未放行**：仍是本地合同与合成适配验证；真实模型工具调用质量、俄语回答评估、真实 Ozon 外发、云端部署和 `tests/integration/knowledge.test.ts` 中尚未同步的旧索引断言不在本阶段放行范围。三项外发开关继续保持默认关闭。
+
+
+## 140. 移除 AI 草稿模式，新运行直接回复（2026-11-06）
+
+产品决定：AI 接待不再提供“只生成草稿、人工确认后发送”的模式，新的 AI 运行只做直接回复；原来的知识检索草稿版本 `support-knowledge-v1`、旧直接回复版本 `support-reply-v1` 及其工具、测试已删除。升级前必须先清空或放弃在途 v1 运行；新运行只使用 `support-reply-v2`。
+
+- **UI**：删除“AI 回复方式”下拉和草稿选项，只保留直接回复说明；执行限制表单仍可全部留空保存连接，填写完整后才允许启动 AI 接待。
+- **运行时**：`resolveSupportConfiguration` 对已保存公司模型始终返回 `support-reply-v2`；`autoReply` 从模型执行表单和运行时选择中移除。历史行中的 `autoReply` 只为严格 schema 兼容保留，运行时忽略，不新增迁移。
+- **新运行准入**：`executeAiRun` 和部署级 `supportConfigurationView` 只接受 `support-reply-v2` 或最小兜底 `support-v1`；旧 v1 答案版本不再被代码识别。
+- **默认轮数**：新的直接回复运行默认最多 6 轮生成，UI 缺省值同步为 6；显式保存的生成轮数仍优先。
+- **验证**：`tests/node-support.test.ts`、`tests/company-model.test.ts`、`tests/ai-configuration.test.ts` 和 `src/web/lib/model-execution-form.test.ts` 已同步；`npm test` 1160/1160、`npm run check:types`、`npm run check:platforms`、`npm run check:release`、`npm run test:portable`（26/26）、`npm run test:knowledge-evaluation-local`（13/13）与 `npm run build` 均通过，`tests/e2e/company-model.spec.ts` 10/10 通过。删除的旧测试包括 `ai-reply-tool`、`ai-reply-intent`、`ai-knowledge-tool`、`ai-text-knowledge` 和 legacy `ai-runtime`；发送管道/完成审阅测试已改用 v2 `send_message` 与证据读取。真实模型质量与真实 Ozon 外发仍未因此放行，三项外发开关保持默认关闭。
+
+
+## 141. Ozon 同步改为 Push-only，移除定时轮询兜底（2026-11-06）
+
+产品决定：Ozon 数据不再由分钟 Cron 发现或轮询，Webhook 是自动同步的唯一入口；定时任务只保留内部 AI、控制、财务修复。
+
+- **调度器**：`runScheduled` 删除 `wakeStores`、`repairPushHistory` 和 `listDueSyncStores` 的调用。Cron 不再唤醒店铺、不再发现 Ozon 变更、不再补偿同步扫描。
+- **Wake 路径**：新消息只能由 `POST /api/ozon/push/:endpointId/:token` 持久接收后调用 `wakeStoreSync`，再由 `StoreCoordinator` alarm 处理。Webhook 初次唤醒失败时没有定时兜底；事件仍在 `ozon_push_event` 中，可通过 Push 面板重试或等待下一次通知。
+- **删除代码**：`listDueSyncStores` 查询及对应测试断言已移除；`tests/integration/sync.test.ts` 改为验证“Cron 不同步 Ozon，只有显式 wake 才导入页面”。
+- **仍在的范围**：Push 激活后聊天、商品、FBS 由事件驱动；FBO/FBP 没有完整通知覆盖，只保留显式人工回补。人工回补仍然是有限任务，分页结束即停止。
+- **验证**：`npm test` 1160/1160、`npm run check:types`、`npm run check:platforms`、`npm run check:release`、`npm run test:portable`（26/26）与 `npm run build` 通过；`tests/integration/sync.test.ts` 6/6 通过，覆盖 Cron 不再发现 Ozon、显式 wake 导入、暂停后不再调度。
+
+
+## 142. 启动全量引导 + Push 增量（2026-11-06）
+
+同步模型确定为“启动一次全量引导，之后 Webhook 增量”，不再有周期性 Ozon 轮询。
+
+- **启动引导**：`runStartupBootstrap` 在首次定时任务中扫描所有已验证、凭证有效且具备读取能力的 Ozon 店铺，创建 `store_sync_source`、聊天 discovery 游标、商品游标和 FBS/FBO/FBP 窗口，然后唤醒 `StoreCoordinator`。协调器继续用自身 alarm 分页完成初始读取。
+- **只执行一次**：迁移 `0075_sync_bootstrap.sql` 新增 `sync_bootstrap`；全局 `startup` 标记和逐店 `completed_at` 防止重启或重复 Cron 再次引导。首批最多处理 50 家店铺，未完成时保留标记并在下一次 Cron 继续。
+- **新店铺**：连接检查成功后调用 `bootstrapStoreSync`，只引导该店铺；已有店铺不会因新增检查重复引导。
+- **增量**：引导完成后，聊天、商品、FBS 只由 Ozon Push Webhook + `StoreCoordinator` alarm 驱动。FBO/FBP 没有完整通知覆盖，保留显式人工回补；旧的周期性发现不再运行。
+- **边界**：启动引导只写入持久任务并唤醒协调器，不直接访问 Ozon；真正的分页读取仍走现有店铺凭证、限流、epoch/fence 和响应校验。订单初始窗口沿用现有 30 天引导预算，更早订单继续使用人工历史导入。
+- **验证**：新增 `tests/sync-bootstrap.test.ts`，覆盖启动标记、初始 chat/product/FBS 工作、逐店完成和无读取能力店铺；`tests/integration/sync.test.ts` 改为验证 Cron 不轮询、显式 wake 才读取。`npm test` 1174/1174、`tests/integration/sync.test.ts` 6/6、`npm run check:types`、`npm run check:platforms`、`npm run check:release`、`npm run test:portable`（26/26）与 `npm run build` 均通过。

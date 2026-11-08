@@ -1,9 +1,10 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import {replyPolicyConfigSchema,policyStageSchema} from '../../shared/reply-policy.ts';
 import {replyBodySchema,storedControlStateSchema} from './control-state.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const counter=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1));
-const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 export const aiScopeSchema=v.strictObject({organizationId:id,storeId:id,conversationId:id,controllerId:id});
 export const aiStartSchema=v.strictObject({runId:v.pipe(v.string(),v.uuid()),expectedVersion:counter,messageId:id,policyId:id,stage:policyStageSchema,language:v.picklist(['ru','zh-CN','en'])});
 export const aiResumeSchema=v.pipe(v.strictObject({...aiStartSchema.entries,previousRunId:v.nullable(v.pipe(v.string(),v.uuid()))}),v.check(r=>r.runId!==r.previousRunId));

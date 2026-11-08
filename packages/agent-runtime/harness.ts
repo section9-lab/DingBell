@@ -1,9 +1,9 @@
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { nvidiaProvider } from '@earendil-works/pi-ai/providers/nvidia';
 import { createModels } from '@earendil-works/pi-ai/models';
-import { AssistantEntry, createRegistry, defineTool, Harness, type HarnessOptions, type Storage, type SubmissionId } from '@earendil-works/pi-durable';
+import { AssistantEntry, createRegistry, defineTool, Harness, type EntryRecord, type HarnessOptions, type Storage, type SubmissionId } from '@earendil-works/pi-durable';
 import type { TSchema } from '@earendil-works/pi-ai';
-import type { AgentAuthority, AgentDefinition, AgentResult } from './contracts.ts';
+import type { AgentAuthority, AgentDefinition, AgentLoop, AgentLoopStep, AgentResult } from './contracts.ts';
 import { legacyNemotron } from './model.ts';
 
 export { context };
@@ -58,4 +58,37 @@ export async function readResult(harness: Harness, uid: string, id: string, auth
   const answer = status.answer ? await (await harness.root(context)).commit(tx => tx.entry(AssistantEntry, status.answer!), context) : undefined;
   const text = answer?.model?.flatMap(message => message.role === 'assistant' ? message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : []).join('') ?? '';
   return { outcome: 'completed', text, metadata: await authority.metadata(uid, text) };
+}
+
+const LOOP_STEP_LIMIT = 60, LOOP_TEXT_LIMIT = 600;
+function clip(value: string) { return value.length > LOOP_TEXT_LIMIT ? `${value.slice(0, LOOP_TEXT_LIMIT)}…` : value; }
+/** Reduces committed Pi entries to the visible loop. Only model-visible turns are shown, oldest first. */
+export function loopSteps(entries: readonly EntryRecord[], limit = LOOP_STEP_LIMIT): AgentLoop {
+  const steps: AgentLoopStep[] = [], tools = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry.model) continue;
+    for (const message of entry.model) {
+      if (message.role === 'assistant') {
+        for (const block of message.content) {
+          if (block.type === 'thinking' && block.thinking.trim()) steps.push({ id: `${entry.id}:t${steps.length}`, kind: 'thinking', text: clip(block.thinking) });
+          else if (block.type === 'toolCall') {
+            tools.set(block.id, steps.length);
+            steps.push({ id: `${entry.id}:c${steps.length}`, kind: 'tool', name: block.name, input: clip(JSON.stringify(block.arguments ?? {})) });
+          } else if (block.type === 'text' && block.text.trim()) steps.push({ id: `${entry.id}:a${steps.length}`, kind: 'answer', text: clip(block.text) });
+        }
+      } else if (message.role === 'toolResult') {
+        const output = message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+        const index = tools.get(message.toolCallId), call = index === undefined ? undefined : steps[index];
+        // One tool is one visible step: its result fills the call rather than creating a second row.
+        if (call) steps[index!] = { ...call, output: clip(output), failed: message.isError };
+        else steps.push({ id: `${entry.id}:r${steps.length}`, kind: 'tool', name: message.toolName, output: clip(output), failed: message.isError });
+      }
+    }
+  }
+  return { steps: steps.length > limit ? steps.slice(-limit) : steps, truncated: steps.length > limit };
+}
+export async function readAgentLoop(harness: Harness): Promise<AgentLoop> {
+  const root = await harness.root(context);
+  const page = await root.entries({ order: 'ascending' }, 200, undefined, context);
+  return loopSteps(page.items);
 }

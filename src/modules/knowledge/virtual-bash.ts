@@ -1,4 +1,3 @@
-import { Bash } from 'just-bash/browser';
 import type { KnowledgeVirtualFile } from './virtual-files.ts';
 
 const MAX_COMMAND_BYTES = 4 * 1024;
@@ -27,6 +26,9 @@ export async function runKnowledgeDiscovery(files: readonly KnowledgeVirtualFile
     initial[file.path] = file.content;
   }
   signal?.throwIfAborted();
+  // Load the sandbox only when a run actually asks for discovery. The control fixture,
+  // health checks and read-only replies must not need the shell runtime at startup.
+  const { Bash } = await import('just-bash/browser');
   const shell = new Bash({
     files: initial, cwd: '/knowledge',
     commands: ['grep', 'cat', 'ls', 'head', 'tail', 'wc'],

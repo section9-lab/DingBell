@@ -1,6 +1,6 @@
 import { waitUntil } from '@vercel/functions';
 import { openWorldReader, openWorldStorage, resumeWith } from 'durable-harness/pi-durable';
-import { context, openAgent, providerId, readResult } from '../../packages/agent-runtime/harness.ts';
+import { context, openAgent, providerId, readAgentLoop, readResult } from '../../packages/agent-runtime/harness.ts';
 import { authority } from './authority.ts';
 import { internal } from './config.ts';
 
@@ -13,11 +13,11 @@ export async function POST(request:Request) {
     const storage=await openWorldStorage(undefined,{traceAudience:'private'}),id=storage.sessionId;await storage.close(context);return Response.json(id);
   }
   const [uid,id]=value.args;
-  if(typeof uid!=='string'||!/^wrun_[0-9A-HJKMNP-TV-Z]{26}$/.test(uid)||!['dispatch','read','abort'].includes(String(value.method)))return new Response(null,{status:400});
+  if(typeof uid!=='string'||!/^wrun_[0-9A-HJKMNP-TV-Z]{26}$/.test(uid)||!['dispatch','read','activity','abort'].includes(String(value.method)))return new Response(null,{status:400});
   if(value.method==='dispatch') { const existing=await authority.receipt(uid);if(existing)return Response.json(existing); }
-  if(value.method==='read') {
+  if(value.method==='read'||value.method==='activity') {
     const reader=openWorldReader(uid);await reader.refresh();
-    if((await reader.snapshot()).unfinished)return Response.json({outcome:'pending'});
+    if(value.method==='read'&&(await reader.snapshot()).unfinished)return Response.json({outcome:'pending'});
   }
   const harness=await open(await openWorldStorage(uid));
   if(value.method==='dispatch'){
@@ -31,6 +31,7 @@ export async function POST(request:Request) {
   }
   try {
     if(value.method==='read'&&typeof id==='string')return Response.json(await readResult(harness,uid,id,authority));
+    if(value.method==='activity')return Response.json(await readAgentLoop(harness));
     if(value.method==='abort'){await(await harness.root(context)).abort(context);return Response.json(null);}
     return new Response(null,{status:400});
   } finally {await harness.close(context);}

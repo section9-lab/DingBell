@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import type { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
 import { checkedReplyTranslation, controlCommandSchema, normalizeControlState } from './control-state.ts';
@@ -5,6 +6,8 @@ import { deferControlRepair, projectControlEvents, readControlAccess, readContro
 import { decryptCredentials } from '../stores/credentials.ts';
 import { reserveReply, recordReplyRateLimit } from '../sync/bindings.ts';
 import { sendOzonMessage, type OzonSendResult } from '../ozon/send.ts';
+import { replyWakeDelay } from './reply-wake.ts';
+import { isBuyerChatType } from '../ozon/chat-type.ts';
 import { readReplyDispatchContext, readAiReplyDispatchContext, projectReplyEvents, type ReplyDispatchContext } from './reply-storage.ts';
 import { checkedReply, replyView } from './reply-state.ts';
 import type { ReplyIntent, ReplySnapshot, ReplyReadResult, ReplyRejectCode, ReplyListReadResult, ReplyTranslation } from './reply-types.ts';
@@ -14,7 +17,7 @@ import type { ControlAccess, ControlActor, ControlCommand, ControlCommandResult,
 import {aiStartSchema,aiResumeSchema,aiHandoffSchema,aiRunSchema,checkedAiReceipt,handoffNotice,type AiRun,type AiReceipt,type AiHandoff} from './ai-state.ts';
 import {readAiAdmission} from './ai-storage.ts';
 import {readAiExecution} from '../ai-runs/storage.ts';
-import {reviewAiReply,reviewCompletedAiReply} from '../ai-runs/reply-intent.ts';
+import {reviewAiMessage,reviewCompletedAiMessage} from '../ai-runs/message-intent.ts';
 import {checkedAiSendReceipt,type AiSendReceipt} from './ai-reply-receipt.ts';
 import type {SupportBindings} from '../ai-runs/execution.ts';
 import {selectReplyPolicy} from '../reply-policies/matching.ts';
@@ -26,8 +29,8 @@ import {aiWorkSchema,aiIntakeRunSchema,aiIntakeRequestSchema,aiClassificationSch
 const eventPrefix='event:';
 const notePrefix='note:';
 const replyPrefix='reply:',replyEventPrefix='reply-event:',replyDuePrefix='reply-due:';
-const wakeTime=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
-const aiReplyWakeSchema=v.pipe(v.strictObject({runId:v.pipe(v.string(),v.uuid()),dueAt:wakeTime,deadlineAt:wakeTime}),v.check(wake=>wake.dueAt<=wake.deadlineAt));
+const wakeTime=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
+const aiReplyWakeSchema=v.pipe(v.strictObject({runId:v.pipe(v.string(),v.uuid()),dueAt:wakeTime,deadlineAt:wakeTime,attempts:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(1000))}),v.check(wake=>wake.dueAt<=wake.deadlineAt));
 const historyEntrySchema=v.strictObject({id:v.pipe(v.string(),v.minLength(1),v.maxLength(256)),sequence:v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(Number.MAX_SAFE_INTEGER))});
 const historySchema=v.pipe(v.strictObject({schemaVersion:v.literal(1),observedSequence:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER)),complete:v.boolean(),after:v.nullable(v.pipe(v.string(),v.minLength(7),v.maxLength(262),v.startsWith(replyPrefix))),recent:v.pipe(v.array(historyEntrySchema),v.maxLength(20))}),
   v.check(history=>(!history.complete||history.after===null)&&new Set(history.recent.map(item=>item.id)).size===history.recent.length&&history.recent.every((item,index)=>item.sequence<=history.observedSequence&&(index===0||item.sequence<history.recent[index-1]!.sequence))));
@@ -517,7 +520,7 @@ return class ConversationController extends Base {
       if(receipt.runId!==runId||!await this.storedReply(transaction,receipt.intentId))throw new Error('INVALID_REPLY_STATE');return {outcome:'accepted' as const,receipt};
     });
     if(historical)return historical;
-    const prepared=await reviewCompletedAiReply(this.env,(s,id)=>this.readAiRun(s,id),scope,runId);
+    const prepared=await reviewCompletedAiMessage(this.env,(s,id)=>this.readAiRun(s,id),scope,runId);
     if(!prepared)return {outcome:'unavailable' as const};
     const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
     const hash=await bodyHash(prepared.body);
@@ -542,11 +545,11 @@ return class ConversationController extends Base {
   async wakeAiReply(scope:ControlScope,runId:string):Promise<void> {
     if(!this.routed(scope))throw new Error('AI_REPLY_UNAVAILABLE');
     const read=(s:ControlScope,id:string)=>this.readAiRun(s,id);
-    const prepared=await reviewAiReply(this.env,read,scope,runId)??await reviewCompletedAiReply(this.env,read,scope,runId);
+    const prepared=await reviewAiMessage(this.env,read,scope,runId)??await reviewCompletedAiMessage(this.env,read,scope,runId);
     if(!prepared)throw new Error('AI_REPLY_UNAVAILABLE');
     await this.ctx.storage.transaction(async transaction=>{
       if(JSON.stringify(await transaction.get('aiRun'))!==JSON.stringify(prepared.run)||Date.now()>=prepared.run.deadlineAt)throw new Error('AI_REPLY_UNAVAILABLE');
-      await transaction.put('aiReplyWake',{runId,dueAt:Math.min(Date.now()+1_000,prepared.run.deadlineAt),deadlineAt:prepared.run.deadlineAt});await this.schedule(transaction);
+      await transaction.put('aiReplyWake',{runId,dueAt:Math.min(Date.now()+replyWakeDelay(0),prepared.run.deadlineAt),deadlineAt:prepared.run.deadlineAt,attempts:0});await this.schedule(transaction);
     });
   }
   protected async observeAiReply(scope:ControlScope,runId:string) {
@@ -564,7 +567,7 @@ return class ConversationController extends Base {
     }catch{retry=true;}
     finally{await this.ctx.storage.transaction(async transaction=>{
       if(JSON.stringify(await transaction.get('aiReplyWake'))!==JSON.stringify(wake))return;
-      if(retry&&Date.now()<wake.deadlineAt)await transaction.put('aiReplyWake',{...wake,dueAt:Math.min(Date.now()+1_000,wake.deadlineAt)});
+      if(retry&&Date.now()<wake.deadlineAt)await transaction.put('aiReplyWake',{...wake,attempts:wake.attempts+1,dueAt:Math.min(Date.now()+replyWakeDelay(wake.attempts+1),wake.deadlineAt)});
       else await transaction.delete('aiReplyWake');await this.schedule(transaction);
     });}
   }
@@ -706,7 +709,7 @@ return class ConversationController extends Base {
   }
   private replyGate(context:ReplyDispatchContext|null,state:ControlState):ReplyRejectCode|null {
     if(this.env.OUTBOUND_ENABLED!=='true'||context&&!context.outboundEnabled)return 'OUTBOUND_DISABLED';
-    if(!context||state.lifecycle!=='open'||state.reception!=='human'||['paused','disconnected'].includes(context.store.status)||context.platformType!=='BUYER_SELLER')return 'REPLY_UNAVAILABLE';
+    if(!context||state.lifecycle!=='open'||state.reception!=='human'||['paused','disconnected'].includes(context.store.status)||!isBuyerChatType(context.platformType))return 'REPLY_UNAVAILABLE';
     if(!context.replyAvailable)return 'CAPABILITY_UNVERIFIED';
     return null;
   }
@@ -772,7 +775,7 @@ return class ConversationController extends Base {
       const now=Math.max(Date.now(),current.intent.updatedAt);
       if(result.httpStatus===429) {
         const previous=await transaction.get<{until:number}>('replyRateLimit');
-        await transaction.put('replyRateLimit',{until:Math.max(previous?.until??0,Math.min(8_640_000_000_000_000,now+(result.retryAfterMs??60_000))),dueAt:now});
+        await transaction.put('replyRateLimit',{until:Math.max(previous?.until??0,Math.min(MAX_TIMESTAMP_MS,now+(result.retryAfterMs??60_000))),dueAt:now});
       }
       await this.putReply(transaction,{intent:{...current.intent,state:result.outcome,revision:revision+1,updatedAt:now,dueAt:null,lastError:code},
         attempt:{...current.attempt!,state:result.outcome,finishedAt:now,httpStatus:result.httpStatus,providerResult:result.providerResult,errorCode:code}},current);
@@ -793,7 +796,7 @@ return class ConversationController extends Base {
   private async replyContext(scope:ControlScope,intent:ReplyIntent) {
     if(intent.schemaVersion===1)return readReplyDispatchContext(this.env.DB!,scope,intent.actorUserId,intent.actorMemberId);
     const context=await readAiReplyDispatchContext(this.env.DB!,scope);
-    const frozen=await reviewCompletedAiReply(this.env,(s,id)=>this.readAiRun(s,id),scope,intent.runId);
+    const frozen=await reviewCompletedAiMessage(this.env,(s,id)=>this.readAiRun(s,id),scope,intent.runId);
     if(!frozen||frozen.id!==intent.id||frozen.body!==intent.body||frozen.platformThreadId!==intent.platformThreadId||frozen.credentialVersion!==intent.credentialVersion
       ||frozen.run.controlEpoch!==intent.controlEpoch)return null;
     return context?.store.platformStoreId===frozen.platformStoreId&&context?.platformThreadId===frozen.platformThreadId&&context?.store.credentialVersion===frozen.credentialVersion?context:null;
@@ -803,7 +806,7 @@ return class ConversationController extends Base {
     if(intent.schemaVersion===1)return this.replyGate(context,state);
     if(this.env.OUTBOUND_ENABLED!=='true'||this.env.AI_OUTBOUND_ENABLED!=='true')return 'OUTBOUND_DISABLED';
     if(state.lifecycle!=='open'||state.reception!=='ai'||state.workStatus!=='needs_reply'||state.assignedMemberId!==null)return 'CONTROL_CHANGED';
-    if(!context.outboundEnabled||!context.replyAvailable||context.store.platform!=='ozon'||context.platformType!=='BUYER_SELLER')return 'CAPABILITY_UNVERIFIED';
+    if(!context.outboundEnabled||!context.replyAvailable||context.store.platform!=='ozon'||!isBuyerChatType(context.platformType))return 'CAPABILITY_UNVERIFIED';
     return null;
   }
   private async deferReply(snapshot:ReplySnapshot,dueAt:number) {

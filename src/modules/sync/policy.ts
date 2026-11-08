@@ -1,9 +1,9 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 /** Scheduling and failure policy for Ozon synchronization. Times are milliseconds. */
 const HISTORY_CONTINUATION_MS = 1_000;
 const HISTORY_ACTIVE_MS = 60_000;
 const HISTORY_IDLE_MS = 900_000;
 const MAX_PROVIDER_RETRY_AFTER_MS = 86_400_000;
-const MAX_TIMESTAMP_MS = 8_640_000_000_000_000;
 const INITIAL_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 300_000;
 const MAX_RETRY_EXPONENT = 6;

@@ -1,11 +1,13 @@
-import {pushCoordinatorRuntime,pushJobCondition,pushJobFrom,pushDue,runnablePush} from '../ozon-push/storage.ts';
+import { NOW_MS } from '../../platform/database/sql.ts';
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
+import {pushCoordinatorRuntime,pushJobCondition} from '../ozon-push/storage.ts';
 import { storeAccess, storeColumns } from '../stores/storage.ts';
 import { prepareProductSyncSeed } from '../products/sync-seed.ts';
 import { prepareFbsSyncSeed, prepareFboSyncSeed,prepareFbpSyncSeed } from '../orders/sync-seed.ts';
 import type { StoreActor, StoreRecord } from '../stores/storage.ts';
 import type { StoreCoordinatorRecord, StoreSyncRecord, SyncCursor, SyncLease, SyncPage, SyncScope, SyncSource, SyncSourceRecord, SyncSQL } from './types.ts';
 
-const nowSQL = "CAST(unixepoch('subsecond') * 1000 AS INTEGER)";
+const nowSQL = NOW_MS;
 const stateColumns = `store.organization_id AS orgId,store.id AS storeId,? AS source,COALESCE(authority.enabled,0) AS enabled,
   COALESCE(authority.epoch,0) AS epoch,COALESCE(coordinator.fence,0) AS fence,authority.credential_version AS credentialVersion,
   MAX(COALESCE(authority.due_at,0),COALESCE(coordinator.blocked_until,0)) AS dueAt,authority.last_success_at AS lastSuccessAt,authority.last_error AS lastError,
@@ -146,7 +148,9 @@ export async function getDueSyncCursor(db:D1Database,lease:SyncLease):Promise<Sy
   const live=syncLeaseCondition(lease);
   const row=await db.prepare(`SELECT store_id AS storeId,thread_id AS threadId,stream,cursor,recent_cursors AS recentCursors,revision,due_at AS dueAt,completed
     FROM sync_cursor WHERE store_id=? AND organization_id=? AND completed=0 AND due_at<=${nowSQL} AND ${live.sql}
-    ORDER BY CASE WHEN stream='discovery' THEN 0 WHEN stream='backfill' THEN 1 ELSE 2 END,due_at,stream,thread_id LIMIT 1`)
+    ORDER BY CASE WHEN stream='discovery' THEN 0 WHEN stream='backfill' THEN 1 ELSE 2 END,
+      CASE WHEN stream='incremental' AND EXISTS (SELECT 1 FROM conversation AS current WHERE current.id=sync_cursor.conversation_id AND current.last_message_id IS NOT sync_cursor.cursor) THEN 0 ELSE 1 END,
+      due_at,stream,thread_id LIMIT 1`)
     .bind(lease.storeId,lease.orgId,...live.values).first<Omit<SyncCursor,'recentCursors'> & {recentCursors:string}>();
   return row?{...row,completed:!!row.completed,recentCursors:JSON.parse(row.recentCursors) as string[]}:null;
 }
@@ -164,7 +168,9 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
       || messages.some(message=>message.liveObserved) || page.nextCursor!==(messages[0]?.platformMessageId ?? null)))
     || (page.restartBackfill && (!page.bootstrapSnapshot || !page.restartBackfill.cursor || page.restartBackfill.cursor!==messages.at(-1)?.platformMessageId))
     || seeds.some(seed=>!chats.some(chat=>chat.platformThreadId===seed.threadId))
-    || chats.some(chat=>typeof chat.platformThreadId!=='string')) throw new Error('INVALID_SYNC_PAGE');
+    || chats.some(chat=>typeof chat.platformThreadId!=='string'
+      || chat.unreadCount!==undefined&&(!Number.isSafeInteger(chat.unreadCount)||chat.unreadCount<0)
+      || chat.firstUnreadMessageId!==undefined&&chat.firstUnreadMessageId!==null&&!/^\d+$/.test(chat.firstUnreadMessageId))) throw new Error('INVALID_SYNC_PAGE');
   if (new TextEncoder().encode(JSON.stringify(page)).length>1_048_576) throw new Error('SYNC_PAGE_TOO_LARGE');
   const current = await db.prepare('SELECT cursor,recent_cursors AS recentCursors FROM sync_cursor WHERE store_id=? AND organization_id=? AND thread_id=? AND stream=? AND revision=?')
     .bind(lease.storeId,lease.orgId,page.cursor.threadId,page.cursor.stream,page.cursor.revision).first<{cursor:string|null;recentCursors:string}>();
@@ -211,6 +217,26 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
         json_extract(value,'$.createdAt'),json_extract(value,'$.lastMessageId'),${nowSQL} FROM json_each(?) WHERE ${accepted}
       ON CONFLICT(store_id,channel_type,platform_thread_id) DO UPDATE SET platform_type=excluded.platform_type,platform_status=excluded.platform_status,last_message_id=excluded.last_message_id`)
       .bind(lease.orgId,lease.storeId,chatJSON,...acceptedValues),
+    ...(chats.length ? [
+        // The chat list carries the platform's unread facts. Catch local read flags up without
+        // touching messages newer than the listed last message or reversing a read receipt.
+        db.prepare(`UPDATE message SET is_read=1
+          WHERE store_id=? AND organization_id=? AND direction IN ('inbound','unknown') AND is_read=0 AND platform_message_id NOT GLOB '*[^0-9]*'
+            AND EXISTS (SELECT 1 FROM json_each(?) AS chat
+              JOIN conversation AS current ON current.id=message.conversation_id AND current.store_id=message.store_id AND current.organization_id=message.organization_id
+              WHERE json_extract(chat.value,'$.platformThreadId')=current.platform_thread_id
+                AND ((json_extract(chat.value,'$.unreadCount')=0
+                    AND (json_extract(chat.value,'$.lastMessageId') IS NULL
+                      OR length(message.platform_message_id)<length(json_extract(chat.value,'$.lastMessageId'))
+                      OR (length(message.platform_message_id)=length(json_extract(chat.value,'$.lastMessageId'))
+                        AND message.platform_message_id<=json_extract(chat.value,'$.lastMessageId'))))
+                  OR (json_extract(chat.value,'$.firstUnreadMessageId') IS NOT NULL AND json_extract(chat.value,'$.firstUnreadMessageId')<>'0'
+                    AND (length(message.platform_message_id)<length(json_extract(chat.value,'$.firstUnreadMessageId'))
+                      OR (length(message.platform_message_id)=length(json_extract(chat.value,'$.firstUnreadMessageId'))
+                        AND message.platform_message_id<json_extract(chat.value,'$.firstUnreadMessageId'))))))
+            AND ${accepted}`)
+          .bind(lease.storeId,lease.orgId,chatJSON,...acceptedValues),
+    ] : []),
     db.prepare(`INSERT INTO message (id,organization_id,store_id,conversation_id,platform_message_id,sender_id,sender_type,direction,content,is_image,is_read,order_number,sku,event_at,received_at,ingest_mode)
       SELECT json_extract(item.value,'$.id'),?,?,conversation.id,json_extract(item.value,'$.platformMessageId'),json_extract(item.value,'$.senderId'),
         json_extract(item.value,'$.senderType'),json_extract(item.value,'$.direction'),json_extract(item.value,'$.content'),json_extract(item.value,'$.isImage'),
@@ -277,7 +303,10 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
     // per-chat interval has to stay short enough for every conversation, which with a
     // few dozen chats exceeds the platform rate budget and delays genuinely new
     // messages behind the backlog.
-    ...(seeds.length ? [db.prepare(`UPDATE sync_cursor SET due_at=${nowSQL}
+    // Pull forward without losing priority: a chat that is already due keeps its
+    // original due time, so repeated discovery cycles cannot push it behind the
+    // whole backlog again.
+    ...(seeds.length ? [db.prepare(`UPDATE sync_cursor SET due_at=MIN(due_at,${nowSQL})
       WHERE store_id=? AND organization_id=? AND stream='incremental' AND completed=0 AND ${accepted}
         AND EXISTS (SELECT 1 FROM conversation AS current WHERE current.id=sync_cursor.conversation_id
           AND current.last_message_id IS NOT sync_cursor.cursor)`)
@@ -297,8 +326,8 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
 
 
 export async function finishSyncFailure(db:D1Database,lease:SyncLease,input:{code:string;nextDueAt:number;disable?:boolean;disableAll?:boolean;blockedUntil?:number}) {
-  const blocked=input.blockedUntil===undefined?null:Math.max(0,Math.min(8_640_000_000_000_000,input.blockedUntil));
-  const due=Math.max(0,Math.min(8_640_000_000_000_000,input.nextDueAt)),token=crypto.randomUUID(),accepted=syncPageCondition(lease,token);
+  const blocked=input.blockedUntil===undefined?null:Math.max(0,Math.min(MAX_TIMESTAMP_MS,input.blockedUntil));
+  const due=Math.max(0,Math.min(MAX_TIMESTAMP_MS,input.nextDueAt)),token=crypto.randomUUID(),accepted=syncPageCondition(lease,token);
   const disabled=input.disable||input.disableAll;
   const results=await db.batch([
     prepareSyncPageGate(db,lease,token),
@@ -323,26 +352,13 @@ export async function releaseSyncLease(db:D1Database,lease:SyncLease,nextDueAt:n
   ]);
   return !!results.at(-1)!.results.length;
 }
-export async function listDueSyncStores(db:D1Database,limit=50):Promise<SyncScope[]> {
-  const rows=await db.prepare(`WITH due AS (
-    SELECT store.organization_id AS orgId,store.id AS storeId,MIN(authority.due_at) AS dueAt FROM store
-    JOIN store_coordinator AS coordinator ON coordinator.store_id=store.id JOIN store_sync_source AS authority ON authority.store_id=store.id
-    WHERE ${validSource} AND authority.due_at<=${nowSQL} AND (coordinator.blocked_until IS NULL OR coordinator.blocked_until<=${nowSQL})
-      AND (coordinator.lease_until IS NULL OR coordinator.lease_until<=${nowSQL}) AND NOT EXISTS(SELECT 1 FROM store_push_endpoint WHERE store_id=store.id AND cutover_at IS NOT NULL) GROUP BY store.id
-    UNION ALL SELECT store.organization_id AS orgId,store.id AS storeId,MIN(${pushDue}) AS dueAt ${pushJobFrom}
-    WHERE ${runnablePush} AND ${pushDue}<=${nowSQL} AND COALESCE(coordinator.blocked_until,0)<=${nowSQL} AND COALESCE(coordinator.lease_until,0)<=${nowSQL} GROUP BY store.id)
-    SELECT orgId,storeId FROM due ORDER BY dueAt,storeId LIMIT ?`)
-    .bind(Math.max(1,Math.min(limit,100))).all<SyncScope>();
-  return rows.results;
-}
-
 export async function getStoreSendCooldown(db:D1Database,scope:SyncScope):Promise<{status:string;blockedUntil:number|null}|null> {
   return db.prepare(`SELECT store.status,coordinator.blocked_until AS blockedUntil FROM store
     LEFT JOIN store_coordinator AS coordinator ON coordinator.store_id=store.id AND coordinator.organization_id=store.organization_id
     WHERE store.id=? AND store.organization_id=?`).bind(scope.storeId,scope.orgId).first();
 }
 export async function recordStoreSendCooldown(db:D1Database,scope:SyncScope,until:number):Promise<boolean> {
-  if(!Number.isSafeInteger(until)||until<0||until>8_640_000_000_000_000)throw new Error('Invalid send cooldown.');
+  if(!Number.isSafeInteger(until)||until<0||until>MAX_TIMESTAMP_MS)throw new Error('Invalid send cooldown.');
   const row=await db.prepare(`INSERT INTO store_coordinator(store_id,organization_id,blocked_until)
     SELECT id,organization_id,? FROM store WHERE id=? AND organization_id=?
     ON CONFLICT(store_id) DO UPDATE SET blocked_until=MAX(COALESCE(store_coordinator.blocked_until,0),excluded.blocked_until)

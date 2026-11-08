@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { workspaceRoutes } from '../lib/routes';
+import { useState, useSyncExternalStore } from 'react';
 import { ArrowLeft, ArrowDown, Info, MessagesSquare } from 'lucide-react';
 import { Link } from 'react-router';
 import { conversationSyncNotice } from '../lib/conversation-sync-notice';
@@ -10,7 +11,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from './
 import { Message, MessageContent, MessageHeader, MessageFooter } from './ui/message';
 import { Bubble, BubbleContent } from './ui/bubble';
 import { Marker, MarkerContent } from './ui/marker';
-import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem, MessageScrollerButton, useMessageScroller, useMessageScrollerScrollable, useMessageScrollerVisibility } from './ui/message-scroller';
+import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem, MessageScrollerButton } from './ui/message-scroller';
 
 import { useCompanySettings } from './company-settings-provider';
 import { MessageContext, type MessageContextScope } from './message-context';
@@ -29,7 +30,7 @@ function ConversationContext({ conversation, messages, ...scope }: ContextProps)
     <MessageContext {...scope} conversationId={conversation.id} storeId={store.id} messages={messages} />
     <Separator />
     <div className="flex flex-col gap-2"><h3 className="font-medium">会话来源</h3><p>{store.name} · Ozon</p>
-      {notice && <div className={`flex flex-col gap-2 text-xs ${notice.stopped?'text-destructive':'text-muted-foreground'}`}><p role="status">{notice.message}</p><Link className="w-fit underline underline-offset-4" to={`/workspace/stores?store=${encodeURIComponent(store.id)}`}>查看同步设置</Link></div>}
+      {notice && <div className={`flex flex-col gap-2 text-xs ${notice.stopped?'text-destructive':'text-muted-foreground'}`}><p role="status">{notice.message}</p><Link className="w-fit underline underline-offset-4" to={`${workspaceRoutes.stores}?store=${encodeURIComponent(store.id)}`}>查看同步设置</Link></div>}
     </div>
     <details className="rounded-md border px-3 py-2 text-xs">
       <summary className="cursor-pointer text-muted-foreground">技术与同步信息</summary>
@@ -47,34 +48,19 @@ function ConversationContext({ conversation, messages, ...scope }: ContextProps)
   </div>;
 }
 
-type TimelinePosition = { anchorId: string | null; view: number; onPosition: (view: number, atEnd: boolean, anchorId: string | null) => void };
-function ReadingPosition({ anchorId, view, onPosition }: TimelinePosition) {
-  const initialAnchor = useRef(anchorId);
-  const [restoring, setRestoring] = useState(!!anchorId);
-  const { scrollToMessage } = useMessageScroller(), scrollable = useMessageScrollerScrollable(), visibility = useMessageScrollerVisibility();
-  const visible = visibility.visibleMessageIds.filter(id => id !== 'page-marker'), visibleKey = visible.join(',');
-  useLayoutEffect(() => {
-    if (!restoring || !initialAnchor.current || !scrollToMessage(initialAnchor.current, { align: 'start', behavior: 'instant' })) return;
-    const frame = requestAnimationFrame(() => setRestoring(false)); return () => cancelAnimationFrame(frame);
-  }, [restoring, scrollToMessage, visibleKey]);
-  useEffect(() => { if (!restoring && visible.length) onPosition(view, !scrollable.end, visible[0]); }, [restoring, visibleKey, scrollable.end, view, onPosition]);
-  return null;
-}
-
-export function MessageTimeline({ companyId, conversationId, messages, pageKey, earlier, anchorId, view, onPosition }: { companyId: string; conversationId: string; messages: ConversationMessage[]; pageKey: string; earlier: boolean } & TimelinePosition) {
+export function MessageTimeline({ companyId, conversationId, messages, pageKey }: { companyId: string; conversationId: string; messages: ConversationMessage[]; pageKey: string }) {
   const { date: messageDate } = useCompanySettings();
   if (!messages.length) return <MessageEmpty title="暂无已导入消息" description="会话已发现，消息历史可能仍在读取。稍后刷新查看。" />;
-  return <MessageScrollerProvider key={pageKey} autoScroll={!earlier} defaultScrollPosition={earlier ? 'start' : 'end'}>
+  return <MessageScrollerProvider key={pageKey} autoScroll defaultScrollPosition="end">
     <MessageScroller className="bg-muted/20">
-      <ReadingPosition anchorId={anchorId} view={view} onPosition={onPosition} />
       <MessageScrollerViewport aria-label="消息记录" role="region" tabIndex={0}>
         <MessageScrollerContent className="p-4 sm:p-6">
-          <MessageScrollerItem messageId="page-marker"><Marker variant="separator"><MarkerContent>当前页 {messages.length} 条消息</MarkerContent></Marker></MessageScrollerItem>
+          <MessageScrollerItem messageId="page-marker"><Marker variant="separator"><MarkerContent>共 {messages.length} 条消息</MarkerContent></Marker></MessageScrollerItem>
           {messages.map(message => {
             const outbound = message.direction === 'outbound';
             const sender = outbound ? '商家' : message.direction === 'inbound' ? '买家' : '未知发送者';
-            // This window is bounded to 100 rows. Fully lay it out: content-visibility's
-            // intrinsic-size cache resets across Activity hide/show and moves the reader.
+            // Fully lay out every message: content-visibility's intrinsic-size cache resets
+            // across Activity hide/show and moves the reader.
             return <MessageScrollerItem key={message.id} messageId={message.id} className="[content-visibility:visible]">
               <Message align={outbound ? 'end' : 'start'}>
                 <MessageContent>
@@ -91,7 +77,7 @@ export function MessageTimeline({ companyId, conversationId, messages, pageKey, 
           })}
         </MessageScrollerContent>
       </MessageScrollerViewport>
-      <MessageScrollerButton aria-label="跳到本页末尾"><ArrowDown /><span className="sr-only">跳到本页末尾</span></MessageScrollerButton>
+      <MessageScrollerButton aria-label="跳到最新消息"><ArrowDown /><span className="sr-only">跳到最新消息</span></MessageScrollerButton>
     </MessageScroller>
   </MessageScrollerProvider>;
 }

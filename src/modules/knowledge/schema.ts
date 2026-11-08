@@ -55,3 +55,13 @@ export const knowledgeAuditEvent = sqliteTable('knowledge_audit_event', {
   documentId: text('document_id').notNull(), actorUserId: text('actor_user_id').notNull(), action: text('action').notNull(), outcome: text('outcome').notNull(),
   expectedVersion: integer('expected_version').notNull(), createdAt: integer('created_at').notNull(),
 }, table => [index('knowledge_audit_organization_time_idx').on(table.organizationId, table.createdAt, table.id)]);
+
+/** Document-level evidence for the reply chain; the chunk table stays for historical runs. */
+export const aiDocumentEvidence = sqliteTable('ai_document_evidence', {
+  runId: text('run_id').primaryKey(), organizationId: text('organization_id').notNull(),
+  scope: text('scope').notNull(), profile: text('profile').notNull(),
+  questionHash: text('question_hash').notNull(), documents: text('documents').notNull(),
+  createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull(),
+}, table => [
+  index('ai_document_evidence_org_idx').on(table.organizationId, table.updatedAt),
+]);

@@ -1,3 +1,4 @@
+import { LoadingState } from '../components/query-state';
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../lib/api';
@@ -45,7 +46,7 @@ export function CompanySettingsPage() {
     const result = await query.refetch();
     if (result.isSuccess) setReread(true);
   }
-  if (!data) return <div className="flex flex-col gap-4"><h1 className="text-2xl font-semibold">公司设置</h1>{query.isPending ? <p role="status" className="flex items-center gap-2"><Spinner />正在读取公司设置…</p> : <ErrorNotice error={query.error} />}<Button variant="outline" disabled={query.isFetching} onClick={() => void readLatest()}>读取最新设置</Button></div>;
+  if (!data) return <div className="flex flex-col gap-4"><h1 className="text-2xl font-semibold">公司设置</h1>{query.isPending ? <LoadingState>正在读取公司设置…</LoadingState> : <ErrorNotice error={query.error} />}<Button variant="outline" disabled={query.isFetching} onClick={() => void readLatest()}>读取最新设置</Button></div>;
   const options = timeZones.includes(data.timeZone) ? timeZones : [...timeZones, data.timeZone];
   return <>
     <div className="flex flex-col gap-2"><h1 className="text-2xl font-semibold tracking-tight">公司设置</h1><p className="text-sm text-muted-foreground">管理时间显示、AI 模型与用量预算。</p></div>

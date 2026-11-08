@@ -10,6 +10,6 @@ test('0033 adds AI financial tables without rewriting existing rows, audits or f
  // Later migrations (0069) drop vector/reply-test tables; compare only tables that survive the full forward migration.
  const surviving=(await f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'_cf_METADATA'").all<{name:string}>()).results.map(r=>r.name).filter(name=>tables.includes(name));
  assert.deepEqual(await snapshot(surviving),Object.fromEntries(surviving.map(name=>[name,before[name]])));
- const added=(await f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ai_%' ORDER BY name").all<{name:string}>()).results.map(r=>r.name);assert.deepEqual(added,['ai_budget','ai_budget_audit','ai_dispatch','ai_execution','ai_generation','ai_knowledge_evidence']);
+ const added=(await f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ai_%' ORDER BY name").all<{name:string}>()).results.map(r=>r.name);assert.deepEqual(added,['ai_budget','ai_budget_audit','ai_dispatch','ai_document_evidence','ai_execution','ai_fact_evidence','ai_generation','ai_knowledge_evidence']);
  assert.deepEqual((await f.db.prepare('PRAGMA foreign_key_check').all()).results,[]);
 });

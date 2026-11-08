@@ -7,7 +7,7 @@ import {prepareKnowledge} from '../../src/modules/knowledge/content.ts';
 import {writeKnowledge} from '../../src/modules/knowledge/storage.ts';
 import {approveTextKnowledge} from '../../src/modules/knowledge/text-profile.ts';
 import type {AiRunReader} from '../../src/modules/ai-runs/storage.ts';
-export async function aiAnswerFixture(promptVersion='support-reply-v1',config:{outboundEnabled?:string;aiEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}){
+export async function aiAnswerFixture(promptVersion='support-reply-v2',config:{outboundEnabled?:string;aiEnabled?:string;aiOutboundEnabled?:string;aiTimeoutMs?:number}={}){
  const f=await conversationControlFixture(undefined,{aiEnabled:'true',...config}),actor={...f.actor(),expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
@@ -25,10 +25,7 @@ export async function aiAnswerFixture(promptVersion='support-reply-v1',config:{o
   const documentId=crypto.randomUUID(),ks={kind:'guide' as const,storeId:'store',productRef:null,language:'ru' as const},prepared=await prepareKnowledge('org',documentId,1,ks,{title:'Width',source:{format:'text',content:'Ширина — 26 см.'}});
   assert.ok(await writeKnowledge(f.db,actor,documentId,ks,prepared,0,crypto.randomUUID()));
   assert.ok(await approveTextKnowledge(f.db,actor,documentId,1));
-  // Seed the persisted, immutable retrieval receipt as text evidence.
-  const chunk=prepared.chunks[0],evidence={runId:run.request.runId,scope:{storeId:'store',productRef:null,language:'ru'},questionHash:await (await import('../../src/modules/knowledge/content.ts')).knowledgeHash(run.admission.question),chunks:[{documentId,revision:1,chunkId:chunk.id,bodyHash:chunk.bodyHash,body:chunk.body,title:prepared.title,contentHash:prepared.contentHash,score:.8}]};
-  await f.db.prepare('INSERT INTO ai_knowledge_evidence(run_id,organization_id,scope,profile,question_hash,chunks,created_at,updated_at) VALUES(?,?,?,?,?,?,1,1)').bind(run.request.runId,'org',JSON.stringify(evidence.scope),'text-grep-2400-v1',evidence.questionHash,JSON.stringify(evidence.chunks)).run();
-  const env={DB:f.db},input={body:'Ширина этой модели — 26 см.',citations:[chunk.id]};
-  return {f,actor,scope,run,read,env,input,evidence,documentId};
+  const env={DB:f.db},input={body:'Ширина этой модели — 26 см.',citations:[documentId]};
+  return {f,actor,scope,run,read,env,input,documentId};
  }catch(e){await f.close();throw e;}
 }

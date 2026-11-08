@@ -2,13 +2,26 @@
 
 本文记录当前工作区的代码事实及拟议方案；不是功能已实现或生产验收证明。
 
+## 实施状态（2026-11-06）
+
+`support-reply-v2` 已按本文的目标合同落地。公司模型不再创建草稿/检索模式，新的 AI 接待运行直接使用 v2；旧 `support-knowledge-v1`、`support-reply-v1` 及其工具和测试已删除：
+
+- 新版本只注册 `bash`、`read`、`get_product_info`、`get_order_status`、`send_message`、`request_handoff`；分类运行仍只注册 `submit_classification`。
+- `bash` 在每次调用新建的只读 `/knowledge` 快照上执行，只有 `grep`、`cat`、`ls`、`head`、`tail`、`wc`，无网络、宿主文件或环境变量；stdout 不是证据。
+- `read` 只接受服务端生成的 `/knowledge/<documentId>.md` 路径和有界行范围；成功读取把文档修订冻结到 `ai_document_evidence`，这是知识引用的唯一来源。
+- `get_product_info` / `get_order_status` 由应用解析商品与订单，读取成功把带哈希的快照冻结到新的 append-only `ai_fact_evidence`（迁移 `0074`），模型只拿到不可猜测的证据 ID。
+- `send_message` 接受 `citations`（文档 ID）和/或 `facts`（事实证据 ID），至少一项；最终发送前重新读取当前文档/商品/订单快照并复核运行、期限、店铺、凭据、预算和会话状态。工具只提交不可变意图，仍由应用侧共享发送器单次尝试。
+- 新运行始终使用 `support-reply-v2`，默认最多 6 轮生成；UI 的“AI 回复方式”草稿/直接回复选择已删除。历史 `autoReply` 字段仅作兼容读取，运行时忽略。升级前必须先清空或放弃在途 v1 运行；新运行只能使用 `support-reply-v2`。
+
+当前实现仍不等于真实模型质量、真实 Ozon 外发或生产验收通过；三项外发开关默认关闭。
+
 ## 当前实现
 
 - `packages/agent-runtime/harness.ts` 使用 `@earendil-works/pi-durable` 的 `Harness` 与显式注册表，不是自动装载 `pi-coding-agent` 的默认编码工具。Cloudflare 的 `src/platform/cloudflare/agent.ts` 也通过同一个 `openAgent` 打开运行时；Node/Vercel 通过业务 authority 暴露同一套工具定义。
-- `src/platform/agents/authority.ts` 根据运行版本注册 `search_knowledge`、`read_knowledge`、`get_product_context`、`prepare_reply` 和 `request_handoff`；分类任务只提供 `submit_classification`。`src/agents/support.ts` 还有 Flue 入口，退役或兼容性需在删除前核实，不能只改一处。
+- `src/platform/agents/authority.ts` 现在只注册 v2 的 `bash`、`read`、`get_product_info`、`get_order_status`、`send_message`、`request_handoff`；分类任务只提供 `submit_classification`。`src/agents/support.ts` 是旧 Flue 入口，仍保留 v2 兼容注册。
 - 知识正文存储在 `knowledge_revision.markdown` 和 `source_json`。`prepareKnowledge` 仍生成切块；`knowledge_text_search` 基于 chunk。`readPublishedKnowledge` 已支持历史缺失 Markdown 时从合法 source 重建，但旧来源不能凭空补造发布证明。
-- `ai_knowledge_evidence` 当前记录不可删除的 chunk 引用。`reply-intent.ts` 在读取与最终授权 SQL 中关联 `knowledge_chunk`、活动版本和发布证明；`controller-core.ts` 的排队、恢复及发送检查也依赖这一合同。仅删除 `prepare_reply` 或更名不能迁移这些安全约束。
-- `readAiProductContext` 只从已冻结的运行和会话消息推导商品，返回名称、价格等有限快照，不允许模型传入任意 SKU。`readMessageContext` 展示了按公司、店铺、会话的 Ozon 消息元数据匹配订单、处理歧义和读取完成后重新验证的已有模式，但它是面向成员会话的服务，不能直接假定是 Agent 授权。
+- `ai_document_evidence` 记录 v2 `read` 实际冻结的文档修订与内容哈希；`ai_fact_evidence` 记录商品/订单快照。`message-intent.ts` 在准备、完成审阅、入队和最终发送前重新核对证据、运行、策略、渠道、凭据、预算和期限；`controller-core.ts` 的排队、恢复及发送检查依赖这一合同。旧的 `reply-intent.ts`、`prepare_reply` 和 chunk 级证据路径已删除。
+- `readAiProductContext` / `readAiOrderContext` 只从已冻结的运行和会话消息推导商品/订单，返回有限快照，不允许模型传入任意 SKU 或订单号。v2 `get_product_info` / `get_order_status` 把读取结果冻结为 `ai_fact_evidence`，`send_message` 只能引用这些服务端签发的证据 ID。
 - 当前发送工具只持久化意图并安排观察；`enqueueAiReply` 需要原运行成功完成且资金结算，再重新授权，并进入原有单次外发/unknown 管道。Pi 工具的 `replay: safe` 并不保证外部副作用 exactly-once。
 
 ## just-bash 验证结论

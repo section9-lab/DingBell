@@ -1,3 +1,5 @@
+import { LoadingState } from '../components/query-state';
+import { canManageCompany, isOwner } from '../lib/roles';
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -22,8 +24,8 @@ export function TeamPage({ company, emailConfigured, userId, refresh }: {
   company: Company; emailConfigured: boolean; userId: string; refresh: (notice?: unknown) => Promise<void>;
 }) {
   const { date, timeZone } = useCompanySettings();
-  const allowed = company.role.split(',').some(role => ['owner', 'admin'].includes(role.trim()));
-  const owner = company.role.split(',').some(role => role.trim() === 'owner');
+  const allowed = canManageCompany(company.role);
+  const owner = isOwner(company.role);
   const [selection, setSelection] = useState<{ member: SelectedMember; action: 'role' | 'remove' } | null>(null);
   const [offsets, setOffsets] = useState({ members: 0, invitations: 0 });
   const queryClient = useQueryClient();
@@ -49,7 +51,7 @@ export function TeamPage({ company, emailConfigured, userId, refresh }: {
     }
   }
   if (!allowed) return <div className="flex flex-col gap-3"><h1 className="text-2xl font-semibold">团队成员</h1><p className="text-sm text-muted-foreground">只有公司所有者和管理员可以管理团队成员与邀请。</p></div>;
-  if (team.isPending || team.isFetching) return <p role="status" className="flex items-center gap-2 text-sm"><Spinner aria-hidden="true" />正在读取团队…</p>;
+  if (team.isPending || team.isFetching) return <LoadingState>正在读取团队…</LoadingState>;
   if (team.isError || !team.data) return <div className="flex flex-col gap-4"><ErrorNotice error={team.error} /><Button variant="outline" onClick={() => void team.refetch()}>重新读取团队</Button></div>;
   return (
     <>

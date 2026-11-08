@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MemoryStorage } from '@earendil-works/pi-durable';
-import { context, openAgent, providerId, readResult } from './harness.ts';
+import { context, loopSteps, openAgent, providerId, readResult } from './harness.ts';
+import type { EntryRecord } from '@earendil-works/pi-durable';
 import type { AgentAuthority, AgentDefinition, AgentReceipt } from './contracts.ts';
 
 test('Pi business tool termination is a successful original submission without a second model call',async()=>{
@@ -20,4 +21,24 @@ test('Pi business tool termination is a successful original submission without a
     const result=await readResult(harness,definition.uid,String(submission.id),authority);
     assert.equal(result.outcome,'completed',JSON.stringify(await submission.status(context)));assert.equal(calls,1);assert.equal(tools,1);
   }finally{await harness.close(context);}
+});
+
+test('the Agent loop view keeps thinking, tool calls and answer text in commit order',()=>{
+  const entries=[
+    {id:1,conversationId:1,kind:'pi.user',model:[{role:'user',content:'question'}]},
+    {id:2,conversationId:1,kind:'pi.assistant',model:[{role:'assistant',content:[
+      {type:'thinking',thinking:'look at knowledge'},
+      {type:'toolCall',id:'c1',name:'bash',arguments:{command:'ls /knowledge'}},
+    ]}]},
+    {id:3,conversationId:1,kind:'pi.tool-result',model:[{role:'toolResult',toolCallId:'c1',toolName:'bash',content:[{type:'text',text:'faq.md'}],isError:false,timestamp:1}]},
+    {id:4,conversationId:1,kind:'pi.assistant',model:[{role:'assistant',content:[{type:'text',text:'Шляпы доступны.'}]}]},
+  ] as unknown as EntryRecord[];
+  const loop=loopSteps(entries);
+  assert.deepEqual(loop.steps.map(step=>[step.kind,step.kind==='tool'?step.name:step.text]),[
+    ['thinking','look at knowledge'],['tool','bash'],['answer','Шляпы доступны.'],
+  ]);
+  const tool=loop.steps[1];
+  assert.equal(tool.kind,'tool');
+  if(tool.kind==='tool'){assert.equal(tool.input,'{"command":"ls /knowledge"}');assert.equal(tool.output,'faq.md');assert.equal(tool.failed,false);}
+  assert.equal(loop.truncated,false);
 });

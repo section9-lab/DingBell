@@ -63,9 +63,11 @@ export function frozenBasis(costs:(CostBasis|null)[],rules:RuleBasis|null):Froze
   return rules&&costs.every((cost):cost is CostBasis=>cost!==null)?{version:1,rules,lines:costs}:null;
 }
 export function summarize(postings:AccountingPosting[],expenses:AccountingOverview['expenses'],fromDate:string,toDate:string) {
+  // Long periods are rolled up by month so the trend stays readable and bounded.
+  const monthly=(Date.parse(toDate)-Date.parse(fromDate))/86_400_000>120,bucket=(date:string)=>monthly?date.slice(0,7):date;
   const totals:AccountingOverview['totals']={revenue:0,knownPurchase:0,knownContribution:0,cost:0,profit:0,margin:null,purchase:0,label:0,commission:0,freight:0,withdrawal:0,advertising:0,other:0};
   const trend=new Map<string,AccountingOverview['trend'][number]>(),orderDays=new Set<string>(),knownCostDays=new Set<string>();
-  for(let date=fromDate;date<=toDate;date=nextDate(date))trend.set(date,{date,revenue:0,cost:0,profit:0,knownCost:0,knownContribution:0});
+  for(let date=fromDate;date<=toDate;date=nextDate(date)){const key=bucket(date);if(!trend.has(key))trend.set(key,{date:key,revenue:0,cost:0,profit:0,knownCost:0,knownContribution:0});}
   for(const posting of postings){
     // Sales and procurement facts remain useful even when freight/fees are unknown.
     // An incomplete cohort must never turn known sales into zero or partial profit into net profit.
@@ -73,17 +75,17 @@ export function summarize(postings:AccountingPosting[],expenses:AccountingOvervi
     for(const key of ['cost','profit','purchase','label','commission','freight','withdrawal'] as const){
       const value=posting[key];totals[key]=totals[key]===null||value===null?null:totals[key]+value;
     }
-    const day=trend.get(posting.date);if(day){
+    const key=bucket(posting.date),day=trend.get(key);if(day){
       day.knownContribution=(day.knownContribution??0)+(posting.profit??0);
-      orderDays.add(posting.date);day.revenue+=posting.revenue??0;day.cost=day.cost===null||posting.cost===null?null:day.cost+posting.cost;day.profit=day.profit===null||posting.profit===null?null:day.profit+posting.profit;
+      orderDays.add(key);day.revenue+=posting.revenue??0;day.cost=day.cost===null||posting.cost===null?null:day.cost+posting.cost;day.profit=day.profit===null||posting.profit===null?null:day.profit+posting.profit;
       const known=[posting.purchase,posting.label,posting.commission,posting.freight,posting.withdrawal].filter((value):value is number=>value!==null);
-      if(known.length){knownCostDays.add(posting.date);day.knownCost=(day.knownCost??0)+(sum(known)??0);}
+      if(known.length){knownCostDays.add(key);day.knownCost=(day.knownCost??0)+(sum(known)??0);}
     }
   }
   for(const expense of expenses){
     totals[expense.category==='advertising'?'advertising':'other']+=expense.amount;
     if(totals.cost!==null)totals.cost+=expense.amount;if(totals.profit!==null)totals.profit-=expense.amount;
-    const day=trend.get(expense.date);if(day){knownCostDays.add(expense.date);day.knownCost=(day.knownCost??0)+expense.amount;if(day.cost!==null)day.cost+=expense.amount;if(day.profit!==null)day.profit-=expense.amount;}
+    const key=bucket(expense.date),day=trend.get(key);if(day){knownCostDays.add(key);day.knownCost=(day.knownCost??0)+expense.amount;if(day.cost!==null)day.cost+=expense.amount;if(day.profit!==null)day.profit-=expense.amount;}
   }
   for(const amount of Object.values(totals))if(amount!==null&&!Number.isSafeInteger(amount))throw new RangeError('ACCOUNTING_AMOUNT_OVERFLOW');
   if(postings.some(posting=>posting.revenue===null)){totals.profit=null;}
@@ -96,5 +98,5 @@ export function summarize(postings:AccountingPosting[],expenses:AccountingOvervi
   totals.knownCost=(sum(Object.values(costComponents).map(value=>value.amount))??0)+totals.advertising+totals.other;
   if(!Number.isSafeInteger(totals.knownCost))throw new RangeError('ACCOUNTING_AMOUNT_OVERFLOW');
   for(const date of orderDays)if(!knownCostDays.has(date))trend.get(date)!.knownCost=null;
-  return {totals,trend:[...trend.values()],costComponents};
+  return {totals,trend:[...trend.values()],costComponents,trendGranularity:monthly?'month' as const:'day' as const};
 }

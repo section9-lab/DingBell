@@ -1,3 +1,4 @@
+import { LoadingState } from './query-state';
 import { useEffect,useRef,useState } from 'react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import type { CompanyModelView,CompanyModelCommand,CompanyModelCatalog,CompanyModelTestFailure } from '../../shared/company-model';
@@ -34,8 +35,8 @@ const testFailures:Record<CompanyModelTestFailure,string>={
 const savedKeyMask='****************';
 function sameOrigin(baseUrl:string,savedUrl:string|null){try{return savedUrl!==null&&new URL(baseUrl.trim()).origin===new URL(savedUrl).origin;}catch{return false;}}
 export function CompanyModelPanel({companyId}:{companyId:string}){
-  const query=useQuery({queryKey:['company-model',companyId],queryFn:({signal})=>readCompanyModel(companyId,signal),retry:false,gcTime:0,refetchOnWindowFocus:false});
-  if(!query.data||query.isError)return <Card><CardHeader><CardTitle>AI 模型</CardTitle></CardHeader><CardContent>{query.isPending?<p role="status" className="flex items-center gap-2"><Spinner/>正在读取模型配置…</p>:<ErrorNotice error={query.error}/>}<Button variant="outline" disabled={query.isFetching} onClick={()=>void query.refetch()}>读取模型配置</Button></CardContent></Card>;
+  const query=useQuery({queryKey:['company-model',companyId],queryFn:({signal})=>readCompanyModel(companyId,signal),gcTime:0,refetchOnWindowFocus:false});
+  if(!query.data||query.isError)return <Card><CardHeader><CardTitle>AI 模型</CardTitle></CardHeader><CardContent>{query.isPending?<LoadingState>正在读取模型配置…</LoadingState>:<ErrorNotice error={query.error}/>}<Button variant="outline" disabled={query.isFetching} onClick={()=>void query.refetch()}>读取模型配置</Button></CardContent></Card>;
   return <ModelForm key={`${companyId}:${query.data.version}`} data={query.data} fetching={query.isFetching} refresh={()=>query.refetch()}/>;
 }
 function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boolean;refresh:()=>Promise<unknown>}){
@@ -45,7 +46,6 @@ function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boole
   const savedKeyVisible=data.hasKey&&!replacingKey,savedKeyReusable=data.hasKey&&sameOrigin(baseUrl,data.baseUrl);
   const hasUsableKey=!!apiKey.trim()||savedKeyReusable&&!replacingKey;
   useEffect(()=>{if(replacingKey)keyInput.current?.focus();},[replacingKey]);
-  const [autoReply,setAutoReply]=useState(data.execution?.autoReply??false);
   const [executionDraft,setExecutionDraft]=useState(()=>createModelExecutionDraft(data.execution));
   const [executionError,setExecutionError]=useState('');
   const [busy,setBusy]=useState(false),[testOpen,setTestOpen]=useState(false),[uncertain,setUncertain]=useState(false),[error,setError]=useState<unknown>(),[message,setMessage]=useState('');
@@ -54,7 +54,7 @@ function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boole
   useEffect(()=>()=>{catalogRequest.current?.abort();catalogRequest.current=null;},[]);
   function clearCatalog(){catalogRequest.current?.abort();catalogRequest.current=null;setListing(false);setCatalog(null);setCatalogSearch('');setCatalogError(undefined);}
   const visibleModels=catalog?.models.filter(id=>id.toLowerCase().includes(catalogSearch.trim().toLowerCase()))??[];
-  const dirty=baseUrl!==(data.baseUrl??'')||model!==(data.model??'')||!!apiKey||replacingKey||autoReply!==(data.execution?.autoReply??false)
+  const dirty=baseUrl!==(data.baseUrl??'')||model!==(data.model??'')||!!apiKey||replacingKey
     ||JSON.stringify(executionDraft)!==JSON.stringify(createModelExecutionDraft(data.execution));
   const disabled=busy||fetching||uncertain||!data.encryptionConfigured;
   async function discover(){
@@ -68,7 +68,7 @@ function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boole
   }
   async function save(){
     if(disabled||listing||!hasUsableKey)return;
-    const parsed=parseModelExecutionDraft(executionDraft,autoReply);
+    const parsed=parseModelExecutionDraft(executionDraft);
     if(!parsed.success){setExecutionError(parsed.message);return;}
     const command:CompanyModelCommand={expectedVersion:data.version,baseUrl:baseUrl.trim(),model:model.trim(),
       ...(apiKey.trim()?{apiKey:apiKey.trim()}:{}),execution:parsed.execution};
@@ -97,7 +97,7 @@ function ModelForm({data,fetching,refresh}:{data:CompanyModelView;fetching:boole
           </>:<p role="status" className="text-sm text-muted-foreground">供应商未返回可用模型。请核对 Key 权限，或从供应商控制台复制 Model ID 手动填写。</p>)}
         </div>
         <Field><FieldLabel htmlFor="company-model-name">模型名称（Model ID）</FieldLabel><Input id="company-model-name" value={model} placeholder="供应商提供的模型 ID" required maxLength={256} disabled={disabled} onChange={event=>setModel(event.target.value)}/><FieldDescription>可手动填写；客服模型需支持流式输出与工具调用，保存后请测试连接。</FieldDescription></Field>
-        <Field><FieldLabel htmlFor="company-model-reply">AI 回复方式</FieldLabel><NativeSelect id="company-model-reply" className="w-full" value={autoReply?'auto':'draft'} disabled={disabled} onChange={event=>setAutoReply(event.target.value==='auto')}><NativeSelectOption value="draft">只生成草稿，我在消息中心确认后发送</NativeSelectOption><NativeSelectOption value="auto">AI 直接回复买家</NativeSelectOption></NativeSelect><FieldDescription>仅对已开启 AI 托管且命中策略的会话自动回复；触发转人工等条件时不会发出。</FieldDescription></Field>
+        <p className="text-xs text-muted-foreground">AI 托管命中已发布策略后会直接回复买家，不再生成需要人工确认的草稿；触发转人工条件时仍不会发送。</p>
         <section className="grid gap-3" aria-label="AI 执行限制与价格"><h3 className="text-sm font-medium">执行限制与价格</h3>
           <p className="text-xs text-muted-foreground">可以全部留空，仅保存或测试模型连接。启用 AI 接待前需完整填写；未知价格不是免费，只有已核实免费的项目才填 0。价格由供应商提供，不从模型目录猜测。</p>
           <div className="grid gap-3 sm:grid-cols-2">{modelExecutionFields.map(field=><Field key={field.name}><FieldLabel htmlFor={`company-model-${field.name}`}>{field.label}</FieldLabel><Input id={`company-model-${field.name}`} inputMode={field.price?'decimal':'numeric'} autoComplete="off" value={executionDraft[field.name]} disabled={disabled} onChange={event=>{setExecutionDraft(value=>({...value,[field.name]:event.target.value}));setExecutionError('');}}/></Field>)}</div>

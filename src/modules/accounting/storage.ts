@@ -5,7 +5,7 @@ import {postingBusinessTimeSQL,postingFactsSQL} from '../commerce/storage.ts';
 import {storeAccess,type StoreActor} from '../stores/storage.ts';
 import {calculatePosting,frozenBasis,moneyCents,summarize,type SalePosting} from './calculation.ts';
 
-const maximumRows=1000;
+const maximumRows=5000;
 const orderAt=`CAST(ROUND((julianday(${postingBusinessTimeSQL})-2440587.5)*86400000) AS INTEGER)`;
 function selectedCostSQL(currentEstimate:boolean){
   const valid=`version.valid_from<=${orderAt} AND (version.valid_to IS NULL OR version.valid_to>${orderAt})`;
@@ -26,7 +26,7 @@ async function zone(db:D1Database,actor:StoreActor){return (await db.prepare('SE
 export async function readAccounting(db:D1Database,actor:StoreActor,filter:AccountingFilter){
   const timeZone=await zone(db,actor),from=zonedStart(filter.fromDate,timeZone),to=zonedStart(nextDate(filter.toDate),timeZone);
   const days=(Date.parse(filter.toDate)-Date.parse(filter.fromDate))/86_400_000+1;
-  if(days<1||days>366||to<=from)throw new RangeError('INVALID_ACCOUNTING_PERIOD');
+  if(days<1||days>20000||to<=from)throw new RangeError('INVALID_ACCOUNTING_PERIOD');
   const where=`posting.organization_id=? AND posting.store_id=? AND ${storeAccess('store.organization_id',false)} AND (?='all' OR posting.fulfillment_type=?)`;
   const scope=[actor.orgId,filter.storeId,actor.actorUserId,actor.sessionId,filter.fulfillment,filter.fulfillment];
   const rows=(await db.prepare(`SELECT posting.posting_number AS postingNumber,posting.order_number AS orderNumber,posting.fulfillment_type AS fulfillment,${orderAt} AS at,${postingFactsSQL} AS raw,posting.detail_facts AS details,
@@ -73,8 +73,13 @@ export async function readAccounting(db:D1Database,actor:StoreActor,filter:Accou
     const identities=new Map<string,Set<string>>();for(const row of rows){const ids=identities.get(row.offerId)??new Set<string>();ids.add(row.id);identities.set(row.offerId,ids);}
     for(const posting of postings)for(const line of posting.lines){const ids=identities.get(line.offerId);if(line.productId===null&&ids?.size===1)line.productId=[...ids][0]!;}
   }
+  const visibleExpenses=filter.fulfillment==='all'?expenses:[];
+  const earliest=[...postings.map(posting=>posting.date),...visibleExpenses.map(expense=>expense.date)].sort()[0];
+  // For open-ended/all-history ranges, start the trend at the first real record instead of a sentinel date.
+  const effectiveFrom=days>366?(earliest&&earliest>filter.fromDate?earliest:earliest?filter.fromDate:filter.toDate):filter.fromDate;
+  const summary=summarize(postings,visibleExpenses,effectiveFrom,filter.toDate);
   const overview:AccountingOverview={companyId:actor.orgId,storeId:filter.storeId,timeZone,fromDate:filter.fromDate,toDate:filter.toDate,postings,expenses,
-    counts:{eligible:postings.length,complete:postings.filter(row=>row.cost!==null).length,frozen:postings.filter(row=>row.frozen).length,excluded,undated,revenueKnown:postings.filter(row=>row.revenue!==null).length,purchaseKnown:postings.filter(row=>row.purchase!==null).length,currentEstimate:postings.filter(row=>row.costSource==='current_estimate').length},...summarize(postings,filter.fulfillment==='all'?expenses:[],filter.fromDate,filter.toDate)};
+    counts:{eligible:postings.length,complete:postings.filter(row=>row.cost!==null).length,frozen:postings.filter(row=>row.frozen).length,excluded,undated,revenueKnown:postings.filter(row=>row.revenue!==null).length,purchaseKnown:postings.filter(row=>row.purchase!==null).length,currentEstimate:postings.filter(row=>row.costSource==='current_estimate').length},...summary};
   return {overview,candidates};
 }
 export async function captureAccounting(db:D1Database,actor:StoreActor,filter:AccountingFilter){

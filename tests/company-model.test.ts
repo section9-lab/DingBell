@@ -126,7 +126,7 @@ test('model catalog permits serialize concurrent requests and discard facts afte
  response=await f.request('/models',draft);assert.equal(response.status,409);assert.equal((await response.text()).includes('must-not-leak'),false);
 });
 
-test('company models require reviewed prices and explicit auto-reply authority before new execution',{timeout:30000},async t=>{
+test('company models require reviewed prices before new direct-reply execution',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);assert.equal((await f.request('',command)).status,200);
  const env=Object.assign(f.env,{AGENT_RUNTIME:{} as any,CONVERSATION_CONTROLLER:{} as any,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'});
  assert.equal(await resolveSupportConfiguration(env,'company'),null);
@@ -134,9 +134,10 @@ test('company models require reviewed prices and explicit auto-reply authority b
  assert.equal(unavailable.enabled,false);assert.equal(unavailable.pricesConfigured,false);assert.equal(unavailable.runReservationMicros,null);
  const result=await f.request('',{...command,expectedVersion:1,execution:{...prices,maxGenerations:2}});assert.equal(result.status,200);
  const cost=await resolveSupportConfiguration(env,'company');assert.ok(cost);assert.equal(cost.config.model.provider,'openai-compatible');assert.equal(cost.config.model.model,command.model);assert.equal(cost.config.model.connection?.revision,2);
- assert.equal(cost.config.model.promptVersion,'support-knowledge-v1');assert.equal(cost.config.maxGenerations,2);assert.ok(cost.total>0);assert.equal(JSON.stringify(cost).includes(command.apiKey),false);
+ assert.equal(cost.config.model.promptVersion,'support-reply-v2');assert.equal(cost.config.maxGenerations,2);assert.ok(cost.total>0);assert.equal(JSON.stringify(cost).includes(command.apiKey),false);
  assert.equal((await companySupportConfigurationView(env,'company')).enabled,true);
  assert.equal(await resolveSupportConfiguration({...env,AGENT_RUNTIME:undefined},'company'),null);
- assert.equal((await f.request('',{...command,expectedVersion:2,execution:{...prices,maxGenerations:2,autoReply:true}})).status,200);
- assert.equal((await resolveSupportConfiguration(env,'company'))?.config.model.promptVersion,'support-reply-v1');
+ assert.equal((await f.request('',{...command,expectedVersion:2,execution:{...prices,maxGenerations:2}})).status,200);
+ assert.equal((await resolveSupportConfiguration(env,'company'))?.config.model.promptVersion,'support-reply-v2');
+ assert.equal((await resolveSupportConfiguration(env,'company'))?.config.maxGenerations,2);
 });

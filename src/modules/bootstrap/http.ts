@@ -5,6 +5,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { timingSafeEqual } from 'hono/utils/buffer';
 import * as v from 'valibot';
 import { apiError, jsonResponse, type ApplicationEnv } from '../../http.ts';
+import { hasRole } from '../../shared/roles.ts';
 import { identityConfig } from '../identity/config.ts';
 import { bootstrapServices } from '../identity/services.ts';
 import type { IdentityBindings } from '../identity/bindings.ts';
@@ -209,7 +210,7 @@ export function registerBootstrapRoutes(app: Hono<ApplicationEnv>, deps: Identit
           members = await findMembers();
         }
         if (members.length !== 1 || members[0].id !== job.expectedMemberId
-          || members[0].userId !== job.expectedUserId || members[0].role !== 'owner') throw new BootstrapConflict('Company ownership does not match the installation claim.');
+          || members[0].userId !== job.expectedUserId || !hasRole(members[0].role, 'owner')) throw new BootstrapConflict('Company ownership does not match the installation claim.');
         await checkpoint({ organizationId: company.id, state: 'initialized', executionId: null, leaseUntil: 0 });
         return jsonResponse(c, { state: 'initialized', organizationId: company.id }, 200, login);
       } catch (error) {

@@ -8,13 +8,14 @@ import {SUPPORT_MODEL,SUPPORT_PROVIDER,supportInstructions,intakeInstructions} f
 import {getConversationController,type ControlBindings} from '../modules/conversations/control-bindings.ts';
 import {createHandoffTool} from '../modules/conversations/handoff-tool.ts';
 import {createClassificationTool} from '../modules/conversations/classification-tool.ts';
-import {createKnowledgeTool,createKnowledgeReadTool} from '../modules/conversations/knowledge-tool.ts';
-import {createProductTool} from '../modules/conversations/product-tool.ts';
-import {readAiProductContext} from '../modules/ai-runs/product.ts';
+import {createBashTool,createReadTool} from '../modules/conversations/knowledge-agent-tool.ts';
+import {createProductInfoTool,createOrderInfoTool} from '../modules/conversations/fact-tool.ts';
+import {createSendMessageTool} from '../modules/conversations/send-message-tool.ts';
 import type {AiKnowledgeBindings} from '../modules/ai-runs/knowledge.ts';
-import {grepAiKnowledge,readAiKnowledge,reviewAiTextEvidence} from '../modules/ai-runs/text-knowledge.ts';
-import {createReplyTool} from '../modules/conversations/reply-tool.ts';
-import {prepareAiReply} from '../modules/ai-runs/reply-intent.ts';
+import {discoverAiKnowledge,readAiKnowledgeFile} from '../modules/ai-runs/text-knowledge.ts';
+import {prepareAiMessage} from '../modules/ai-runs/message-intent.ts';
+import {recordAiProductFact,recordAiOrderFact} from '../modules/ai-runs/fact-evidence.ts';
+import {SUPPORT_REPLY_V2} from '../shared/ai-versions.ts';
 export const cloudflare=supportExtension;
 setProvider(supportProvider());
 export function Support(){
@@ -26,12 +27,13 @@ export function Support(){
  if(work.schemaVersion===2)useTool(createClassificationTool(work,{recordAiClassification:(scope,id,input)=>controller.recordAiClassification(scope,id,input)}));
  else {
   useTool(createHandoffTool(work,{requestHandoff:(scope,id,input)=>controller.requestHandoff(scope,id,input)}));
-  if(['support-knowledge-v1','support-reply-v1'].includes(state.run.config.model.promptVersion)){
+  if(state.run.config.model.promptVersion===SUPPORT_REPLY_V2){
    const read=(scope:typeof work.scope,id:string)=>controller.readAiRun(scope,id);
-   useTool(createKnowledgeTool(work,{search:(scope,id,query)=>grepAiKnowledge(env,read,scope,id,{query:query??work.admission.question}),review:(scope,id,evidence)=>reviewAiTextEvidence(env,read,scope,id,evidence)}));
-   useTool(createKnowledgeReadTool(work,{read:(scope,id,documentId)=>readAiKnowledge(env,read,scope,id,{documentId})}));
-   useTool(createProductTool(work,{read:(scope,id)=>readAiProductContext(env,scope,id)}));
-   if(state.run.config.model.promptVersion==='support-reply-v1')useTool(createReplyTool(work,{prepare:(scope,id,input)=>prepareAiReply(env,read,scope,id,input),wakeAiReply:(scope,id)=>controller.wakeAiReply(scope,id),requestHandoff:(scope,id,input)=>controller.requestHandoff(scope,id,input)}));
+   useTool(createBashTool(work,{run:(scope,id,command,signal)=>discoverAiKnowledge(env,read,scope,id,{command},signal)}));
+   useTool(createReadTool(work,{read:(scope,id,input,signal)=>readAiKnowledgeFile(env,read,scope,id,input,signal)}));
+   useTool(createProductInfoTool(work,{read:(scope,id)=>recordAiProductFact(env,scope,id)}));
+   useTool(createOrderInfoTool(work,{read:(scope,id)=>recordAiOrderFact(env,scope,id)}));
+   useTool(createSendMessageTool(work,{prepare:(scope,id,input)=>prepareAiMessage(env,read,scope,id,input),wakeAiReply:(scope,id)=>controller.wakeAiReply(scope,id),requestHandoff:(scope,id,input)=>controller.requestHandoff(scope,id,input)}));
   }
  }
  useResponseFinish(()=>({support:{canSend:false,sent:false}}));return (work.schemaVersion===2?intakeInstructions:supportInstructions)(state.run.config.model.promptVersion);

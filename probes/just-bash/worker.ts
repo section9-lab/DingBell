@@ -9,7 +9,7 @@ export default {
       const id = '00000001-0000-4000-8000-000000000000';
       return Response.json(await runKnowledgeDiscovery([{
         documentId: id, path: `/knowledge/${id}.md`, revision: 1,
-        contentHash: 'a'.repeat(64), content: 'FAQ\n退货政策：需要人工确认\n',
+        contentHash: 'a'.repeat(64), title: 'FAQ', content: 'FAQ\n退货政策：需要人工确认\n',
       }], "grep -n -F '退货' /knowledge/*.md"));
     }
     const query = url.searchParams.get('query') ?? '退货';

@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { PiHarness, Lifecycle } from '../../../deploy/cloudflare/agent-dependencies.ts';
-import { ROOT_CONVERSATION_ID, context, openAgent, providerId, readResult } from '../../../packages/agent-runtime/harness.ts';
+import { ROOT_CONVERSATION_ID, context, openAgent, providerId, readAgentLoop, readResult } from '../../../packages/agent-runtime/harness.ts';
 import type { AgentDriver, AgentKind } from '../../../packages/agent-runtime/contracts.ts';
 import { BusinessAgentAuthority } from '../agents/authority.ts';
 import { initializeExecutionState, type ExecutionStateSql } from '../agents/state.ts';
@@ -49,6 +49,7 @@ export class PiAgentObject extends DurableObject<CloudflareEnv> {
         await this.authority.bind(id,receipt); return receipt;
       },
       read: async (id,submissionId) => { if(id!==uid())throw new Error('AGENT_BINDING_CONFLICT');return readResult(await this.harness.pi(),id,submissionId,this.authority); },
+      activity: async id => { if(id!==uid())throw new Error('AGENT_BINDING_CONFLICT');return readAgentLoop(await this.harness.pi()); },
       abort: async id => { if(id!==uid())throw new Error('AGENT_BINDING_CONFLICT');await this.harness.abort({operationId:(await this.authority.describe(id)).requestId}); },
       resumeAll: async () => {}, close: async () => {},
     };
@@ -68,6 +69,7 @@ export class PiAgentObject extends DurableObject<CloudflareEnv> {
   async supportRecover(...args: Parameters<Method<'support','recover'>>) { this.scope('support',args[0].id); return this.services.support.recover(...args); }
   async supportCancel(...args: Parameters<Method<'support','cancel'>>) { this.scope('support',args[0].id); return this.services.support.cancel(...args); }
   async supportRead(...args: Parameters<Method<'support','read'>>) { this.scope('support',args[0].id); return this.services.support.read(...args); }
+  async supportActivity(...args: Parameters<NonNullable<Method<'support','activity'>>>) { this.scope('support',args[0].id); return this.services.support.activity!(...args); }
   async supportAbort(...args: Parameters<Method<'support','abort'>>) { this.scope('support',args[0].id); return this.services.support.abort(...args); }
   async supportClose(...args: Parameters<Method<'support','close'>>) { this.scope('support',args[0].id); return this.services.support.close(...args); }
 }

@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import { knowledgeDraftSchema, knowledgeScopeSchema, productImportCommandSchema, validKnowledgeScope,
   type KnowledgeDraft, type KnowledgeScope, type KnowledgeFilters, type ProductImportScope } from '../../shared/knowledge.ts';
@@ -5,7 +6,7 @@ import { ApiError, request } from './api.ts';
 import { knowledgeFileBytes, knowledgeFileRows, knowledgeFileScopeSchema, type KnowledgeFileScope } from '../../shared/knowledge-file.ts';
 
 const version = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(Number.MAX_SAFE_INTEGER));
-const time = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(8_640_000_000_000_000));
+const time = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(MAX_TIMESTAMP_MS));
 const digest = v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/));
 const uuid = v.pipe(v.string(), v.uuid());
 const status = v.picklist(['draft', 'ready', 'failed']);

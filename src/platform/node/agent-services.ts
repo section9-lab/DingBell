@@ -25,6 +25,10 @@ export function agentServices(authority: BusinessAgentAuthority, driver: AgentDr
       if (!run.receipt || run.receipt.uid !== uid('support',run.id)) throw new Error('AGENT_RECEIPT_CONFLICT');
       return (await driver.read(run.receipt.uid,run.receipt.submissionId)).outcome;
     },
+    async activity(run) {
+      if (!run.receipt || authority.lookup('support',run.id)?.uid !== run.receipt.uid) return null;
+      return driver.activity(run.receipt.uid);
+    },
     async abort(run) {
       const state = await support.inspect(run);
       if (!state || !matchingSupport(state,run) || !state.cancellation || !run.receipt || state.receipt?.uid !== run.receipt.uid || (await support.lookup(run))?.uid !== run.receipt.uid) throw new Error('AGENT_ABORT_UNCONFIRMED');

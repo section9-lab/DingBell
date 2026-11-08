@@ -1,3 +1,5 @@
+import { NOW_MS, sqlHasRole, sqlManagesCompany } from '../../platform/database/sql.ts';
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import { storeAccess } from '../stores/storage.ts';
 import { replyBodySchema } from '../conversations/control-state.ts';
@@ -7,7 +9,7 @@ import type { TranslationDeploymentEnv } from './deployment-config.ts';
 
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value=>value.trim()===value&&value.isWellFormed()&&!/[\u0000-\u001f\u007f]/.test(value)));
 const counter=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER));
-const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 const actorSchema=v.strictObject({orgId:id,actorUserId:id,sessionId:id});
 const querySchema=v.strictObject({requestId:id,storeId:id,conversationId:id,expectedMemberId:id});
 const previewInputSchema=v.strictObject({...querySchema.entries,source:replyBodySchema,sourceRevision:counter});
@@ -15,7 +17,7 @@ const inputSchema=v.strictObject({...previewInputSchema.entries,budgetId:id});
 const scopeSchema=v.strictObject({organizationId:id,storeId:id,conversationId:id});
 const receiptSchema=v.strictObject({submissionId:id,uid:id,acceptedAt:v.pipe(v.string(),v.maxLength(40),v.isoTimestamp(),v.check(value=>Number.isFinite(Date.parse(value))&&Date.parse(value)>=0))});
 const evidenceSchema=v.strictObject({kind:v.literal('execution_closed_without_provider_request'),evidenceId:id,instanceId:id,verifiedAt:time,providerRequests:v.literal(0),executionClosed:v.literal(true)});
-const now="CAST(unixepoch('subsecond')*1000 AS INTEGER)";
+const now = NOW_MS;
 const budgetColumns='id,organization_id AS organizationId,starts_at AS startsAt,ends_at AS endsAt,enabled,revision,limit_micros AS limitMicros,reserved_micros AS reservedMicros,spent_micros AS spentMicros';
 const runColumns=`run.id,run.organization_id AS organizationId,run.store_id AS storeId,run.conversation_id AS conversationId,run.request_id AS requestId,
   run.actor_user_id AS actorUserId,run.actor_member_id AS actorMemberId,run.source,run.source_hash AS sourceHash,run.source_revision AS sourceRevision,
@@ -203,7 +205,7 @@ const executionEligible=`run.settlement='held' AND EXISTS (
   WHERE conversation.id=run.conversation_id AND conversation.organization_id=run.organization_id AND conversation.store_id=run.store_id
     AND caller.email_verified=1 AND budget.enabled=1 AND budget.reserved_micros>=run.reserved_micros
     AND budget.spent_micros<=budget.limit_micros-budget.reserved_micros
-    AND (actor.role IN ('owner','admin') OR (actor.role='member' AND EXISTS (SELECT 1 FROM store_grant AS permission
+    AND (${sqlManagesCompany('actor.role')} OR (${sqlHasRole('actor.role','member')} AND EXISTS (SELECT 1 FROM store_grant AS permission
       WHERE permission.organization_id=store.organization_id AND permission.store_id=store.id AND permission.member_id=actor.id))))`;
 export async function readTranslationExecutionContext(db:D1Database,scope:TranslationScope,runId:string):Promise<TranslationRun|null>{
   const row=await db.prepare(`SELECT ${runColumns} FROM reply_preview_run AS run WHERE ${runWhere} AND ${executionEligible}`).bind(...scopeValues(scope,runId)).first<RunRow>();

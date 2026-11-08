@@ -39,7 +39,7 @@ test('URL and key alone fetch searchable model options before saving or testing'
  await expect(panel.getByLabel('可用模型',{exact:true})).toBeVisible();await panel.getByLabel('搜索模型',{exact:true}).fill('synthetic-');await expect(panel.getByLabel('可用模型',{exact:true}).locator('option')).toHaveCount(3);
  await panel.getByLabel('可用模型',{exact:true}).selectOption('synthetic-customer-model');await expect(panel.getByLabel('模型名称（Model ID）',{exact:true})).toHaveValue('synthetic-customer-model');await expect(panel.getByText('连接状态：尚未配置',{exact:true})).toBeVisible();expect(application.calls()).toBe(0);expect(application.listCalls()).toBe(1);
  const unsaved=await(await page.request.get(application.baseURL+'/api/companies/model-company/settings/ai-model')).json();expect(unsaved.version).toBe(0);
- await expect(panel.getByLabel('AI 回复方式',{exact:true})).toHaveValue('draft');
+ await expect(panel.getByLabel('AI 回复方式',{exact:true})).toHaveCount(0);await expect(panel.getByText('AI 托管命中已发布策略后会直接回复买家')).toBeVisible();
  expect(await page.evaluate('JSON.stringify(localStorage)+JSON.stringify(sessionStorage)')).not.toContain(key);
  await panel.getByRole('button',{name:'保存模型配置',exact:true}).click();await expect(panel.getByText('连接状态：已保存，尚未测试 · 第 1 版',{exact:true})).toBeVisible();await expect(panel.getByLabel('API Key',{exact:true})).toHaveValue(savedMask);await expect(panel.getByLabel('API Key',{exact:true})).toHaveJSProperty('readOnly',true);expect(application.calls()).toBe(0);
  const connectionOnly=await(await page.request.get(application.baseURL+'/api/companies/model-company/settings/ai-model')).json();expect(connectionOnly.execution).toBeNull();

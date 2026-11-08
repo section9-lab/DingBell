@@ -45,7 +45,7 @@ test('bounded virtual reads use exact authorized paths and preserve line positio
   const files = await readKnowledgeVirtualFiles(f.db, 'company', scope);
   const path = `/knowledge/${id}.md`;
   assert.deepEqual(readKnowledgeVirtualFile(files, path, 3, 1), {
-    path, documentId: id, revision: 1, contentHash: files[0]!.contentHash,
+    path, documentId: id, revision: 1, contentHash: files[0]!.contentHash, title: 'FAQ',
     startLine: 3, endLine: 3, totalLines: 4, content: 'Товар 1',
   });
   assert.equal(readKnowledgeVirtualFile(files, `/knowledge/../knowledge/${id}.md`), null);

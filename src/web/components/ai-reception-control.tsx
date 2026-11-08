@@ -25,7 +25,7 @@ export function AiReceptionControl({ scope, view, disabled, onChanged, onDenied 
   const active = useRef(true), working = useRef(false), initial = useRef(pending), reported = useRef(false), refreshed = useRef(-1);
   const { companyId, conversationId, memberId } = scope;
   const prefix = ['ai-reception', scope.userId, memberId, companyId, conversationId], queryKey = [...prefix, view.state.version];
-  const query = useQuery({ queryKey, queryFn: ({ signal }) => readAiReception(companyId, conversationId, memberId, signal), enabled: !busy, gcTime: 0, retry: false, refetchInterval: 10_000 });
+  const query = useQuery({ queryKey, queryFn: ({ signal }) => readAiReception(companyId, conversationId, memberId, signal), enabled: !busy, gcTime: 0, refetchInterval: 10_000 });
   useEffect(() => { active.current = true; if (initial.current.state === 'pending') void recover(initial.current.command); return () => { active.current = false; }; }, []);
   useEffect(() => { if (denied(query.error) && !reported.current) { reported.current = true; onDenied(query.error); } }, [query.error, onDenied]);
   useEffect(() => {

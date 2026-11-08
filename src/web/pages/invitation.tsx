@@ -1,3 +1,5 @@
+import { workspaceRoutes } from '../lib/routes';
+import { LoadingState } from '../components/query-state';
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -54,7 +56,7 @@ export function InvitationPage({ identity, reset, logout }: {
         {signedIn ? (
           <>
             <p className="break-all text-sm text-muted-foreground">当前账号：{identity.session?.user.email}</p>
-            {invitation.isPending || invitation.isFetching ? <p role="status" className="flex items-center gap-2 text-sm"><Spinner aria-hidden="true" />正在核对邀请…</p>
+            {invitation.isPending || invitation.isFetching ? <LoadingState>正在核对邀请…</LoadingState>
               : invitation.isError || !invitation.data ? <><ErrorNotice error={invitation.error} /><Button variant="outline" onClick={() => void invitation.refetch()}>重新检查邀请</Button></>
                 : <>
                   <div className="rounded-xl border bg-muted/30 p-5 text-sm leading-6"><p className="font-medium">{invitation.data.invitation.organization.name}</p><p className="text-muted-foreground">邀请角色：{roleLabel(invitation.data.invitation.role)}</p></div>
@@ -62,7 +64,7 @@ export function InvitationPage({ identity, reset, logout }: {
                   {invitation.data.membershipStatus === 'removed' ? <p className="text-sm text-muted-foreground">你的成员资格已被移除，旧邀请不能恢复权限。请联系公司管理员。</p>
                     : !invitation.data.canAccept && invitation.data.membershipStatus !== 'active' && <p className="text-sm text-muted-foreground">此邀请当前无法接受，请联系邀请人确认是否已经过期或被撤销。</p>}
                 </>}
-            <Button variant="outline" render={<Link to="/workspace" />}>返回工作区</Button>
+            <Button variant="outline" render={<Link to={workspaceRoutes.home} />}>返回工作区</Button>
             <Button variant="ghost" onClick={logout}>切换账号</Button>
           </>
         ) : done ? (

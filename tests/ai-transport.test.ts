@@ -3,9 +3,9 @@ import {test} from 'node:test';
 import {previewFetch,PREVIEW_ENDPOINT} from '../src/modules/translations/transport.ts';
 const raw=(names:string[])=>[...names.map((name,i)=>({choices:[{index:0,delta:{tool_calls:[{index:i,id:`t${i}`,type:'function',function:{name,arguments:'{}'}}]},finish_reason:'tool_calls'}]})),{choices:[],usage:{prompt_tokens:3,completion_tokens:2,total_tokens:5}}].map(x=>`data: ${JSON.stringify(x)}\n\n`).join('')+'data: [DONE]\n\n';
 const request={method:'POST',body:'{}'};
-test('a knowledge-enabled run permits either listed tool, but never multiple or unsolicited calls',async()=>{
- for(const names of [['search_knowledge'],['request_handoff'],['task'],['search_knowledge','request_handoff']]){
-  const transport=previewFetch({claim:async()=>true,spend(){},record(){}},async()=>new Response(raw(names),{headers:{'content-type':'text/event-stream'}}),{allowedTools:['request_handoff','search_knowledge']});
+test('a tool-enabled run permits either listed tool, but never multiple or unsolicited calls',async()=>{
+ for(const names of [['bash'],['request_handoff'],['task'],['bash','request_handoff']]){
+  const transport=previewFetch({claim:async()=>true,spend(){},record(){}},async()=>new Response(raw(names),{headers:{'content-type':'text/event-stream'}}),{allowedTools:['request_handoff','bash']});
   if(names.length===1&&names[0]!=='task')assert.equal(await(await transport(PREVIEW_ENDPOINT,request)).text(),raw(names));
   else await assert.rejects(transport(PREVIEW_ENDPOINT,request),/PREVIEW_TOOLS_REJECTED/);
  }

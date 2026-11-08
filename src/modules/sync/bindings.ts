@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import { credentialConfig, type CredentialBindings } from '../stores/credentials.ts';
 import type { StoreCoordinator } from './coordinator.ts';
 import type { SyncScope } from './types.ts';
@@ -37,7 +38,7 @@ export async function reserveReply(env: SyncBindings, scope: SyncScope): Promise
 
 export async function recordReplyRateLimit(env: SyncBindings, scope: SyncScope, until: number): Promise<void> {
   if (!env.STORE_COORDINATOR || !Number.isFinite(until) || !Number.isInteger(until) || until < 0) throw new Error('Invalid send cooldown.');
-  const deadline = Math.min(until, 8_640_000_000_000_000);
+  const deadline = Math.min(until, MAX_TIMESTAMP_MS);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([

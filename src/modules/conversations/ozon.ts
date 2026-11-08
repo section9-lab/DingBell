@@ -1,4 +1,5 @@
 import { OzonReadError, readOzonJSON, type Credentials } from '../ozon/read.ts';
+import { normalizeChatType } from '../ozon/chat-type.ts';
 export { OzonReadError };
 export type { OzonReadCode, Credentials } from '../ozon/read.ts';
 
@@ -33,9 +34,12 @@ export async function listOzonChats(credentials: Credentials, options: { cursor?
   const hasNext = boolean(value.has_next);
   if (!Array.isArray(value.chats) || value.chats.length > size || hasNext && !value.chats.length) invalid();
   const chats = value.chats.map(item => {
-    const row = object(item), chat = object(row.chat);
+    const row = object(item);
+    // v2/v3 documented a nested `chat` object; recorded production responses have also
+    // arrived flat. Accept both instead of failing the whole page on a shape change.
+    const chat = row.chat === undefined || row.chat === null ? row : object(row.chat);
     if (typeof row.unread_count !== 'number' || !Number.isSafeInteger(row.unread_count) || row.unread_count < 0) invalid();
-    return { id: text(chat.chat_id), type: text(chat.chat_type), status: text(chat.chat_status), createdAt: timestamp(chat.created_at), lastMessageId: optionalId(row.last_message_id), firstUnreadMessageId: optionalId(row.first_unread_message_id), unreadCount: row.unread_count };
+    return { id: text(chat.chat_id), type: normalizeChatType(text(chat.chat_type)), status: text(chat.chat_status), createdAt: timestamp(chat.created_at), lastMessageId: optionalId(row.last_message_id), firstUnreadMessageId: optionalId(row.first_unread_message_id), unreadCount: row.unread_count };
   });
   return { chats, cursor: hasNext ? text(value.cursor, 4096) : null, hasNext };
 }

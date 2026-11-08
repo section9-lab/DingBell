@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { REPLY_BODY_MAX } from '../../shared/reply-body.ts';
 import type { PendingReplyScope, PendingReplyStorage } from './conversation-reply-pending.ts';
 
 type StorageInput = PendingReplyStorage | null | undefined;
@@ -8,7 +9,7 @@ const prefix = 'dingbell:reply-draft:v1:';
 const identifier = v.pipe(v.string(), v.minLength(1), v.maxLength(256), v.check(value => !!value.trim() && value.isWellFormed() && !/[\u0000-\u001f\u007f]/.test(value)));
 const scopeSchema = v.strictObject({ userId: identifier, memberId: identifier, companyId: identifier, conversationId: identifier });
 const selectorSchema = v.strictObject({ userId: identifier, memberId: v.optional(identifier), companyId: v.optional(identifier), conversationId: v.optional(identifier) });
-const bodySchema = v.pipe(v.string(), v.maxLength(1000));
+const bodySchema = v.pipe(v.string(), v.maxLength(REPLY_BODY_MAX));
 const recordSchema = v.strictObject({ v: v.literal(1), scope: scopeSchema, body: bodySchema });
 function keyFor(scope: PendingReplyScope) { return prefix + encodeURIComponent(JSON.stringify([scope.userId, scope.memberId, scope.companyId, scope.conversationId])); }
 function keyScope(key: string): PendingReplyScope | null {

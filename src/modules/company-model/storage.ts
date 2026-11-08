@@ -1,3 +1,4 @@
+import { sqlManagesCompany, NOW_MS } from '../../platform/database/sql.ts';
 import type { SettingsActor } from '../company-settings/storage.ts';
 import type { ModelExecution,CompanyModelTestFailure } from '../../shared/company-model.ts';
 import type { ModelSecret } from './security.ts';
@@ -8,11 +9,11 @@ export function readCompanyModel(db:D1Database,companyId:string,revision?:number
     .bind(companyId,...(revision===undefined?[]:[revision])).first<ModelRecord>();
 }
 export const modelManagerAccess=`EXISTS(SELECT 1 FROM member a JOIN user u ON u.id=a.user_id JOIN session s ON s.user_id=u.id
-  WHERE a.organization_id=? AND a.user_id=? AND s.id=? AND s.expires_at>CAST(unixepoch('subsecond')*1000 AS INTEGER) AND u.email_verified=1 AND a.role IN ('owner','admin'))`;
+  WHERE a.organization_id=? AND a.user_id=? AND s.id=? AND s.expires_at>${NOW_MS} AND u.email_verified=1 AND ${sqlManagesCompany('a.role')})`;
 const actorValues=(a:SettingsActor)=>[a.orgId,a.actorUserId,a.sessionId];
 export function insertCompanyModel(db:D1Database,actor:SettingsActor,expectedVersion:number,baseUrl:string,model:string,secret:ModelSecret,execution:ModelExecution|null){
   return db.prepare(`INSERT INTO company_ai_model_revision(organization_id,revision,base_url,model,key_version,nonce,ciphertext,execution,created_at)
-    SELECT ?,?,?,?,?,?,?,?,CAST(unixepoch('subsecond')*1000 AS INTEGER) WHERE ${modelManagerAccess}
+    SELECT ?,?,?,?,?,?,?,?,${NOW_MS} WHERE ${modelManagerAccess}
     AND (SELECT COALESCE(MAX(revision),0) FROM company_ai_model_revision WHERE organization_id=?)=?
     ON CONFLICT(organization_id,revision) DO NOTHING RETURNING revision`)
     .bind(actor.orgId,expectedVersion+1,baseUrl,model,secret.keyVersion,secret.nonce,secret.ciphertext,execution?JSON.stringify(execution):null,...actorValues(actor),actor.orgId,expectedVersion).first<{revision:number}>();
@@ -28,7 +29,7 @@ export function claimModelTest(db:D1Database,actor:SettingsActor,revision:number
 }
 // Reuse the persistent request limiter, with a company-scoped namespace and no provider data.
 export function claimModelCatalog(db:D1Database,actor:SettingsActor,revision:number){
-  const key=`dingbell:company-model:catalog:${actor.orgId}`,now="CAST(unixepoch('subsecond')*1000 AS INTEGER)";
+  const key=`dingbell:company-model:catalog:${actor.orgId}`,now=NOW_MS;
   return db.prepare(`INSERT INTO rate_limit(id,key,count,last_request)
     SELECT ?,?,1,${now} WHERE ${modelManagerAccess}
     AND (SELECT COALESCE(MAX(revision),0) FROM company_ai_model_revision WHERE organization_id=?)=?

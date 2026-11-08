@@ -1,10 +1,11 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import type { OrderTimeSource } from '../../shared/order-time.ts';
 import { storeAccess, type StoreActor } from '../stores/storage.ts';
 import type { SourcingDTO } from './sourcing.ts';
 export { writeProductSourcing, type SourcingInput } from './sourcing.ts';
 
 const productIdPattern=/^(0|[1-9][0-9]{0,39})$/;
-const maximumTime=8_640_000_000_000_000;
+const maximumTime=MAX_TIMESTAMP_MS;
 export class InvalidCommerceCursor extends Error {constructor(){super('INVALID_COMMERCE_CURSOR');this.name='InvalidCommerceCursor';}}
 
 type ProductRow={id:string;storeId:string;storeName:string;listing:string;facts:string|null;listObservedAt:number;factsObservedAt:number|null;state:string;error:string|null;

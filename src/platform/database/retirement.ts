@@ -1,3 +1,4 @@
+import { NOW_MS } from './sql.ts';
 /** Persisted subsystem identities, not a general-purpose SQL migration parser. */
 export const retiredSubsystemTables = [
   'ai_answer', 'ai_reply_intent', 'knowledge_index_job', 'knowledge_index_usage',
@@ -30,7 +31,7 @@ export function retirementArchivePlan(table: RetiredTable) {
         table_name TEXT PRIMARY KEY,archive_table TEXT NOT NULL UNIQUE,source_schema TEXT NOT NULL,
         row_count INTEGER NOT NULL CHECK(row_count>=0),archived_at INTEGER NOT NULL)`,
       `INSERT INTO dingbell_retirement_archive(table_name,archive_table,source_schema,row_count,archived_at)
-        SELECT '${table}','${name}',sql,(SELECT COUNT(*) FROM ${archive}),CAST(unixepoch('subsecond')*1000 AS INTEGER)
+        SELECT '${table}','${name}',sql,(SELECT COUNT(*) FROM ${archive}),${NOW_MS}
         FROM sqlite_master WHERE type='table' AND name='${table}' ON CONFLICT(table_name) DO NOTHING`,
     ],
     verify: `SELECT '${table}' AS sourceTable,

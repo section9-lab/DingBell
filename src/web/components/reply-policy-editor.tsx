@@ -1,3 +1,4 @@
+import { LoadingState } from './query-state';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as v from 'valibot';
@@ -20,13 +21,13 @@ const accessDenied = (error: unknown) => error instanceof ApiError && ['FORBIDDE
 export function ReplyPolicyEditor({ companyId, id, kind, isNew, stores, storesUnavailable, onSaved, onDirty, onClose, refresh }: Props) {
   const client = useQueryClient(), { timeZone, date, query: settings } = useCompanySettings();
   const queryKey = ['reply-policy', companyId, id];
-  const query = useQuery({ queryKey, queryFn: ({ signal }) => readReplyPolicy(companyId, id, signal), enabled: !isNew, retry: false, gcTime: 0 });
+  const query = useQuery({ queryKey, queryFn: ({ signal }) => readReplyPolicy(companyId, id, signal), enabled: !isNew, gcTime: 0 });
   const [local, setLocal] = useState<{ config: ReplyPolicyConfig; version: number } | null>(() => isNew ? { config: defaultPolicy(kind), version: 0 } : null);
   const [pending, setPending] = useState(false), busy = useRef(false), mounted = useRef(false);
   const [review, setReview] = useState(false), [reread, setReread] = useState(false);
   const [error, setError] = useState<unknown>(), [message, setMessage] = useState('');
   const [before, setBefore] = useState<number | null>(null), [historyOpen, setHistoryOpen] = useState(false);
-  const history = useQuery({ queryKey: ['reply-policy-history', companyId, id, before], queryFn: ({ signal }) => readPolicyVersions(companyId, id, before!, signal), enabled: before !== null && !isNew, retry: false, gcTime: 0 });
+  const history = useQuery({ queryKey: ['reply-policy-history', companyId, id, before], queryFn: ({ signal }) => readPolicyVersions(companyId, id, before!, signal), enabled: before !== null && !isNew, gcTime: 0 });
   const data = query.data, policy = data?.policy;
   const savedConfig = policy?.published?.config ?? policy?.draft;
   const config = local?.config ?? savedConfig;
@@ -83,7 +84,7 @@ export function ReplyPolicyEditor({ companyId, id, kind, isNew, stores, storesUn
       if (!(cause instanceof ApiError) || ['OPERATION_UNCONFIRMED', 'POLICY_CHANGED'].includes(cause.code)) { setReview(true); setReread(false); }
     } finally { busy.current = false; if (mounted.current) setPending(false); }
   }
-  if (!isNew && (query.isError || !data)) return <div className="space-y-4 p-6">{query.isError ? <ErrorNotice error={query.error} /> : <p role="status" className="flex items-center gap-2"><Spinner />正在读取策略…</p>}<Button variant="outline" disabled={query.isFetching || pending} onClick={() => void readLatest()}>读取最新策略</Button></div>;
+  if (!isNew && (query.isError || !data)) return <div className="space-y-4 p-6">{query.isError ? <ErrorNotice error={query.error} /> : <LoadingState>正在读取策略…</LoadingState>}<Button variant="outline" disabled={query.isFetching || pending} onClick={() => void readLatest()}>读取最新策略</Button></div>;
   if (!config) return null;
   const effective = policy?.published;
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">

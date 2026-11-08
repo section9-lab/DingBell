@@ -1,3 +1,4 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 import * as v from 'valibot';
 import {noPushMessageReview} from '../ozon-push/barrier.ts';
 import {aiScopeSchema} from '../conversations/ai-state.ts';
@@ -26,7 +27,7 @@ export type AiRunReader=(scope:ControlScope,runId:string)=>Promise<AiWork|null>;
 export interface AiExecution {id:string;budgetId:string;agent:'Support';instanceId:string;dispatchKey:string;payload:Payload;modelInput:Payload['modelInput'];config:Config;reservedMicros:number;perGenerationMicros:number;
  createdAt:number;receipt:TranslationReceipt|null;closure:Closure|null;generations:Generation[];remainingReservedMicros:number;status:'open'|'unconfirmed'|'settled'}
 type Row={id:string;organizationId:string;storeId:string;conversationId:string;controllerId:string;budgetId:string;payload:string;payloadHash:string;config:string;perGenerationMicros:number;reservedMicros:number;maxGenerations:number;generations:number;createdAt:number;receipt:string|null;closure:string|null};
-const now="CAST(unixepoch('subsecond')*1000 AS INTEGER)";
+const now = NOW_MS;
 const columns='r.id,r.organization_id AS organizationId,r.store_id AS storeId,r.conversation_id AS conversationId,r.controller_id AS controllerId,r.budget_id AS budgetId,r.payload,r.payload_hash AS payloadHash,r.config,r.per_generation_micros AS perGenerationMicros,r.reserved_micros AS reservedMicros,r.max_generations AS maxGenerations,r.generations,r.created_at AS createdAt,r.receipt,r.closure';
 const where='r.id=? AND r.organization_id=? AND r.store_id=? AND r.conversation_id=? AND r.controller_id=?';
 function bound(scope:ControlScope,runId:string){v.parse(aiScopeSchema,scope);v.parse(v.pipe(v.string(),v.uuid()),runId);return [runId,scope.organizationId,scope.storeId,scope.conversationId,scope.controllerId];}

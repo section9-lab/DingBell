@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import { replyBodySchema } from './control-state.ts';
 import type { ReplySnapshot, ReplyView } from './reply-types.ts';
@@ -5,7 +6,7 @@ import type { ReplySnapshot, ReplyView } from './reply-types.ts';
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const counter=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER));
 const positive=v.pipe(counter,v.minValue(1));
-const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 const reason=v.nullable(v.pipe(v.string(),v.regex(/^[A-Z][A-Z0-9_]{0,127}$/)));
 const intentFields={id:identifier,commandId:identifier,
   body:replyBodySchema,bodyHash:v.pipe(v.string(),v.regex(/^[a-f0-9]{64}$/)),platformThreadId:identifier,credentialVersion:positive,controlEpoch:counter,

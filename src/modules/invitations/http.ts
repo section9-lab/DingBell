@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull, lte, or } from 'drizzle-orm';
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import * as v from 'valibot';
 import { apiError, authError, jsonResponse, type ApplicationEnv } from '../../http.ts';
+import { canManageCompany } from '../../shared/roles.ts';
 import { auditedChange } from '../audit/operation.ts';
 import { configured, signedIn, limitedBody, companyFor, recorder } from '../identity/http.ts';
 import { invitationServices, services } from '../identity/services.ts';
@@ -71,7 +72,7 @@ async function audited(c: AppContext, action: string, organizationId: string, op
 const management: MiddlewareHandler<ApplicationEnv> = async (c, next) => {
   const company = await companyFor(c, c.req.param('companyId')!, c.get('identitySession').user.id);
   if (!company) return missing(c);
-  if (!company.role.split(',').some(role => ['owner', 'admin'].includes(role.trim()))) return apiError(c, 'FORBIDDEN', 'Only company owners and administrators can manage invitations.', 403);
+  if (!canManageCompany(company.role)) return apiError(c, 'FORBIDDEN', 'Only company owners and administrators can manage invitations.', 403);
   await next();
 };
 const noFields: MiddlewareHandler<ApplicationEnv> = async (c, next) => {

@@ -35,6 +35,15 @@ export const knowledgeCitationSchema = v.strictObject({ documentId: v.pipe(v.str
 export const knowledgeCitationRequestSchema = v.strictObject({ storeId: reference, productRef: v.nullable(reference), language: knowledgeScopeSchema.entries.language,
   citations: v.pipe(v.array(knowledgeCitationSchema), v.minLength(1), v.maxLength(10), v.check(values => new Set(values.map(value => value.chunkId)).size === values.length)) });
 export type KnowledgeCitationRequest = v.InferOutput<typeof knowledgeCitationRequestSchema>;
+/**
+ * Document-level citation identity. One approved document is cited once, regardless of how
+ * its text was split for search, so a reply cannot depend on an arbitrary chunk boundary.
+ */
+export const knowledgeDocumentCitationSchema = v.strictObject({ documentId: v.pipe(v.string(), v.uuid()), revision: knowledgeVersionSchema, contentHash: digest });
+export const knowledgeDocumentCitationRequestSchema = v.strictObject({ storeId: reference, productRef: v.nullable(reference), language: knowledgeScopeSchema.entries.language,
+  citations: v.pipe(v.array(knowledgeDocumentCitationSchema), v.minLength(1), v.maxLength(10), v.check(values => new Set(values.map(value => value.documentId)).size === values.length)) });
+export type KnowledgeDocumentCitation = v.InferOutput<typeof knowledgeDocumentCitationSchema>;
+export type KnowledgeDocumentCitationRequest = v.InferOutput<typeof knowledgeDocumentCitationRequestSchema>;
 export type KnowledgeDraft = v.InferOutput<typeof knowledgeDraftSchema>;
 export type KnowledgeScope = v.InferOutput<typeof knowledgeScopeSchema>;
 export function validKnowledgeScope(scope: KnowledgeScope, draft: KnowledgeDraft) {

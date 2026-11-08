@@ -1,3 +1,4 @@
+import { workspaceRoutes } from '../lib/routes';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -42,7 +43,7 @@ function ContextDetails({companyId,conversationId,storeId,viewerMemberId,source,
   const root=useRef<HTMLDivElement>(null),previous=useRef<HTMLButtonElement>(null),next=useRef<HTMLButtonElement>(null),retry=useRef<HTMLButtonElement>(null);
   const focusPage=useRef<'previous'|'next'|null>(null);
   const query=useQuery({queryKey:['message-context',companyId,viewerMemberId,storeId,conversationId,source.id,afterPosting],
-    queryFn:({signal})=>readMessageContext(companyId,conversationId,source,{storeId,viewerMemberId},afterPosting,signal),gcTime:0,retry:false,refetchInterval:10_000});
+    queryFn:({signal})=>readMessageContext(companyId,conversationId,source,{storeId,viewerMemberId},afterPosting,signal),gcTime:0,refetchInterval:10_000});
   useEffect(()=>{if(query.error instanceof ApiError&&['NOT_FOUND','FORBIDDEN','UNAUTHENTICATED'].includes(query.error.code))onDenied(query.error);},[query.error,onDenied]);
   useEffect(()=>{
     if(!focusPage.current||query.isFetching)return;
@@ -59,12 +60,12 @@ function ContextDetails({companyId,conversationId,storeId,viewerMemberId,source,
     <div className="flex flex-col gap-2 rounded-lg border bg-background p-3">
       <h4 className="font-medium">商品</h4>
       {source.sku&&<p>SKU：{source.sku}</p>}
-      {item?<><div className="flex min-w-0 items-center gap-3"><ContextProductImage src={item.primaryImage} alt={item.name??`商品 ${item.id}`}/><div className="min-w-0"><p className="break-words text-sm font-medium">{item.name??'商品详情尚未导入'}</p><p className="break-words text-muted-foreground">商家编码：{item.offerId}</p><Button className="mt-1 h-auto p-0" variant="link" render={<Link to={`/workspace/products?store=${encodeURIComponent(storeId)}&product=${encodeURIComponent(item.id)}`}/>}>查看商品资料</Button></div></div>
+      {item?<><div className="flex min-w-0 items-center gap-3"><ContextProductImage src={item.primaryImage} alt={item.name??`商品 ${item.id}`}/><div className="min-w-0"><p className="break-words text-sm font-medium">{item.name??'商品详情尚未导入'}</p><p className="break-words text-muted-foreground">商家编码：{item.offerId}</p><Button className="mt-1 h-auto p-0" variant="link" render={<Link to={`${workspaceRoutes.products}?store=${encodeURIComponent(storeId)}&product=${encodeURIComponent(item.id)}`}/>}>查看商品资料</Button></div></div>
         {item.price!==null&&<p>采集价格：{item.price} {item.currency??'币种未提供'}</p>}
         {item.archived===true&&<Badge variant="outline">采集时已归档</Badge>}
         <p className="text-muted-foreground">SKU 来源：{item.skuSource==='list'?'商品列表':item.skuSource==='details'?'商品详情':'商品列表与详情'}</p>
         <p className="text-muted-foreground">列表采集：{date(item.listObservedAt)}</p><p className="text-muted-foreground">详情采集：{date(item.factsObservedAt,'尚未导入')}</p>
-      </>:orderProduct?<><div className="flex min-w-0 items-center gap-3"><ContextProductImage src={orderProduct.primaryImage} alt={orderProduct.name??`商品 ${orderProduct.offerId}`}/><div className="min-w-0"><p className="break-words text-sm font-medium">{orderProduct.name??'订单商品名称尚未提供'}</p><p className="break-words text-muted-foreground">商家编码：{orderProduct.offerId}</p><p className="text-muted-foreground">SKU：{orderProduct.sku}</p>{orderProduct.productId&&<Button className="mt-1 h-auto p-0" variant="link" render={<Link to={`/workspace/products?store=${encodeURIComponent(storeId)}&product=${encodeURIComponent(orderProduct.productId)}`}/>}>查看商品资料</Button>}</div></div><p className="text-muted-foreground">这是消息订单号匹配到的首项商品预览，不代表订单只有这一项或消费者归属已经验证。</p></>:<p className="text-muted-foreground">{product.state==='not_provided'?(source.orderNumber?'这条消息只携带订单号；当前已导入的订单快照中没有匹配订单，因此无法读取关联商品。':'这条消息没有携带 SKU 或订单号。'):product.state==='ambiguous'?'同一 SKU 对应多个商品，暂不展示详情。':'尚未导入匹配的商品。'}</p>}
+      </>:orderProduct?<><div className="flex min-w-0 items-center gap-3"><ContextProductImage src={orderProduct.primaryImage} alt={orderProduct.name??`商品 ${orderProduct.offerId}`}/><div className="min-w-0"><p className="break-words text-sm font-medium">{orderProduct.name??'订单商品名称尚未提供'}</p><p className="break-words text-muted-foreground">商家编码：{orderProduct.offerId}</p><p className="text-muted-foreground">SKU：{orderProduct.sku}</p>{orderProduct.productId&&<Button className="mt-1 h-auto p-0" variant="link" render={<Link to={`${workspaceRoutes.products}?store=${encodeURIComponent(storeId)}&product=${encodeURIComponent(orderProduct.productId)}`}/>}>查看商品资料</Button>}</div></div><p className="text-muted-foreground">这是消息订单号匹配到的首项商品预览，不代表订单只有这一项或消费者归属已经验证。</p></>:<p className="text-muted-foreground">{product.state==='not_provided'?(source.orderNumber?'这条消息只携带订单号；当前已导入的订单快照中没有匹配订单，因此无法读取关联商品。':'这条消息没有携带 SKU 或订单号。'):product.state==='ambiguous'?'同一 SKU 对应多个商品，暂不展示详情。':'尚未导入匹配的商品。'}</p>}
     </div>
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2"><h4 className="font-medium">订单包裹</h4><Badge variant="outline">FBS / FBO / FBP</Badge></div>
@@ -74,7 +75,7 @@ function ContextDetails({companyId,conversationId,storeId,viewerMemberId,source,
           <h5 className="font-medium"><Badge variant="outline" className="mr-2">{posting.fulfillmentType.toUpperCase()}</Badge>{posting.postingNumber}</h5><p>平台状态：<span title={orderStatusRaw(posting)}>{orderStatusLabel(posting,'尚未提供')}</span></p>
           <p>运单号：{posting.trackingNumber??'尚未提供'}</p><p>商品记录：{posting.productCount??'未知'} 项</p>
           <p className="text-muted-foreground">采用{posting.source==='details'?'包裹详情':posting.source==='list'?'包裹列表':'未确认'}记录 · {date(posting.observedAt)}</p>
-          <Button className="h-auto self-start p-0" variant="link" render={<Link to={`/workspace/orders?${new URLSearchParams({store:storeId,posting:posting.postingNumber,type:posting.fulfillmentType})}`}/>}>查看订单详情</Button>
+          <Button className="h-auto self-start p-0" variant="link" render={<Link to={`${workspaceRoutes.orders}?${new URLSearchParams({store:storeId,posting:posting.postingNumber,type:posting.fulfillmentType})}`}/>}>查看订单详情</Button>
         </article>)}
         {!order.postings.length&&<p className="text-muted-foreground">本页已无包裹，请返回前一页或稍后刷新。</p>}
         <div className="flex flex-wrap items-center gap-2"><Button ref={previous} size="sm" variant="outline" disabled={!pages.length||query.isFetching} onClick={()=>{focusPage.current='previous';setPages(value=>value.slice(0,-1));}}>上一页包裹</Button><span>第 {pages.length+1} 页</span><Button ref={next} size="sm" variant="outline" disabled={!order.nextPosting||query.isFetching} onClick={()=>{focusPage.current='next';setPages(value=>[...value,order.nextPosting!]);}}>下一页包裹</Button></div>

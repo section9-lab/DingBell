@@ -1,7 +1,8 @@
+import { workspaceRoutes } from '../lib/routes';
 import {useEffect,useState} from 'react';
 import {useQuery} from '@tanstack/react-query';
 import {Link,useSearchParams} from 'react-router';
-import {ChevronLeft,ChevronRight,RefreshCw,SlidersHorizontal} from 'lucide-react';
+import {RefreshCw,SlidersHorizontal} from 'lucide-react';
 import type {Company} from '../lib/api';
 import {readStores} from '../lib/stores-api';
 import {storesQueryKey} from '../lib/query-keys';
@@ -20,7 +21,8 @@ import {Field,FieldDescription,FieldLabel} from '../components/ui/field';
 import {Input} from '../components/ui/input';
 import {NativeSelect,NativeSelectOption} from '../components/ui/native-select';
 import {Popover,PopoverContent,PopoverTitle,PopoverTrigger} from '../components/ui/popover';
-import {Spinner} from '../components/ui/spinner';
+import {LoadingState} from '../components/query-state';
+import {Pager} from '../components/pager';
 import {Table,TableBody,TableCell,TableHead,TableHeader,TableRow} from '../components/ui/table';
 
 const states={pending:'等待详情',complete:'资料完整',error:'读取失败'} as const;
@@ -39,10 +41,10 @@ export function ProductsPage({company}:{company:Company}){
   const [filterOpen,setFilterOpen]=useState(false),[filters,setFilters]=useState<ProductFilterOptions>({}),[draft,setDraft]=useState<ProductFilterDraft>(emptyProductDraft);
   const activeFilters=Object.values(filters).filter(value=>value!==undefined&&value!==false).length;
   const canEdit=canRecordSourcing(company.role);
-  const stores=useQuery({queryKey:storesQueryKey(company.id),queryFn:({signal})=>readStores(company.id,0,signal),retry:false});
+  const stores=useQuery({queryKey:storesQueryKey(company.id),queryFn:({signal})=>readStores(company.id,0,signal)});
   useEffect(()=>{if(!storeId&&stores.data?.stores[0])setParams({store:stores.data.stores[0].id},{replace:true});},[storeId,stores.data,setParams]);
-  const products=useQuery({queryKey:['commerce-products',company.id,storeId,cursor,JSON.stringify(filters)],queryFn:({signal})=>readCommerceProducts(company.id,{storeId,cursor,limit:25,filters},signal),enabled:!!storeId,retry:false});
-  const detail=useQuery({queryKey:['commerce-product',company.id,storeId,productId],queryFn:({signal})=>readCommerceProduct(company.id,storeId,productId,signal),enabled:!!storeId&&!!productId,retry:false});
+  const products=useQuery({queryKey:['commerce-products',company.id,storeId,cursor,JSON.stringify(filters)],queryFn:({signal})=>readCommerceProducts(company.id,{storeId,cursor,limit:25,filters},signal),enabled:!!storeId});
+  const detail=useQuery({queryKey:['commerce-product',company.id,storeId,productId],queryFn:({signal})=>readCommerceProduct(company.id,storeId,productId,signal),enabled:!!storeId&&!!productId});
   const selectStore=(id:string)=>{setPages([]);setEditing(null);setParams(id?{store:id}:{});};const selectProduct=(id:string)=>setParams({store:storeId,...(id?{product:id}:{})});
   const applyFilters=()=>{
     const number=(input:string)=>input.trim()===''?undefined:Number(input.trim()),priceMin=number(draft.priceMin),priceMax=number(draft.priceMax);
@@ -82,11 +84,11 @@ export function ProductsPage({company}:{company:Company}){
           </form>
         </PopoverContent>
       </Popover>
-      <Button variant="outline" render={<Link to={`/workspace/stores${storeId?`?store=${encodeURIComponent(storeId)}`:''}`}/>}>同步设置</Button><Button variant="outline" disabled={products.isFetching||!storeId} onClick={()=>void products.refetch()}><RefreshCw data-icon="inline-start"/>刷新商品</Button></div></div>
+      <Button variant="outline" render={<Link to={`${workspaceRoutes.stores}${storeId?`?store=${encodeURIComponent(storeId)}`:''}`}/>}>同步设置</Button><Button variant="outline" disabled={products.isFetching||!storeId} onClick={()=>void products.refetch()}><RefreshCw data-icon="inline-start"/>刷新商品</Button></div></div>
     <Field className="max-w-sm"><FieldLabel htmlFor="commerce-product-store">店铺</FieldLabel><NativeSelect id="commerce-product-store" value={storeId} disabled={stores.isPending||stores.isError} onChange={event=>selectStore(event.target.value)}><NativeSelectOption value="">请选择店铺</NativeSelectOption>{stores.data?.stores.map(store=><NativeSelectOption key={store.id} value={store.id}>{store.name}</NativeSelectOption>)}</NativeSelect></Field>
-    {stores.isError?<ErrorNotice error={stores.error}/>:stores.isPending?<p role="status" className="flex items-center gap-2 text-sm"><Spinner/>正在读取店铺…</p>:!stores.data?.stores.length?<Empty><EmptyHeader><EmptyTitle>尚无可访问店铺</EmptyTitle><EmptyDescription>连接店铺并分配访问权限后，才能查看商品。</EmptyDescription></EmptyHeader><EmptyContent><Button render={<Link to="/workspace/stores"/>}>前往店铺管理</Button></EmptyContent></Empty>:productId?<>
+    {stores.isError?<ErrorNotice error={stores.error}/>:stores.isPending?<LoadingState>正在读取店铺…</LoadingState>:!stores.data?.stores.length?<Empty><EmptyHeader><EmptyTitle>尚无可访问店铺</EmptyTitle><EmptyDescription>连接店铺并分配访问权限后，才能查看商品。</EmptyDescription></EmptyHeader><EmptyContent><Button render={<Link to={workspaceRoutes.stores}/>}>前往店铺管理</Button></EmptyContent></Empty>:productId?<>
       <Button className="w-fit" variant="ghost" onClick={()=>selectProduct('')}>← 返回商品列表</Button>
-      {detail.isPending?<p role="status" className="flex items-center gap-2"><Spinner/>正在读取商品详情…</p>:detail.isError?<ErrorNotice error={detail.error}/>:detail.data&&<Card><CardHeader><CardTitle>{detail.data.product.name??`Ozon 商品 ${detail.data.product.id}`}</CardTitle></CardHeader><CardContent className="grid gap-5 text-sm sm:grid-cols-2">
+      {detail.isPending?<LoadingState>正在读取商品详情…</LoadingState>:detail.isError?<ErrorNotice error={detail.error}/>:detail.data&&<Card><CardHeader><CardTitle>{detail.data.product.name??`Ozon 商品 ${detail.data.product.id}`}</CardTitle></CardHeader><CardContent className="grid gap-5 text-sm sm:grid-cols-2">
         <section className="sm:col-span-2" aria-label="商品图片"><div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{detail.data.product.images.length?detail.data.product.images.map((image,index)=><ProductImage key={image} src={image} alt={`${detail.data!.product.name??`商品 ${detail.data!.product.id}`}图片 ${index+1}`} className="aspect-square w-full rounded-lg border bg-background"/>):<ProductImage src={null} alt={detail.data.product.name??`商品 ${detail.data.product.id}`} className="aspect-square w-full max-w-48 rounded-lg border"/>}</div></section>
         <dl className="grid gap-3"><div><dt className="text-muted-foreground">Ozon 商品 ID</dt><dd className="break-all">{detail.data.product.id}</dd></div><div><dt className="text-muted-foreground">商家货号</dt><dd className="break-all">{detail.data.product.offerId}</dd></div><div><dt className="text-muted-foreground">SKU</dt><dd>{detail.data.product.sku??'平台未提供'}</dd></div><div><dt className="text-muted-foreground">上架时间</dt><dd>{detail.data.product.createdAt?date(detail.data.product.createdAt):'平台未提供'}</dd></div><div><dt className="text-muted-foreground">价格快照</dt><dd>{money(detail.data.product.price,detail.data.product.currency)}</dd></div></dl>
         <dl className="grid gap-3"><div><dt className="text-muted-foreground">详情状态</dt><dd><Badge variant="outline">{states[detail.data.product.state]}</Badge></dd></div><div><dt className="text-muted-foreground">已归档</dt><dd>{yes(detail.data.product.archived)}</dd></div><div><dt className="text-muted-foreground">存在 FBO 库存</dt><dd>{yes(detail.data.product.hasFboStocks)}</dd></div><div><dt className="text-muted-foreground">存在 FBS 库存</dt><dd>{yes(detail.data.product.hasFbsStocks)}</dd></div></dl>
@@ -106,11 +108,11 @@ export function ProductsPage({company}:{company:Company}){
           </dl>:<p className="text-muted-foreground">该商品尚未映射到价格表成本（可在核算中心补录，或回填表格映射后重新同步）。</p>}
         </section>
       </CardContent></Card>}
-    </>:products.isPending?<p role="status" className="flex items-center gap-2"><Spinner/>正在读取商品…</p>:products.isError?<ErrorNotice error={products.error}/>:products.data?.products.length?<>
+    </>:products.isPending?<LoadingState>正在读取商品…</LoadingState>:products.isError?<ErrorNotice error={products.error}/>:products.data?.products.length?<>
       <Table><TableHeader><TableRow><TableHead>商品</TableHead><TableHead>商家货号 / SKU</TableHead><TableHead>价格快照</TableHead><TableHead>拿货成本 / 重量</TableHead><TableHead>货源 / 采购价</TableHead><TableHead>详情状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>{products.data.products.map(product=><TableRow key={product.id}><TableCell className="max-w-80 whitespace-normal"><div className="flex items-center gap-3"><ProductImage src={product.primaryImage} alt={product.name??`商品 ${product.id}`} className="size-16 shrink-0 rounded-md border"/><div className="min-w-0"><p className="font-medium">{product.name??`Ozon 商品 ${product.id}`}</p><p className="break-all text-xs text-muted-foreground">ID {product.id}</p></div></div></TableCell><TableCell><p>{product.offerId}</p><p className="text-xs text-muted-foreground">SKU {product.sku??'—'}</p></TableCell><TableCell>{money(product.price,product.currency)}</TableCell><TableCell className="whitespace-normal">{product.costing?<><p>{product.costing.purchasePrice} {product.costing.purchaseCurrency}</p><p className="text-xs text-muted-foreground">{product.costing.weightGrams===null?'':`重量 ${product.costing.weightGrams} g`}</p></>:<p className="text-muted-foreground">未映射</p>}</TableCell><TableCell className="whitespace-normal">{canEdit?<button type="button" onClick={()=>setEditing(product)} title="编辑货源与采购价" className="-mx-2 flex w-full min-w-32 flex-col items-start gap-0.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">{product.sourcing?.supplySource?<p className="line-clamp-2">{product.sourcing.supplySource}</p>:<p className="text-muted-foreground">填写货源</p>}{sourcingPrice(product)?<p className="text-xs text-muted-foreground">{sourcingPrice(product)}</p>:<p className="text-xs text-muted-foreground">填写采购价</p>}</button>:<><p className={product.sourcing?.supplySource?'':'text-muted-foreground'}>{product.sourcing?.supplySource??'未填写'}</p><p className="text-xs text-muted-foreground">{sourcingPrice(product)??'未记录采购价'}</p></>}</TableCell><TableCell><Badge variant={product.state==='complete'?'secondary':'outline'}>{states[product.state]}</Badge></TableCell><TableCell className="text-right">{product.sourcing?.purchaseUrl&&<Button size="sm" variant="ghost" render={<a href={product.sourcing.purchaseUrl} target="_blank" rel="noreferrer noopener"/>}>采购页</Button>}<Button size="sm" variant="ghost" onClick={()=>selectProduct(product.id)}>查看详情</Button></TableCell></TableRow>)}</TableBody></Table>
-      <div className="flex items-center justify-between"><Button variant="outline" size="sm" disabled={!pages.length||products.isFetching} onClick={()=>setPages(value=>value.slice(0,-1))}><ChevronLeft data-icon="inline-start"/>上一页</Button><span className="text-xs text-muted-foreground">{activeFilters>0?'筛选匹配':'共'} {products.data.totalProducts} 件商品 · 第 {pages.length+1} / {Math.max(products.data.totalPages,1)} 页</span><Button variant="outline" size="sm" disabled={!products.data.nextCursor||products.isFetching} onClick={()=>setPages(value=>[...value,products.data!.nextCursor!])}>下一页<ChevronRight data-icon="inline-end"/></Button></div>
+      <Pager canPrevious={pages.length>0} canNext={!!products.data.nextCursor} busy={products.isFetching} onPrevious={()=>setPages(value=>value.slice(0,-1))} onNext={()=>setPages(value=>[...value,products.data!.nextCursor!])}>{activeFilters>0?'筛选匹配':'共'} {products.data.totalProducts} 件商品 · 第 {pages.length+1} / {Math.max(products.data.totalPages,1)} 页</Pager>
       <Alert><AlertTitle>商品事实不会自动发布</AlertTitle><AlertDescription>价格和库存是同步时观察值。需要用于客服回答的商品资料，请前往“知识库 → 从商品导入”核对并发布。</AlertDescription></Alert>
-    </>:<Empty><EmptyHeader><EmptyTitle>尚无已同步商品</EmptyTitle><EmptyDescription>先在店铺管理完成商品只读能力检查并启用商品同步。</EmptyDescription></EmptyHeader><EmptyContent><Button render={<Link to={`/workspace/stores?store=${encodeURIComponent(storeId)}`}/>}>检查商品同步</Button></EmptyContent></Empty>}
+    </>:<Empty><EmptyHeader><EmptyTitle>尚无已同步商品</EmptyTitle><EmptyDescription>先在店铺管理完成商品只读能力检查并启用商品同步。</EmptyDescription></EmptyHeader><EmptyContent><Button render={<Link to={`${workspaceRoutes.stores}?store=${encodeURIComponent(storeId)}`}/>}>检查商品同步</Button></EmptyContent></Empty>}
     {editing&&editing.store.id===storeId&&<ProductSourcingDialog companyId={company.id} storeId={storeId} product={editing} date={date} close={()=>setEditing(null)}/>}
   </>;
 }

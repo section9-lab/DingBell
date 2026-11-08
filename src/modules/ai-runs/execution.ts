@@ -4,13 +4,14 @@ import {getConversationController,type ControlBindings} from '../conversations/c
 import type {TranslationReceipt} from '../translations/types.ts';
 import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGeneration,freezeAiConfig,type AiExecution,type AiRunReader} from './storage.ts';
 import {selectAiBudget} from './budget.ts';
+import {isOutboundPromptVersion} from '../../shared/ai-versions.ts';
 import type {SupportInspection} from './ledger.ts';
 import type {AiKnowledgeBindings} from './knowledge.ts';
 import type {CompanyModelBindings} from '../company-model/security.ts';
 export interface SupportBindings extends ControlBindings,AiKnowledgeBindings,CompanyModelBindings {NVAPI_KEY?:string;AI_RECEPTION_CONFIG_JSON?:string;FLUE_SUPPORT_AGENT?:DurableObjectNamespace<Agent>;AGENT_RUNTIME?:import('../../platform/agents/bindings.ts').PortableAgents}
 export interface SupportRuntime {
  lookup(run:AiExecution):Promise<{uid?:string}|null>;prepare(run:AiExecution):Promise<void>;inspect(run:AiExecution):Promise<SupportInspection|null>;
- dispatch(run:AiExecution):Promise<TranslationReceipt>;read(run:AiExecution):Promise<'completed'|'failed'|'aborted'|'pending'>;close(run:AiExecution):Promise<void>;
+ dispatch(run:AiExecution):Promise<TranslationReceipt>;read(run:AiExecution):Promise<'completed'|'failed'|'aborted'|'pending'>;close(run:AiExecution):Promise<void>;activity?(run:AiExecution):Promise<import('../../../packages/agent-runtime/contracts.ts').AgentLoop|null>;
  recover(run:AiExecution):Promise<TranslationReceipt>;cancel(run:AiExecution):Promise<void>;abort(run:AiExecution):Promise<void>;
 }
 export const aiRunReader=(env:ControlBindings):AiRunReader=>(scope,id)=>getConversationController(env,scope.controllerId).readAiWork(scope,id);
@@ -45,14 +46,14 @@ export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:str
    cost=await (await import('../company-model/runtime.ts')).resolveSupportConfiguration(env,scope.organizationId);
    if(!cost)return view('unavailable');
   }catch{return view('unavailable');}
-  if(cost.config.model.promptVersion==='support-reply-v1'&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
+  if(isOutboundPromptVersion(cost.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
   const work=await aiRunReader(env)(scope,id);if(!work)return view('unavailable');
   if(work.schemaVersion===2)cost=freezeAiConfig({maxGenerations:1,model:{...cost.config.model,promptVersion:'intake-v1'}});
   const budget=await selectAiBudget(env.DB,scope,cost.total);if(!budget)return view('unavailable');
   const reserved=await reserveAiExecution(env.DB,aiRunReader(env),scope,id,budget,cost.config);
   if(!reserved.run)return view('unavailable');run=reserved.run;
  }
- if(run.config.model.promptVersion==='support-reply-v1'&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
+ if(isOutboundPromptVersion(run.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
  const runtime=await native(env,deps);if(run.receipt||run.closure)return observe(env,run,runtime);
  try{
   const instance=await runtime.lookup(run),state=await runtime.inspect(run);

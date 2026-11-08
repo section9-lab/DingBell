@@ -5,7 +5,7 @@ import type { KnowledgeVirtualFile } from '../src/modules/knowledge/virtual-file
 
 const id = '00000001-0000-4000-8000-000000000000';
 const path = `/knowledge/${id}.md`;
-const file: KnowledgeVirtualFile = { path, documentId: id, revision: 1, contentHash: 'a'.repeat(64), content: 'FAQ\n退货需要人工确认\nВОЗВРАТ' };
+const file: KnowledgeVirtualFile = { path, documentId: id, revision: 1, contentHash: 'a'.repeat(64), title: 'FAQ', content: 'FAQ\n退货需要人工确认\nВОЗВРАТ' };
 
 test('bash searches only the supplied in-memory document snapshot', async () => {
   const result = await runKnowledgeDiscovery([file], "grep -n -F '退货' /knowledge/*.md");

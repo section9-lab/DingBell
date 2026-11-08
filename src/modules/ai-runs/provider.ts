@@ -7,6 +7,7 @@ import {aiRunReader,type SupportBindings} from './execution.ts';
 import {claimAiGeneration,settleAiGeneration} from './storage.ts';
 import {sendSupportRequest} from './provider-fetch.ts';
 import {SUPPORT_MODEL,SUPPORT_PROVIDER,SUPPORT_BASE_URL,SUPPORT_MODEL_TEMPLATE_ID,validateSupportConfig} from './policy.ts';
+import {isOutboundPromptVersion,SUPPORT_REPLY_V2} from '../../shared/ai-versions.ts';
 const base=nvidiaProvider(),catalogModel=base.getModels().find(m=>m.id===SUPPORT_MODEL_TEMPLATE_ID);
 if(!catalogModel||catalogModel.baseUrl!==SUPPORT_BASE_URL)throw new Error('SUPPORT_MODEL_UNAVAILABLE');
 export const supportModel={...catalogModel,id:SUPPORT_MODEL,name:'Nemotron 3.5 Super VL',provider:SUPPORT_PROVIDER};
@@ -14,7 +15,7 @@ export const currentSupportLedger=()=>new SupportLedger(getCloudflareContext().s
 function active(){
  const env=getCloudflareContext().env as SupportBindings,ledger=currentSupportLedger(),state=ledger.inspect();
  if(!env.DB||!state||state.closed||state.cancellation||getDurableObjectIdentity().name!==state.run.instanceId||Date.now()>=state.run.payload.run.deadlineAt)throw new Error('SUPPORT_DISABLED');
- if(state.run.config.model.promptVersion==='support-reply-v1'&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))throw new Error('SUPPORT_DISABLED');
+ if(isOutboundPromptVersion(state.run.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))throw new Error('SUPPORT_DISABLED');
  validateSupportConfig(state.run,supportModel.contextWindow);return {env,ledger,run:state.run};
 }
 export function supportProvider():Provider<'openai-completions'>{
@@ -22,7 +23,7 @@ export function supportProvider():Provider<'openai-completions'>{
   signal.throwIfAborted();const key=active().env.NVAPI_KEY;if(typeof key!=='string'||!key.trim())throw new Error('SUPPORT_SECRET_UNAVAILABLE');return {auth:{apiKey:key},source:'Cloudflare support secret'};
  }}},stream(){throw new Error('SUPPORT_STREAM_UNSUPPORTED');},streamSimple(model,context,options){
   const {env,ledger,run}=active();if(model.id!==SUPPORT_MODEL||model.provider!==SUPPORT_PROVIDER||model.baseUrl!==supportModel.baseUrl)throw new Error('SUPPORT_MODEL_UNAVAILABLE');
-  const sequence=ledger.begin(),scope=run.payload.run.scope,allowedTools=run.payload.run.schemaVersion===2?['submit_classification']:run.config.model.promptVersion==='support-reply-v1'?['request_handoff','search_knowledge','get_product_context','prepare_reply']:run.config.model.promptVersion==='support-knowledge-v1'?['request_handoff','search_knowledge','get_product_context']:['request_handoff'],timeout=Math.min(45000,run.payload.run.deadlineAt-Date.now());if(timeout<=0)throw new Error('SUPPORT_EXPIRED');
+  const sequence=ledger.begin(),scope=run.payload.run.scope,allowedTools=run.payload.run.schemaVersion===2?['submit_classification']:run.config.model.promptVersion===SUPPORT_REPLY_V2?['request_handoff','bash','read','get_product_info','get_order_status','send_message']:['request_handoff'],timeout=Math.min(45000,run.payload.run.deadlineAt-Date.now());if(timeout<=0)throw new Error('SUPPORT_EXPIRED');
   const transport=previewFetch({spend:()=>ledger.spend(sequence),async claim(){
    const receipt=ledger.inspect()?.receipt??await(await import('./runtime.ts')).dispatchSupport(env,run,true);
    ledger.bindReceipt(receipt);

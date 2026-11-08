@@ -1,6 +1,7 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 import type { SyncScope } from '../sync/types.ts';
 
-const nowSQL = "CAST(unixepoch('subsecond') * 1000 AS INTEGER)";
+const nowSQL = NOW_MS;
 export function prepareProductSyncSeed(db: D1Database, scope: SyncScope, epoch: number, condition: { sql: string; values: (string | number | null)[] }): D1PreparedStatement[] {
   return [
     db.prepare(`INSERT INTO product_sync_cursor (store_id,organization_id,epoch,generation,cursor,revision,recent_cursors,due_at,last_kind)

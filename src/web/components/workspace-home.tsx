@@ -1,3 +1,4 @@
+import { workspaceRoutes } from '../lib/routes';
 import { ArrowRight, BookOpen, Calculator, History, Inbox, PackageSearch, ShoppingBag, SlidersHorizontal, Store } from 'lucide-react';
 import { Link } from 'react-router';
 import type { Company } from '../lib/api';
@@ -28,7 +29,7 @@ export function WorkspaceHome({ company }: { company: Company }) {
         <h1 id="workspace-title" className="text-3xl font-semibold tracking-tight">公司工作区</h1>
         <p className="text-sm leading-6 break-words text-muted-foreground [overflow-wrap:anywhere]">欢迎回到 <span className="font-medium text-foreground">{company.name}</span>。从会话开始，让每一次服务有序进行。</p>
       </div>
-      <Button render={<Link to="/workspace/messages" />} className="w-fit shrink-0">进入消息中心<ArrowRight data-icon="inline-end" /></Button>
+      <Button render={<Link to={workspaceRoutes.messages} />} className="w-fit shrink-0">进入消息中心<ArrowRight data-icon="inline-end" /></Button>
     </section>
 
     <section aria-labelledby="next-steps" className="flex flex-col gap-4">
@@ -51,7 +52,7 @@ export function WorkspaceHome({ company }: { company: Company }) {
           </Card>
         </li>)}
       </ol>
-      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-muted-foreground">知识需完成索引和检索测试后再发布；自动接待与发送需另行配置并启用。</p><Button variant="outline" size="sm" render={<Link to="/workspace/capabilities" />}>查看能力与数据<ArrowRight data-icon="inline-end" /></Button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-muted-foreground">知识需完成索引和检索测试后再发布；自动接待与发送需另行配置并启用。</p><Button variant="outline" size="sm" render={<Link to={workspaceRoutes.capabilities} />}>查看能力与数据<ArrowRight data-icon="inline-end" /></Button></div>
     </section>
 
     <section aria-labelledby="workspace-shortcuts" className="flex flex-col gap-4">

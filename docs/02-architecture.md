@@ -37,7 +37,7 @@
 | 监控 | Flue 事件、Workers 日志与指标 | Sentry 等外部平台可选，不作为自部署启动条件 |
 | 商业订阅 | Better Auth Stripe 插件为候选 | 模块可关闭；实际支付供应商待经营条件确认 |
 
-同步运行规则见 [Ozon Push 同步](15-ozon-push-sync.md)：每店铺显式切换后，平台通知只标识任务，经持久接收与协调器按对象核对事实；停止旧周期发现，不以暂停或失败偷偷恢复扫描。切换后的该店铺同步 Cron 只修复持久待办及明确人工回补，原有控制/财务修复独立保留；浏览器 SSE 只更新本地读模型。
+同步运行规则见 [Ozon Push 同步](15-ozon-push-sync.md)：启动时一次性引导所有已验证店铺的聊天/商品/订单读取，之后 Push 是增量同步唯一入口；平台通知只标识任务，经持久接收与协调器按对象核对事实。停止周期发现，不以暂停或失败偷偷恢复扫描。定时任务不再处理该店铺的 Ozon 同步；内部 AI/控制/财务修复独立保留，人工回补必须显式触发；浏览器 SSE 只更新本地读模型。
 
 Hono RPC 可共享 API 类型，标准 Schema 校验可使用 Valibot。此处复用其合同能力，不据此免除权限检查。[Hono RPC](https://hono.dev/docs/guides/rpc)
 
@@ -46,12 +46,12 @@ Hono RPC 可共享 API 类型，标准 Schema 校验可使用 Valibot。此处�
 ~~~mermaid
 flowchart LR
     UI[React 工作台] --> API[Hono API 与 Better Auth]
-    OZ[Ozon 回调或迁移前扫描] --> IN[接收与规范化]
+    OZ[Ozon Push 回调] --> IN[接收与规范化]
     API --> DB[(D1 业务主库)]
     IN --> DB
     DB --> OUT[持久 Outbox]
     OUT --> Q[Cloudflare Queues]
-    CRON[Cron 调度与补偿扫描] --> OUT
+    CRON[Cron 内部修复，不同步 Ozon] --> OUT
     Q --> CC[ConversationController DO]
     Q --> SC[StoreCoordinator DO]
     CC --> FLUE[Flue 客服 Agent DO]
@@ -423,16 +423,18 @@ Flue 的持久步骤不能保证外部平台恰好执行一次；发送副作用
 | 工具 | 输入来源 | 允许返回 | 副作用 |
 | --- | --- | --- | --- |
 | submit_classification | 仅 intake 运行 | 分类回执（阶段、语言、是否要求人工） | 无；策略与转人工由应用决定 |
-| search_knowledge | 问题、当前会话已绑定范围 | 当前可用知识片段和引用 | 无 |
-| get_product_context | 由准入运行反查的消息 SKU 或会话内最近 SKU；模型不能指定商品 | 商品名、价格、币种、归档标记、主图、观测时间 | 无 |
-| prepare_reply | 回复文本和可见引用；会话及不可变运行版本由服务端附加 | 意图 ID 或拒绝原因 | 只提交意图，实际发送另行检查 |
+| bash | 受限命令；应用固定知识快照 | stdout/stderr/exitCode | 无；输出不是证据，不能发送 |
+| read | 服务端生成的 `/knowledge/<documentId>.md` 路径和行范围 | 文档元数据、正文，并冻结读取证据 | 无发送权限 |
+| get_product_info | 由准入运行反查的消息 SKU 或会话内最近 SKU；模型不能指定商品 | 商品快照和事实证据 ID | 无 |
+| get_order_status | 由准入运行反查的订单；模型不能指定订单号 | 导入的订单/包裹快照和事实证据 ID | 无 |
+| send_message | 回复正文 + 文档引用和/或事实证据 ID | 意图 ID 或拒绝原因 | 只提交意图，实际发送另行检查 |
 | request_handoff | 原因、问题摘要、所需资料 | 新接待状态 | 切换为待人工并暂停 AI |
 
-工具按 promptVersion 挂载：`intake-v1` 只有 `submit_classification`；`support-v1` 只有 `request_handoff`；`support-knowledge-v1`、`support-reply-v1` 追加 `search_knowledge` 与 `get_product_context`，后者再追加 `prepare_reply`。网关侧 `allowedTools` 与两个宿主（Cloudflare Agent、可移植 authority）必须同时更新，任一未同步都会让工具在运行时不可见。
+工具按 promptVersion 挂载：`intake-v1` 只有 `submit_classification`；`support-reply-v2` 注册 `bash`、`read`、`get_product_info`、`get_order_status`、`send_message`、`request_handoff`。网关侧 `allowedTools` 与两个宿主（Cloudflare Agent、可移植 authority）必须同时更新，任一未同步都会让工具在运行时不可见。旧 `support-knowledge-v1`、`support-reply-v1` 及其 `search_knowledge`、`read_knowledge`、`get_product_context`、`prepare_reply` 工具已删除；`support-v1` 仍保留为只转人工的最小兜底。
 
-AI 回复模式：`autoReply`（默认开启）决定模型是直接回复买家（`support-reply-v1`）还是仅检索知识后转人工（`support-knowledge-v1`）。原来的草稿模式（`support-answer-v1`、`submit_answer` 工具、`ai_answer` 表）已移除——AI 不再生成需要人工逐条审批的内部草稿；要么直接回复，要么转人工。删除草稿的迁移见 `0065_drop_ai_answer.sql`。
+AI 回复模式：新的 AI 接待运行始终使用 `support-reply-v2` 直接回复买家；原内部草稿/检索后转人工模式（`support-knowledge-v1`）已从公司模型、UI 和代码中删除。历史配置中的 `autoReply` 字段仅为兼容旧记录保留，运行时忽略。原来的逐条审批草稿（`support-answer-v1`、`submit_answer` 工具、`ai_answer` 表）此前已移除，迁移见 `0065_drop_ai_answer.sql`。
 
-`get_product_context` 的商品只能来自冻结运行：优先取启动本次运行的那条消息上的 SKU，缺失时回退到本会话最近一条带 SKU 的买家消息（Ozon 只在由商品页发起的会话首条消息上附带 SKU）。模型不提供任何 SKU 参数，避免提示注入枚举商家目录。工具不返回库存、发货时间、订单状态，也不返回公司/店铺/会话标识。
+商品与订单只能来自冻结运行：优先取启动本次运行的那条消息上的 SKU/订单号，缺失时回退到本会话最近一条带该字段的买家消息（Ozon 只在由商品页发起的会话首条消息上附带 SKU）。模型不能传任何 SKU 或订单号，避免提示注入枚举商家目录。工具不返回库存、发货时间、退款、地址或其他客户个人信息。
 
 尚未实现：`get_order_status`（已绑定订单/包裹的真实状态）。订单数据涉及更强的权限绑定，当前仅由人工消息中心读取；AI 侧遇到订单问题一律转人工。
 
@@ -1160,9 +1162,9 @@ AI 测试台如需逐字输出，使用受权限保护、字段过滤后的流�
 
 本节取代 11.3D 的历史 v2 格式，追加游标仍为 v1、会话列表游标不变。历史 v3 绑定公司、会话、当前 memberId、snapshot 和可空 edge `{at,id,direction:older/newer,inclusive}`。默认最新页倒序取样后正序展示；较新方向升序取样。`nextCursor` 仍表示更早页，新增 `newerCursor` 表示更晚页，`pageCursor` 精确重读该页。请求可增加成对的 anchorId + direction（older/newer/from），且必须同时提供历史 cursor；from 包含锚点。服务端先在授权范围和 snapshot 内读取锚点，最终页 SQL 再核验当前权限，不把第一次授权作为后续读取凭证。
 
-相反方向是否还有记录通过当前范围的索引 EXISTS 判断；候选条数、900 KiB JSON 正文字节预算与首条完整保留规则不变。不存在、其他范围或超出 snapshot 的锚点返回 404；无效组合和旧 v1/v2 游标返回 400。追加响应增加 `historyCursor`，其 snapshot 是本次实际交付的 after：未完取最后返回序号，已完取 through。客户端不用拼装服务端游标；在裁剪窗口后仍能从最早保留消息向前继续，不依赖无界历史页栈。
+相反方向是否还有记录通过当前范围的索引 EXISTS 判断；候选条数、900 KiB JSON 正文字节预算与首条完整保留规则不变。不存在、其他范围或超出 snapshot 的锚点返回 404；无效组合和旧 v1/v2 游标返回 400。追加响应增加 `historyCursor`，其 snapshot 是本次实际交付的 after：未完取最后返回序号，已完取 through。客户端不用拼装服务端游标；打开会话时沿 `nextCursor` 读完所有历史页，再按 eventAt/id 合并为一份完整消息列表，界面不提供翻页。
 
-初次窗口 50 条；已应用的追加记录按 eventAt/id 排序合入，最多 100 条、累计正文约 1800 KiB，至少保留一条完整消息。裁剪只从最早端进行，旧记录仍可分页读取。事件时间早于窗口起点的回填保留最早定位和“查看较早更新”入口，打开其上下文并双向翻页；不把不连续片段混进最新窗口。该提示不是未读、待办或未处理数量。当前翻阅历史或离开末尾时，仅保留一页待显示响应，并继续从未推进的边界检查；点击“显示新消息”或回到末尾后应用。页面固定一个增量查询键，每个响应携带发起时的 cursor，只有当前范围、成员和游标匹配才应用，迟到响应不写入别的会话。每批最多 50 条，后台标签停止周期查询，没有不受控的连续请求循环。
+会话消息一次性展示：客户端首屏读取最新页（每页最多 100 条、正文约 900 KiB）后继续回溯，直到没有更早页；重复出现的游标立即停止，避免服务端异常造成无限回溯。追加记录按 eventAt/id 排序合入，包括事件时间早于已加载起点的回填，不再裁剪 100 条或 1800 KiB 上限，也不丢弃较早补录。页面固定一个增量查询键，每个响应携带发起时的 cursor，只有当前范围、成员和游标匹配才应用，迟到响应不写入别的会话。每批最多 50 条，后台标签停止周期查询，没有不受控的连续请求循环。
 
 阅读元数据使用独立 `dingbell:conversation-position:v1:` sessionStorage，key 和 value 同时绑定 userId/memberId/companyId/conversationId。只保存 live historyCursor、可空历史页 cursor、可见消息锚点与较早更新定位，不保存消费者正文。恢复先读取服务端确认当前成员，再读该成员元数据；从保存的历史边界重新取得 updatesCursor，不单独持久化两个可能不一致的水位。历史页和锚点再经授权读取，普通草稿仍由独立机制处理。旧/失效游标须再次发起授权读取，不能回退到之前缓存的正文。当前成员替换导致游标失效时允许一次自动重新确认；持续无效保留错误，避免重置请求循环。
 
@@ -1235,7 +1237,7 @@ FBS 订单号必须完整相等，不把 posting 编号截取后猜成订单号�
 | 今日新增会话 | 公司时区当天创建的独立会话 |
 | 今日已解决 | 当天发生解决事件的去重会话，同时可查看解决事件次数 |
 | 当前待回复 | 当前 work_state=needs_reply 且未归档的可见会话 |
-| 首次响应 | 首条客户入站至首条真实确认外发；内部备注、AI 草稿不算 |
+| 首次响应 | 首条客户入站至首条真实确认外发；内部备注不算 |
 | 转人工比例 | 选定 AI 接待会话中发生转人工的去重比例，分母为 0 显示无数据 |
 | AI 解决代理指标 | 由 AI 接待并被标记解决且观察窗口内未重开的比例 | 
 | 发送失败率 | 明确 failed / 已有明确结果的发送；unknown 单列 |
@@ -1553,7 +1555,7 @@ AI 等待只接受显式恢复边界之后的输入；接收时删除等待/旧�
 
 ### 7.27 阶段 6B-16：运行绑定的知识检索工具
 
-显式选择 `support-knowledge-v1` 提示版本时，Support 增加 `search_knowledge`；旧 `support-v1` 和分类运行保留原工具集合及冻结载荷。工具输入为空对象，问题只能来自原 AI 运行，不能由模型另选公司、店铺、商品或问题。原生传输每轮仍只接收一个已声明工具，禁止 task、未知工具和并行批次。知识正文是引用材料，不是系统指令；相似度不构成事实支持的证明。
+历史阶段曾支持 `support-knowledge-v1` 与 `search_knowledge`（该版本和工具现已删除）；旧 `support-v1` 和分类运行保留原工具集合及冻结载荷。工具输入为空对象，问题只能来自原 AI 运行，不能由模型另选公司、店铺、商品或问题。原生传输每轮仍只接收一个已声明工具，禁止 task、未知工具和并行批次。知识正文是引用材料，不是系统指令；相似度不构成事实支持的证明。
 
 服务端读取原执行账本，并通过会话控制器核对运行、epoch、消息版本、有效策略和截止时间。商品范围只从原平台消息的 SKU 与同店铺商品别名推导；没有唯一映射时只检索通用知识。员工身份不进入自动检索授权。员工检索和 AI 检索复用同一批次、排序和发布重查算法，各自保留权限检查：最多 160 份匹配的当前发布文档，每批 20 份，合并前十条；发布中变化允许一次重查，索引不可见或范围超限返回不可用，不能冒充没有知识。
 
@@ -1595,7 +1597,7 @@ AI 等待只接受显式恢复边界之后的输入；接收时删除等待/旧�
 
 新增内部 `prepareAiReply` 与 `reviewAiReply`，仅接收原运行编号、受控作用域和严格的正文/引用输入。模型不能提供成员、店铺、渠道、凭据版本或发送权限。独立 `ai_reply_intent` 以原 `run_id` 为主键，使用确定性编号 `ai-reply:<runId>`，保存执行快照哈希、正文及哈希、引用和完整原知识证据、平台账号、会话线程、凭据版本与创建时间。不可变触发器拒绝更新和删除；原执行外键保留原 epoch、输入版本、发布策略及期限，避免重新绑定当前运行。迁移 `0043_ai_reply_intent.sql` 只增加此表、唯一索引和触发器，不改写历史表或发送记录。
 
-只接受内部 `support-reply-v1`，既有 `support-answer-v1` 继续是人工审核草稿。新版本尚未加入生产模型校验、提示词、工具集或自动派发配置，也没有新增公开 HTTP 入口。准备结果与审阅快照始终 `canSend:false`；`origin` 明确为 AI，成员/用户编号为空，不能借用客服身份进入原人工 `send_reply`。
+该历史阶段只接受内部 `support-reply-v1`（该版本现已删除），既有 `support-answer-v1` 继续是人工审核草稿。新版本尚未加入生产模型校验、提示词、工具集或自动派发配置，也没有新增公开 HTTP 入口。准备结果与审阅快照始终 `canSend:false`；`origin` 明确为 AI，成员/用户编号为空，不能借用客服身份进入原人工 `send_reply`。
 
 资格同时要求部署 `AI_OUTBOUND_ENABLED` 和 `OUTBOUND_ENABLED` 为准确的 `true`，店铺外发开启、状态可用、Ozon 买卖双方会话仍开放，auth/reply 能力未过期且凭据信封完整。通过真实控制对象重新读取并完整比较原 run；D1 同时复核 epoch、最新输入、未分配人工、工作状态、原策略发布版本和原 deadline。知识证据绑定原问题哈希及公司/店铺/语言/唯一 SKU 商品关联，全部检索来源仍须保持原发布版本、原文、标题、内容哈希和索引档案；引用有效不等于回答语义正确。
 
@@ -1610,7 +1612,7 @@ AI 等待只接受显式恢复边界之后的输入；接收时删除等待/旧�
 
 ### 7.31 阶段 6B-20：AI 来源接入共享发送管道
 
-`support-reply-v1` 是独立的冻结版本，工具集为 `request_handoff`、`search_knowledge` 和 `prepare_reply`。模型只能提交严格的正文与原检索 chunk 编号，不能指定公司、成员、渠道、凭据或期限。准备成功持久化原意图并终止生成，随后唤醒原运行观察任务；不转人工、不确认已发送。唤醒失败保留原意图和未确认状态，重放可幂等重试。原 `support-answer-v1` 继续提交人工审核草稿，不获得自动外发资格。
+`support-reply-v1` 是历史冻结版本（现已删除），工具集为 `request_handoff`、`search_knowledge` 和 `prepare_reply`。模型只能提交严格的正文与原检索 chunk 编号，不能指定公司、成员、渠道、凭据或期限。准备成功持久化原意图并终止生成，随后唤醒原运行观察任务；不转人工、不确认已发送。唤醒失败保留原意图和未确认状态，重放可幂等重试。原 `support-answer-v1` 继续提交人工审核草稿，不获得自动外发资格。
 
 新增只读 `reviewCompletedAiReply`，与原 live-only 准备资格明确分开。要求原运行 `runtime_closed/completed`、原 native receipt 完全一致、至少一次生成、每次 usage/charge/settledAt 已确认、状态 settled 且无剩余生成预留；失败、中止、未启动、未知用量都拒绝。复用原 epoch、输入、发布策略、知识原文/档案、SKU 关联、渠道/凭据、原 deadline 和预算窗口检查，不重新占用费用或名额。检索嵌入的保守预留仍在预算中，不能误称实际费用已经全部核销；此处结清针对聊天生成。
 

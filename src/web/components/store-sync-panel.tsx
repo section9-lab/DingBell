@@ -1,3 +1,4 @@
+import { LoadingState } from './query-state';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
@@ -57,7 +58,7 @@ export function StoreSyncPanel({ source = 'chat', companyId, storeId, management
   useEffect(() => {
     if (query.error instanceof ApiError && ['NOT_FOUND', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(query.error.code)) void refresh(query.error);
   }, [query.error, refresh]);
-  if (query.isPending) return <p role="status" className="flex items-center gap-2 text-sm"><Spinner aria-hidden="true" />正在读取同步状态…</p>;
+  if (query.isPending) return <LoadingState>正在读取同步状态…</LoadingState>;
   if (query.isError || !query.data) return <div className="flex flex-col gap-3"><ErrorNotice error={query.error} /><Button className="w-fit" variant="outline" onClick={() => void query.refetch()}>重新读取同步状态</Button></div>;
   const { sync, configured } = query.data;
   const products = 'productCount' in sync ? sync : null;

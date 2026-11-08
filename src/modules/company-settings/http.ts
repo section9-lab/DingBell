@@ -1,6 +1,7 @@
 import type { Hono } from 'hono';
 import * as v from 'valibot';
 import { apiError, jsonResponse, type ApplicationEnv } from '../../http.ts';
+import { canManageCompany } from '../../shared/roles.ts';
 import { canonicalTimeZone } from '../../shared/time-zone.ts';
 import { auditedChange, type AuditOutcome } from '../audit/operation.ts';
 import { configured, limitedBody, signedIn } from '../identity/http.ts';
@@ -10,7 +11,7 @@ const bodySchema = v.strictObject({
   timeZone: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
   expectedVersion: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER - 1)),
 });
-const canManage = (row: SettingsRecord) => row.role === 'owner' || row.role === 'admin';
+const canManage = (row: SettingsRecord) => canManageCompany(row.role);
 const dto = (row: SettingsRecord) => ({ companyId: row.companyId, timeZone: row.timeZone, version: row.version,
   updatedAt: row.updatedAt === null ? null : new Date(row.updatedAt).toISOString(), canManage: canManage(row) });
 

@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import {latestCanonicalInput,noPushMessageReview} from '../ozon-push/barrier.ts';
 import {aiScopeSchema} from './ai-state.ts';
@@ -5,7 +6,7 @@ import {storedControlStateSchema} from './control-state.ts';
 import type {ControlScope} from './control-types.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const counter=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1));
-const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 export const inboundEventSchema=v.strictObject({scope:aiScopeSchema,eventId:id,messageId:id,sequence:v.pipe(counter,v.minValue(1)),eventAt:time,liveObservedAt:time});
 export const aiPendingInputSchema=v.strictObject({schemaVersion:v.literal(1),event:inboundEventSchema,controlEpoch:counter});
 const receiptSchema=v.pipe(v.strictObject({action:v.literal('customer_message'),origin:v.literal('system'),commandId:v.pipe(v.string(),v.maxLength(264)),expectedVersion:counter,

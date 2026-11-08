@@ -1,3 +1,4 @@
+import { NOW_MS, sqlManagesCompany } from '../../platform/database/sql.ts';
 import * as v from 'valibot';
 import { aiBudgetCommandSchema,type AiBudgetCommand,type AiBudgetView } from '../../shared/ai-budget.ts';
 import type { ControlActor } from '../conversations/control-types.ts';
@@ -6,9 +7,9 @@ import {aiScopeSchema} from '../conversations/ai-state.ts';
 import type {ControlScope} from '../conversations/control-types.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const actorSchema=v.strictObject({orgId:id,actorUserId:id,sessionId:id,expectedMemberId:v.optional(id)});
-const now="CAST(unixepoch('subsecond')*1000 AS INTEGER)";
+const now = NOW_MS;
 const managerSQL=`SELECT actor.id AS memberId,caller.name FROM member actor JOIN user caller ON caller.id=actor.user_id JOIN session login ON login.user_id=caller.id
-  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>${now} AND caller.email_verified=1 AND actor.role IN ('owner','admin')
+  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>${now} AND caller.email_verified=1 AND ${sqlManagesCompany('actor.role')}
   AND (? IS NULL OR actor.id=?)`;
 const values=(actor:ControlActor)=>[actor.orgId,actor.actorUserId,actor.sessionId,actor.expectedMemberId??null,actor.expectedMemberId??null];
 const access=(db:D1Database,actor:ControlActor)=>db.prepare(managerSQL).bind(...values(actor)).first<{memberId:string;name:string}>();

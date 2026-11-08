@@ -1,4 +1,6 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
+import { REPLY_BODY_MAX } from '../../shared/reply-body.ts';
 import type { ControlState } from './control-types.ts';
 import type { ReplyTranslation } from './reply-types.ts';
 
@@ -8,7 +10,7 @@ const fields = {
   version: counter, controlEpoch: counter, sequence: counter,
   lifecycle: v.picklist(['open', 'resolved']), reception: v.picklist(['paused', 'human', 'ai']),
   assignedMemberId: v.nullable(identifier),
-  updatedAt: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(8_640_000_000_000_000)),
+  updatedAt: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(MAX_TIMESTAMP_MS)),
 };
 const workStatus = v.picklist(['needs_reply', 'waiting_customer', 'waiting_internal']);
 const currentState = v.pipe(v.strictObject({ ...fields, schemaVersion: v.literal(2), workStatus: v.nullable(workStatus) }),
@@ -18,7 +20,7 @@ export const storedControlStateSchema = v.union([v.strictObject({ ...fields, rec
 const commandFields = { commandId: identifier, expectedVersion: v.pipe(counter, v.maxValue(Number.MAX_SAFE_INTEGER - 1)) };
 export const noteBodySchema = v.pipe(v.string(), v.maxLength(4000),
   v.check(body => body.trim().length > 0 && body.isWellFormed() && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(body)));
-export const replyBodySchema = v.pipe(v.string(), v.maxLength(1000),
+export const replyBodySchema = v.pipe(v.string(), v.maxLength(REPLY_BODY_MAX),
   v.check(body => body.trim().length > 0 && body.isWellFormed() && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(body)));
 export const controlCommandSchema = v.union([
   v.strictObject({ ...commandFields, action: v.picklist(['claim', 'takeover', 'resolve', 'reopen']) }),

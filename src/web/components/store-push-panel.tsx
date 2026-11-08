@@ -1,3 +1,4 @@
+import { LoadingState } from './query-state';
 import {useEffect,useRef,useState} from 'react';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import {useForm} from 'react-hook-form';
@@ -29,7 +30,7 @@ const simulationSchema=v.object({body:v.pipe(v.string(),v.minLength(2),v.maxLeng
 
 export function StorePushPanel({companyId,storeId,management,configured}:{companyId:string;storeId:string;management:boolean;configured:boolean}){
  const client=useQueryClient(),{date}=useCompanySettings(),key=['store-push',companyId,storeId];
- const query=useQuery({queryKey:key,queryFn:({signal})=>readPush(companyId,storeId,signal),retry:false});
+ const query=useQuery({queryKey:key,queryFn:({signal})=>readPush(companyId,storeId,signal)});
  const [pending,setPending]=useState(false),busy=useRef(false),[error,setError]=useState<unknown>(null),[notice,setNotice]=useState(''),[callback,setCallback]=useState(''),[visible,setVisible]=useState(false);
  const mounted=useRef(true);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  const [confirm,setConfirm]=useState<PushCommand|null>(null),[source,setSource]=useState<(typeof pushSources)[number]>('chat');
@@ -42,7 +43,7 @@ export function StorePushPanel({companyId,storeId,management,configured}:{compan
    client.setQueryData(key,{push:safe});setConfirm(null);return callbackUrl;
   }catch(cause){setError(cause);void query.refetch();}finally{busy.current=false;setPending(false);}
  }
- if(query.isPending)return <p role="status" className="flex items-center gap-2 text-sm"><Spinner/>正在读取 Push 状态…</p>;
+ if(query.isPending)return <LoadingState>正在读取 Push 状态…</LoadingState>;
  if(query.isError||!query.data)return <div><ErrorNotice error={query.error}/><Button variant="outline" onClick={()=>void query.refetch()}>重新读取 Push 状态</Button></div>;
  const view=query.data.push,revision=view.revision,active=view.mode==='active';
  async function copy(){try{const url=callback||await run({operation:'reveal',expectedRevision:revision});if(url){await navigator.clipboard.writeText(url);setNotice('回调地址已复制。地址含密钥，请仅填入 Ozon 通知配置。');}}catch{setNotice('浏览器未允许复制。请点击「显示地址」后手动复制。');}}

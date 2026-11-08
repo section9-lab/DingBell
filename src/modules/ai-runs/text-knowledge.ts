@@ -1,25 +1,37 @@
 import * as v from 'valibot';
-import { aiRunSchema, aiScopeSchema, } from '../conversations/ai-state.ts';
+import { aiRunSchema, aiScopeSchema } from '../conversations/ai-state.ts';
 import type { ControlScope } from '../conversations/control-types.ts';
 import { knowledgeHash } from '../knowledge/content.ts';
-import { grepPublishedText, readPublishedKnowledge, knowledgeTextProfile, resolveTextKnowledgeCitations } from '../knowledge/text-profile.ts';
+import { knowledgeTextProfile, resolveTextKnowledgeDocuments } from '../knowledge/text-profile.ts';
 import { retrievalScopeSchema, type RetrievalScope } from '../knowledge/retrieval.ts';
-import { aiKnowledgeEvidenceSchema, aiKnowledgeScope, type AiKnowledgeBindings } from './knowledge.ts';
+import { readKnowledgeVirtualFile, readKnowledgeVirtualFiles } from '../knowledge/virtual-files.ts';
+import { runKnowledgeDiscovery } from '../knowledge/virtual-bash.ts';
+import { isOutboundPromptVersion, isSupportKnowledgePromptVersion } from '../../shared/ai-versions.ts';
+import { aiDocumentEvidenceSchema, aiKnowledgeScope, type AiKnowledgeBindings } from './knowledge.ts';
 import { currentPayload, readAiExecution, type AiRunReader } from './storage.ts';
 
-export const textKnowledgeProfiles = ['support-knowledge-v1', 'support-reply-v1'] as const;
-export const grepInputSchema = v.strictObject({ query: v.pipe(v.string(), v.minLength(2), v.maxLength(300)) });
-export const readInputSchema = v.strictObject({ documentId: v.pipe(v.string(), v.uuid()) });
+export const fileReadInputSchema = v.strictObject({
+  path: v.pipe(v.string(), v.minLength(1), v.maxLength(512)),
+  startLine: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(Number.MAX_SAFE_INTEGER))),
+  lineCount: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(200))),
+});
+export const discoveryInputSchema = v.strictObject({ command: v.pipe(v.string(), v.minLength(1), v.maxLength(4096)) });
+const documentReadInputSchema = v.strictObject({
+  documentId: v.pipe(v.string(), v.uuid()),
+  revision: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(Number.MAX_SAFE_INTEGER)),
+  contentHash: v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/)),
+  title: v.pipe(v.string(), v.maxLength(160)),
+  excerpt: v.pipe(v.string(), v.maxLength(8192)),
+});
 export const evidenceLimit = 10;
-type None = { status: 'unavailable' | 'unconfirmed' | 'changed' | 'empty'; canSend: false; evidence: null };
-const none = (status: None['status']): None => ({ status, canSend: false as const, evidence: null });
-async function authority(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string) {
+/** Internal authorization for one live support run. It never grants send authority. */
+export async function knowledgeAuthority(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string) {
   if (!env.DB) return null;
   scope = v.parse(aiScopeSchema, scope);
   v.parse(v.pipe(v.string(), v.uuid()), runId);
   const db = env.DB, execution = await readAiExecution(db, scope, runId);
-  if (!execution || execution.closure || !textKnowledgeProfiles.includes(execution.config.model.promptVersion as typeof textKnowledgeProfiles[number])) return null;
-  if (execution.config.model.promptVersion === 'support-reply-v1'
+  if (!execution || execution.closure || !isSupportKnowledgePromptVersion(execution.config.model.promptVersion)) return null;
+  if (isOutboundPromptVersion(execution.config.model.promptVersion)
     && !(env.AI_OUTBOUND_ENABLED === 'true' && env.OUTBOUND_ENABLED === 'true')) return null;
   const run = v.parse(aiRunSchema, execution.payload.run);
   if (Date.now() >= run.deadlineAt) return null;
@@ -28,89 +40,83 @@ async function authority(env: AiKnowledgeBindings, read: AiRunReader, scope: Con
     .bind(JSON.stringify(execution.payload), runId).first();
   return live ? { db, execution, run } : null;
 }
-type Frozen = { chunks: string };
-const frozenRow = (db: D1Database, runId: string) => db.prepare('SELECT chunks FROM ai_knowledge_evidence WHERE run_id=?').bind(runId).first<Frozen>();
+type Frozen = { documents: string };
+const frozenRow = (db: D1Database, runId: string) => db.prepare('SELECT documents FROM ai_document_evidence WHERE run_id=?').bind(runId).first<Frozen>();
 async function readFrozen(db: D1Database, runId: string, scope: RetrievalScope, questionHash: string) {
   const row = await frozenRow(db, runId);
   if (!row) return null;
-  const evidence = v.safeParse(aiKnowledgeEvidenceSchema, { runId, scope, questionHash, chunks: JSON.parse(row.chunks) });
+  const evidence = v.safeParse(aiDocumentEvidenceSchema, { runId, scope, questionHash, documents: JSON.parse(row.documents) });
   return evidence.success ? evidence.output : null;
 }
-/**
- * Agentic retrieval: the assistant names the words it wants to find, the
- * application only searches knowledge the merchant already approved. Evidence
- * accumulates per run but can never shrink or change, so a later reply tool
- * call revalidates exactly the text this run was shown.
- */
-export async function grepAiKnowledge(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string, value: unknown) {
-  try {
-    const input = v.parse(grepInputSchema, value), auth = await authority(env, read, scope, runId);
-    if (!auth) return none('unavailable');
-    const { db } = auth, knowledgeScope = await aiKnowledgeScope(db, scope, auth.run);
-    const questionHash = await knowledgeHash(auth.run.admission.question);
-    const frozen = await readFrozen(db, runId, knowledgeScope, questionHash);
-    if (await frozenRow(db, runId) && !frozen) return none('changed');
-    const merged = [...(frozen?.chunks ?? [])];
-    if (merged.length < evidenceLimit) {
-      for (const match of await grepPublishedText(db, scope.organizationId, knowledgeScope, input.query)) {
-        if (merged.length >= evidenceLimit) break;
-        if (!merged.some(chunk => chunk.chunkId === match.chunkId)) merged.push(match);
-      }
-    }
-    if (!merged.length) return none('empty');
-    // Freeze only text that is still the merchant's active publication.
-    if (!await resolveTextKnowledgeCitations(db, scope.organizationId, knowledgeScope, merged)) return none('changed');
-    const evidence = v.parse(aiKnowledgeEvidenceSchema, { runId, scope: knowledgeScope, questionHash, chunks: merged });
-    const stamped = Date.now();
-    await db.prepare(`INSERT INTO ai_knowledge_evidence(run_id,organization_id,scope,profile,question_hash,chunks,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET chunks=excluded.chunks,updated_at=excluded.updated_at
-      WHERE ai_knowledge_evidence.chunks<>excluded.chunks`)
-      .bind(runId, scope.organizationId, JSON.stringify(knowledgeScope), knowledgeTextProfile.id, questionHash, JSON.stringify(merged), stamped, stamped).run();
-    const confirmed = await readFrozen(db, runId, knowledgeScope, questionHash);
-    return confirmed && JSON.stringify(confirmed) === JSON.stringify(evidence)
-      ? { status: 'found' as const, canSend: false as const, evidence: confirmed }
-      : none('changed');
-  } catch { return none('unconfirmed'); }
+/** Freeze only documents that are still the merchant's active publication. */
+async function freezeDocuments(db: D1Database, runId: string, organizationId: string, scope: RetrievalScope, questionHash: string, documents: { documentId: string; revision: number; contentHash: string; title: string; excerpt: string }[]) {
+  if (!await resolveTextKnowledgeDocuments(db, organizationId, scope, documents)) return null;
+  const evidence = v.parse(aiDocumentEvidenceSchema, { runId, scope, questionHash, documents });
+  const stamped = Date.now();
+  await db.prepare(`INSERT INTO ai_document_evidence(run_id,organization_id,scope,profile,question_hash,documents,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET documents=excluded.documents,updated_at=excluded.updated_at
+    WHERE ai_document_evidence.documents<>excluded.documents`)
+    .bind(runId, organizationId, JSON.stringify(scope), knowledgeTextProfile.id, questionHash, JSON.stringify(documents), stamped, stamped).run();
+  const confirmed = await readFrozen(db, runId, scope, questionHash);
+  return confirmed && JSON.stringify(confirmed) === JSON.stringify(evidence) ? confirmed : null;
 }
-/** Read the full published markdown body of a specific knowledge document for this run. */
-export async function readAiKnowledge(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string, value: unknown) {
+/** Record one document the agent actually read. Shell output is deliberately not accepted. */
+export async function recordAiDocumentRead(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string, value: unknown) {
   try {
-    const input = v.parse(readInputSchema, value), auth = await authority(env, read, scope, runId);
+    const input = v.parse(documentReadInputSchema, value), auth = await knowledgeAuthority(env, read, scope, runId);
+    if (!auth) return { status: 'unavailable' as const, canSend: false as const, evidence: null };
+    const { db } = auth, knowledgeScope = await aiKnowledgeScope(db, scope, auth.run), questionHash = await knowledgeHash(auth.run.admission.question);
+    const frozen = await readFrozen(db, runId, knowledgeScope, questionHash);
+    if (await frozenRow(db, runId) && !frozen) return { status: 'changed' as const, canSend: false as const, evidence: null };
+    const documents = [...(frozen?.documents ?? [])], existing = documents.find(document => document.documentId === input.documentId);
+    if (existing) {
+      if (existing.revision !== input.revision || existing.contentHash !== input.contentHash) return { status: 'changed' as const, canSend: false as const, evidence: null };
+    } else {
+      if (documents.length >= evidenceLimit) return { status: 'unavailable' as const, canSend: false as const, evidence: null };
+      documents.push({ documentId: input.documentId, revision: input.revision, contentHash: input.contentHash, title: input.title, excerpt: input.excerpt });
+    }
+    const confirmed = await freezeDocuments(db, runId, scope.organizationId, knowledgeScope, questionHash, documents);
+    return confirmed ? { status: 'found' as const, canSend: false as const, evidence: confirmed }
+      : { status: 'changed' as const, canSend: false as const, evidence: null };
+  } catch { return { status: 'unconfirmed' as const, canSend: false as const, evidence: null }; }
+}
+/** Bounded, read-only discovery. Its stdout is never evidence and never a send permission. */
+export async function discoverAiKnowledge(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string, value: unknown, signal?: AbortSignal) {
+  try {
+    const input = v.parse(discoveryInputSchema, value), auth = await knowledgeAuthority(env, read, scope, runId);
+    if (!auth) return { status: 'unavailable' as const, canSend: false as const, stdout: '', stderr: '', exitCode: 1 };
+    const knowledgeScope = await aiKnowledgeScope(auth.db, scope, auth.run), files = await readKnowledgeVirtualFiles(auth.db, scope.organizationId, knowledgeScope);
+    signal?.throwIfAborted();
+    if (!await knowledgeAuthority(env, read, scope, runId)) return { status: 'unconfirmed' as const, canSend: false as const, stdout: '', stderr: '', exitCode: 1 };
+    const result = await runKnowledgeDiscovery(files, input.command, signal);
+    if (!await knowledgeAuthority(env, read, scope, runId)) return { status: 'unconfirmed' as const, canSend: false as const, stdout: '', stderr: '', exitCode: 1 };
+    return { status: 'ok' as const, canSend: false as const, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+  } catch { return { status: 'unavailable' as const, canSend: false as const, stdout: '', stderr: '', exitCode: 1 }; }
+}
+/** Read a bounded range from the authorized virtual snapshot and freeze that exact document. */
+export async function readAiKnowledgeFile(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string, value: unknown, signal?: AbortSignal) {
+  try {
+    const input = v.parse(fileReadInputSchema, value), auth = await knowledgeAuthority(env, read, scope, runId);
     if (!auth) return { status: 'unavailable' as const, canSend: false as const, document: null };
-    const knowledgeScope = await aiKnowledgeScope(auth.db, scope, auth.run);
-    const document = await readPublishedKnowledge(auth.db, scope.organizationId, knowledgeScope, input.documentId);
-    return document ? { status: 'found' as const, canSend: false as const, document }
-      : { status: 'empty' as const, canSend: false as const, document: null };
+    const knowledgeScope = await aiKnowledgeScope(auth.db, scope, auth.run), files = await readKnowledgeVirtualFiles(auth.db, scope.organizationId, knowledgeScope);
+    const document = readKnowledgeVirtualFile(files, input.path, input.startLine, input.lineCount);
+    if (!document) return { status: 'empty' as const, canSend: false as const, document: null };
+    signal?.throwIfAborted();
+    const recorded = await recordAiDocumentRead(env, read, scope, runId, {
+      documentId: document.documentId, revision: document.revision, contentHash: document.contentHash,
+      title: document.title, excerpt: document.content.slice(0, 8192),
+    });
+    if (recorded.status !== 'found') return { status: recorded.status, canSend: false as const, document: null };
+    if (!await knowledgeAuthority(env, read, scope, runId)) return { status: 'unconfirmed' as const, canSend: false as const, document: null };
+    return { status: 'found' as const, canSend: false as const, document };
   } catch { return { status: 'unconfirmed' as const, canSend: false as const, document: null }; }
 }
-/** Citation validity only: a match never proves the text answers the question. */
-export async function reviewAiTextEvidence(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string, value: unknown) {
-  try {
-    const auth = await authority(env, read, scope, runId);
-    if (!auth) return null;
-    const parsed = v.safeParse(aiKnowledgeEvidenceSchema, structuredClone(value));
-    if (!parsed.success) return null;
-    const requested = parsed.output;
-    const frozen = await readFrozen(auth.db, runId, requested.scope, requested.questionHash);
-    if (!frozen || frozen.runId !== runId || JSON.stringify(frozen) !== JSON.stringify(requested)) return null;
-    const resolved = await resolveTextKnowledgeCitations(auth.db, scope.organizationId, requested.scope, requested.chunks);
-    if (!resolved || resolved.some((row, index) => JSON.stringify(row) !== JSON.stringify(((({ score, ...chunk }) => chunk)(requested.chunks[index]))))) return null;
-    return frozen;
-  } catch { return null; }
-}
 export type RunKnowledgeEvidence = { raw: string; scope: RetrievalScope; questionHash: string; profile: string };
-/**
- * One durable evidence record per run, whichever retrieval path produced it.
- * Callers must still revalidate the chunks; this only identifies the record.
- */
+/** One durable evidence record per run; historical chunk evidence stays readable but is not reused. */
 export async function readRunKnowledgeEvidence(db: D1Database, runId: string) {
-  const row = await db.prepare(`SELECT chunks AS raw,scope,question_hash AS questionHash,profile FROM ai_knowledge_evidence WHERE run_id=?`)
+  const row = await db.prepare(`SELECT documents AS raw,scope,question_hash AS questionHash,profile FROM ai_document_evidence WHERE run_id=?`)
     .bind(runId).first<{ raw: string; scope: string; questionHash: string; profile: string }>();
   if (!row) return null;
   const scope = v.safeParse(retrievalScopeSchema, JSON.parse(row.scope));
   return scope.success && /^[0-9a-f]{64}$/.test(row.questionHash) ? { ...row, scope: scope.output } : null;
-}
-/** Text retrieval is the only evidence path; it produces the shared evidence shape. */
-export async function reviewRunKnowledgeEvidence(env: AiKnowledgeBindings, read: AiRunReader, scope: ControlScope, runId: string, value: unknown) {
-  return await reviewAiTextEvidence(env, read, scope, runId, value);
 }

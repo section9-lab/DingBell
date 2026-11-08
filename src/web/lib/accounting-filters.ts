@@ -7,7 +7,7 @@ export function resolveAccountingFilter(storeId:string,today:string,params:URLSe
   const parsed=v.safeParse(accountingFilter,{storeId,fromDate:params.get('fromDate')??fromDate,toDate:params.get('toDate')??today,fulfillment:params.get('fulfillment')??'all',costMode:params.get('costMode')??'current_estimate'});
   if(!parsed.success)return fallback;
   const days=(Date.parse(parsed.output.toDate)-Date.parse(parsed.output.fromDate))/86_400_000;
-  return days<0||days>=366?fallback:parsed.output;
+  return days<0||days>=20_000?fallback:parsed.output;
 }
 export function accountingSearch(filter:AccountingFilter,existing?:URLSearchParams){
   const params=new URLSearchParams(existing);

@@ -1,3 +1,5 @@
+import { workspaceRoutes } from '../lib/routes';
+import { canManageCompany } from '../lib/roles';
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
@@ -14,6 +16,8 @@ import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '../components/ui/empty';
+import { LoadingState } from '../components/query-state';
+import { Pager } from '../components/pager';
 import { Spinner } from '../components/ui/spinner';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 
@@ -31,13 +35,13 @@ const reasons: Record<string, string> = {
 
 export function StoresPage({ company, refresh }: { company: Company; refresh: (notice?: unknown) => Promise<void> }) {
   const { date, timeZone } = useCompanySettings();
-  const management = ['owner', 'admin'].includes(company.role);
+  const management = canManageCompany(company.role);
   const [search, setSearch] = useSearchParams();
   const selectedId = search.get('store');
   const [offset, setOffset] = useState(0);
   const stores = useQuery({ queryKey: storesQueryKey(company.id, offset), queryFn: ({ signal }) => readStores(company.id, offset, signal) });
   const detail = useQuery({ queryKey: storeQueryKey(company.id, selectedId ?? ''), queryFn: ({ signal }) => readStore(company.id, selectedId!, signal), enabled: !!selectedId });
-  const push=useQuery({queryKey:['store-push',company.id,selectedId],queryFn:({signal})=>readPush(company.id,selectedId!,signal),enabled:!!selectedId,retry:false});
+  const push=useQuery({queryKey:['store-push',company.id,selectedId],queryFn:({signal})=>readPush(company.id,selectedId!,signal),enabled:!!selectedId});
   const pushDriven=!!push.data?.push.cutoverAt,pushActive=push.data?.push.mode==='active';
   const [dialog, setDialog] = useState<'platform' | 'create' | 'credentials' | 'grants' | 'paused' | 'unverified' | 'disconnected' | null>(null);
   const [pending, setPending] = useState(false);
@@ -52,7 +56,7 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
     // Secrets and private drafts are discarded, and uncertain writes are never replayed.
     await refresh(error);
   };
-  if (stores.isPending) return <p role="status" className="flex items-center gap-2 text-sm"><Spinner aria-hidden="true" />正在读取店铺…</p>;
+  if (stores.isPending) return <LoadingState>正在读取店铺…</LoadingState>;
   if (stores.isError || !stores.data) return <><ErrorNotice error={stores.error} /><Button variant="outline" onClick={() => void stores.refetch()}>重新读取店铺</Button></>;
   const store = selectedId && !detail.isError ? detail.data?.store : undefined;
   const shared = { companyId: company.id, pending, close: () => setDialog(null), change };
@@ -71,14 +75,14 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
     {!stores.data.configured && management && <Alert><AlertTitle>店铺凭证加密尚未配置</AlertTitle><AlertDescription>请联系部署管理员配置凭证加密密钥。现有店铺信息仍可查看，配置完成后才能保存或检查凭证。</AlertDescription></Alert>}
     {selectedId ? <>
       <Button className="w-fit" variant="ghost" disabled={pending} onClick={() => setSearch({})}><ArrowLeft data-icon="inline-start" />返回店铺列表</Button>
-      {detail.isPending ? <p role="status">正在读取店铺详情…</p> : detail.isError || !store ? <ErrorNotice error={detail.error} /> : <>
+      {detail.isPending ? <LoadingState>正在读取店铺详情…</LoadingState> : detail.isError || !store ? <ErrorNotice error={detail.error} /> : <>
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex min-w-0 flex-col gap-2"><h2 className="break-words text-xl font-semibold">{store.name}</h2><p className="break-all text-sm text-muted-foreground">Ozon · Client ID {store.platformStoreId}</p></div><Badge variant="outline">{statuses[store.status]}</Badge></div>
           <p className="text-sm text-muted-foreground">{store.hasCredentials ? `凭证已加密保存 · 第 ${store.credentialVersion} 版` : '未保存凭证'} · 上次检查：{date(store.checkedAt, '尚未检查')}</p>
           {store.hasCredentials&&<p role="status" aria-label="凭证保存状态" className="text-sm text-muted-foreground">API Key 已加密保存（第 {store.credentialVersion} 版），刷新或重启后可继续复用，不需要再次填写。页面不回显原 Key。</p>}
           {store.status==='paused'&&<Alert><AlertTitle>连接已暂停，凭证仍已保存</AlertTitle><AlertDescription>点击「恢复连接」即可复用已保存的 Key，无需重新录入。恢复后检查只读能力，并手动启用需要的同步。</AlertDescription></Alert>}
           {store.status==='disconnected'&&<Alert><AlertTitle>店铺已断开，需要重新连接</AlertTitle><AlertDescription>{management?'当前没有保存的 API Key（此前的删除凭证或旧版断开操作会清除 Key）。请点击「重新连接」录入一次；之后平时暂停和恢复不会再要求重填。已有商品、订单和会话保留。':'请联系公司管理员重新连接店铺。已保存的商品、订单和会话仍可查看。'}</AlertDescription></Alert>}
-          {store.outboundEnabled?<Alert><AlertTitle>已允许向买家发送消息</AlertTitle><AlertDescription>人工回复可以在消息中心发出；AI 只有在「公司设置 &gt; AI 模型」选择「AI 直接回复买家」、且会话开启 AI 托管并命中已发布策略时才会自动发送。随时可以停止发送。</AlertDescription></Alert>
+          {store.outboundEnabled?<Alert><AlertTitle>已允许向买家发送消息</AlertTitle><AlertDescription>人工回复可以在消息中心发出；AI 只有在「公司设置 &gt; AI 模型」保存了可用模型、会话开启 AI 托管并命中已发布策略时才会直接回复买家。随时可以停止发送。</AlertDescription></Alert>
             :<Alert><AlertTitle>尚未允许向买家发送消息</AlertTitle><AlertDescription>只读同步不受影响。人工回复和 AI 自动回复都需要先在这里授权；只读能力检查不会自动打开对外发送。</AlertDescription></Alert>}
           {management && <div className="flex flex-wrap gap-2">
             {store.status==='disconnected'&&<Button disabled={pending||!stores.data.configured} onClick={()=>setDialog('credentials')}>重新连接</Button>}
@@ -112,8 +116,8 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
       <Table><TableHeader><TableRow><TableHead>店铺</TableHead><TableHead>连接状态</TableHead><TableHead>上次检查</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
         <TableBody>{stores.data.stores.map(item => <TableRow key={item.id}><TableCell><p className="font-medium">{item.name}</p><p className="text-xs text-muted-foreground">Ozon</p></TableCell><TableCell><Badge variant="outline">{statuses[item.status]}</Badge></TableCell><TableCell className="text-xs text-muted-foreground">{date(item.checkedAt, '尚未检查')}</TableCell><TableCell className="text-right"><div className="flex flex-wrap justify-end gap-2">{management&&item.status==='disconnected'&&<Button size="sm" variant="outline" aria-label={`重新连接 ${item.name}`} disabled={pending||!stores.data.configured} onClick={()=>{setSearch({store:item.id});setDialog('credentials');}}>重新连接</Button>}<Button size="sm" variant="ghost" aria-label={`查看 ${item.name}`} onClick={() => setSearch({ store: item.id })}>查看详情</Button></div></TableCell></TableRow>)}</TableBody>
       </Table>
-      <div className="flex items-center justify-between gap-2"><Button size="sm" variant="outline" disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 100))}>上一页店铺</Button><span className="text-xs text-muted-foreground">第 {offset / 100 + 1} 页</span><Button size="sm" variant="outline" disabled={stores.data.nextOffset === null} onClick={() => setOffset(stores.data!.nextOffset!)}>下一页店铺</Button></div>
+      <Pager canPrevious={offset > 0} canNext={stores.data.nextOffset !== null} onPrevious={() => setOffset(value => Math.max(0, value - 100))} onNext={() => setOffset(stores.data!.nextOffset!)} previousLabel="上一页店铺" nextLabel="下一页店铺">第 {offset / 100 + 1} 页</Pager>
     </> : <Empty className="border border-dashed"><EmptyHeader><EmptyMedia variant="icon"><StoreIcon /></EmptyMedia><EmptyTitle>{management ? '还没有店铺' : '暂无可访问的店铺'}</EmptyTitle><EmptyDescription>{management ? '可添加多个 Ozon 卖家账号；每家店铺单独配置凭证、能力检查和团队访问权限。' : '请联系公司管理员为你分配具体店铺。加入公司不会自动获得所有店铺权限。'}</EmptyDescription></EmptyHeader>{management && <EmptyContent><Button disabled={!stores.data.configured} onClick={() => setDialog('platform')}>添加店铺</Button></EmptyContent>}</Empty>}
-    <Alert><AlertTitle>想确认还有哪些能力没开？</AlertTitle><AlertDescription><p>会话、商品与 FBS / FBO / FBP 同步可以在本页逐项启用；对外发送在本页授权，AI 自动回复在「公司设置 &gt; AI 模型」选择。</p><Button size="sm" variant="outline" render={<Link to="/workspace/capabilities" />}>打开能力与数据</Button></AlertDescription></Alert>
+    <Alert><AlertTitle>想确认还有哪些能力没开？</AlertTitle><AlertDescription><p>会话、商品与 FBS / FBO / FBP 同步可以在本页逐项启用；对外发送在本页授权，AI 自动回复在「公司设置 &gt; AI 模型」选择。</p><Button size="sm" variant="outline" render={<Link to={workspaceRoutes.capabilities} />}>打开能力与数据</Button></AlertDescription></Alert>
   </>;
 }

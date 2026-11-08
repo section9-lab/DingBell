@@ -6,6 +6,8 @@ import {diagnoseAiReceptionBlocker} from './ai-listening.ts';
 import {aiReceptionCommandSchema,aiReceptionSchema} from '../../shared/ai-reception.ts';
 import {companySupportConfigurationView} from '../company-model/runtime.ts';
 import {selectAiBudget} from '../ai-runs/budget.ts';
+import {readAiExecution} from '../ai-runs/storage.ts';
+import {aiActivitySchema} from '../../shared/ai-activity.ts';
 import {getConversationController} from './control-bindings.ts';
 import {ensureControlDirectory,readControlAccess} from './control-storage.ts';
 import type {ConversationController} from './controller.ts';
@@ -70,5 +72,31 @@ export function registerAiReceptionRoutes(app:Hono<ApplicationEnv>){
    if(commandRead&&!read.receipt)return apiError(c,'RESUMPTION_NOT_FOUND','No receipt is currently available for this command. Keep its original ID when checking again.',404);
    return jsonResponse(c,dto(scope,read));
   }catch{return apiError(c,method==='post'?'OPERATION_UNCONFIRMED':'CONTROL_UNAVAILABLE',method==='post'?'The operation may have completed. Read its original command result before continuing.':'The reception state is temporarily unavailable.',503);}
+ });
+
+ app.get(`${base}/ai-activity`,configured,limitedBody,signedIn,async(c:Context<ApplicationEnv>)=>{
+  const invalid=()=>apiError(c,'INVALID_REQUEST','Provide the canonical membership header.',400);
+  if(new URL(c.req.url).search||!validId(c.req.param('companyId'))||!validId(c.req.param('id')))return invalid();
+  const raw=c.req.header('X-DingBell-Member-Id');let memberId:string;
+  try{memberId=decodeURIComponent(raw??'');if(!validId(memberId)||encodeURIComponent(memberId)!==raw)return invalid();}catch{return invalid();}
+  const identity=c.get('identitySession'),companyId=c.req.param('companyId')!,conversationId=c.req.param('id')!;
+  const actor:ControlActor={orgId:companyId,actorUserId:identity.user.id,sessionId:identity.session.id,expectedMemberId:memberId};
+  try{
+   const access=await readControlAccess(c.env.DB!,actor,conversationId);
+   if(!access||access.memberId!==memberId)return apiError(c,'NOT_FOUND','The conversation is not available to this member.',404);
+   const empty=(status:'unavailable'|'pending'='unavailable')=>jsonResponse(c,v.parse(aiActivitySchema,{companyId,conversationId,runId:null,status,steps:[],truncated:false}));
+   const directory=access.directory;if(!directory)return empty();
+   const scope=directory.scope;
+   const row=await c.env.DB!.prepare(`SELECT id FROM ai_execution WHERE organization_id=? AND store_id=? AND conversation_id=? AND controller_id=? AND json_extract(payload,'$.run.schemaVersion')=1 ORDER BY created_at DESC,id DESC LIMIT 1`)
+     .bind(scope.organizationId,scope.storeId,scope.conversationId,scope.controllerId).first<{id:string}>();
+   if(!row)return empty();
+   const run=await readAiExecution(c.env.DB!,scope,row.id);if(!run)return empty();
+   const status=!run.closure?'pending':run.closure.kind!=='runtime_closed'?'unavailable':run.closure.outcome==='completed'?'completed':'failed';
+   let loop:import('../../../packages/agent-runtime/contracts.ts').AgentLoop|null=null;
+   try{loop=run.receipt&&c.env.AGENT_RUNTIME?.support.activity?await c.env.AGENT_RUNTIME.support.activity(run):null;}catch{loop=null;}
+   const question='untrustedCustomerQuestion'in run.modelInput?run.modelInput.untrustedCustomerQuestion:'';
+   const input=question?[{id:`input:${run.id}`,kind:'input' as const,text:question.length>600?`${question.slice(0,600)}…`:question}]:[];
+   return jsonResponse(c,v.parse(aiActivitySchema,{companyId,conversationId,runId:run.id,status,steps:[...input,...(loop?.steps??[])],truncated:loop?.truncated??false}));
+  }catch{return apiError(c,'ACTIVITY_UNAVAILABLE','The Agent activity is temporarily unavailable.',503);}
  });
 }

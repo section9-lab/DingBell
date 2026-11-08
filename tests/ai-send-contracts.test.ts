@@ -9,7 +9,8 @@ import {projectControlEvents} from '../src/modules/conversations/control-storage
 import {conversationControlFixture} from './fixtures/conversation-control.ts';
 import {aiAnswerFixture} from './fixtures/ai-answer.ts';
 import {encryptCredentials} from '../src/modules/stores/credentials.ts';
-import {prepareAiReply} from '../src/modules/ai-runs/reply-intent.ts';
+import {prepareAiMessage} from '../src/modules/ai-runs/message-intent.ts';
+import {readAiKnowledgeFile} from '../src/modules/ai-runs/text-knowledge.ts';
 import type {ReplySnapshot} from '../src/modules/conversations/reply-types.ts';
 import * as v from 'valibot';
 
@@ -36,12 +37,12 @@ test('AI send receipts strictly identify the original intent without becoming a 
  for(const change of [{schemaVersion:1},{version:3},{sequence:0},{lifecycle:'resolved'},{reception:'human'},{workStatus:'waiting_customer'},{assignedMemberId:'owner-member'}])assert.throws(()=>m.checkedAiSendReceipt({...value,appliedState:{...value.appliedState,...change}}));
 });
 async function outboundFixture(){
- const x=await aiAnswerFixture('support-reply-v1');
+ const x=await aiAnswerFixture('support-reply-v2');
  try{
   const key=await encryptCredentials(x.f.credentialEnv,{orgId:'org',storeId:'store',platformStoreId:'1',credentialVersion:1},{apiKey:'synthetic-api-key'});
   await x.f.db.prepare("UPDATE store SET outbound_enabled=1,credential_key_version=?,credential_nonce=?,credential_ciphertext=?,capabilities=?,expires_at=? WHERE id='store'")
    .bind(key.keyVersion,key.nonce,key.ciphertext,JSON.stringify([{code:'auth',status:'available'},{code:'reply',status:'available'}]),Date.now()+3600000).run();
-  const prepared=await prepareAiReply({...x.env,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'},x.read,x.scope,x.run.request.runId,x.input);assert.equal(prepared.status,'prepared');return x;
+  const env={...x.env,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'},read=await readAiKnowledgeFile(env,x.read,x.scope,x.run.request.runId,{path:`/knowledge/${x.documentId}.md`});assert.equal(read.status,'found');const prepared=await prepareAiMessage(env,x.read,x.scope,x.run.request.runId,x.input);assert.equal(prepared.status,'prepared');return x;
  }catch(e){await x.f.close();throw e;}
 }
 test('AI receipt and delivery projections preserve null actors, immutable provenance and monotonic attempts',{timeout:30000},async t=>{

@@ -1,3 +1,4 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 import {readEndpoint} from '../ozon-push/storage.ts';
 import {runPushPage} from '../ozon-push/worker.ts';
 import { listOzonChats, readOzonMessages, OzonReadError } from '../conversations/ozon.ts';
@@ -10,6 +11,7 @@ import type { SyncBindings, SyncBucket } from './bindings.ts';
 import { claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getSyncRuntime, releaseSyncLease } from './storage.ts';
 import type { SyncLease, NormalizedMessage, SyncScope } from './types.ts';
 import { historyDueIn, retrySyncFailure } from './policy.ts';
+import { isBuyerChatType, messageDirection } from '../ozon/chat-type.ts';
 
 // Preserve the existing public entry points for callers and tests.
 export { historyDueIn, retrySyncFailure } from './policy.ts';
@@ -95,7 +97,7 @@ export async function runSyncPage(env: SyncBindings & { DB: D1Database }, scope:
     if (cursor.stream === 'discovery') {
       const page = await listOzonChats(credentials, { cursor: cursor.cursor ?? undefined }, options.fetcher, signal);
       checkCursorProgress(cursor.cursor, page.cursor, cursor.recentCursors, page.hasNext);
-      const chats = page.chats.filter(chat => chat.type === 'BUYER_SELLER');
+      const chats = page.chats.filter(chat => isBuyerChatType(chat.type));
       // 增量游标指向库里已有的最新消息：平台 list 的 lastMessageId 可能无效
       // （如 '0'），而且用它当起点会把刚刚发出的消息直接跳过、永远拉不回来。
       const seen = await lastSeenMessageIds(env.DB, lease, chats.map(chat => chat.id));
@@ -106,7 +108,8 @@ export async function runSyncPage(env: SyncBindings & { DB: D1Database }, scope:
       };
       await commitSyncPage(env.DB, lease, {
         cursor, nextCursor: page.cursor, nextDueAt: now() + (page.hasNext ? 10_000 : 60_000), completed: false, continuing: page.hasNext,
-        chats: chats.map(chat => ({ platformThreadId: chat.id, type: chat.type, status: chat.status, createdAt: Date.parse(chat.createdAt), lastMessageId: chat.lastMessageId })),
+        chats: chats.map(chat => ({ platformThreadId: chat.id, type: chat.type, status: chat.status, createdAt: Date.parse(chat.createdAt), lastMessageId: chat.lastMessageId,
+          firstUnreadMessageId: chat.firstUnreadMessageId, unreadCount: chat.unreadCount })),
         seeds: chats.flatMap(chat => [
           { threadId: chat.id, stream: 'backfill' as const, cursor: null, dueAt: now() },
           { threadId: chat.id, stream: 'incremental' as const, cursor: incrementalCursor(chat), dueAt: now() + 60_000 },
@@ -115,7 +118,7 @@ export async function runSyncPage(env: SyncBindings & { DB: D1Database }, scope:
     } else {
       // 存量坏游标自愈：重置为引导快照（null），下一轮从最新一页开始回填。
       if (cursor.stream === 'incremental' && cursor.cursor !== null && !validCursor(cursor.cursor)) {
-        await env.DB.prepare(`UPDATE sync_cursor SET cursor=NULL,recent_cursors='[]',revision=revision+1,due_at=CAST(unixepoch('subsecond')*1000 AS INTEGER)
+        await env.DB.prepare(`UPDATE sync_cursor SET cursor=NULL,recent_cursors='[]',revision=revision+1,due_at=${NOW_MS}
           WHERE store_id=? AND organization_id=? AND thread_id=? AND stream='incremental'`)
           .bind(lease.storeId, lease.orgId, cursor.threadId).run();
         await releaseSyncLease(env.DB, lease, now() + 2_000);
@@ -132,7 +135,7 @@ export async function runSyncPage(env: SyncBindings & { DB: D1Database }, scope:
         .map(message => ({ platformThreadId: cursor.threadId, platformMessageId: message.id, senderId: message.senderId,
           senderType: message.senderType, content: message.content, isImage: message.isImage, isRead: message.isRead,
           orderNumber: message.orderNumber, sku: message.sku, eventAt: Date.parse(message.createdAt), liveObserved: cursor.stream === 'incremental' && !bootstrapSnapshot,
-          direction: ['Customer', 'Сustomer'].includes(message.senderType) ? 'inbound' : message.senderType === 'Seller' ? 'outbound' : 'unknown' }));
+          direction: messageDirection(message.senderType) }));
       const humans=messages.filter(message=>message.direction==='inbound'||message.direction==='outbound');
       const canonicalHead=direction==='Backward'&&cursor.cursor===null?{canonicalHead:humans[0]?.platformMessageId??null}
         :direction==='Forward'&&page.hasNext?{canonicalHead:null}:direction==='Forward'&&humans.length?{canonicalHead:humans.at(-1)!.platformMessageId}:{};

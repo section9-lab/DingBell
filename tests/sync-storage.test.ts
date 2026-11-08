@@ -21,7 +21,7 @@ test('message synchronization persists its company-scoped entities and checkpoin
 });
 
 import { Miniflare } from 'miniflare';
-import { getSyncSource, setSyncSourceEnabled, getStoreCoordinatorRuntime, releaseSyncLease, prepareSyncPageGate, syncPageCondition, prepareSyncPageFinish, claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getStoreSync, getSyncRuntime, listDueSyncStores, setStoreSyncEnabled } from '../src/modules/sync/storage.ts';
+import { getSyncSource, setSyncSourceEnabled, getStoreCoordinatorRuntime, releaseSyncLease, prepareSyncPageGate, syncPageCondition, prepareSyncPageFinish, claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getStoreSync, getSyncRuntime, setStoreSyncEnabled } from '../src/modules/sync/storage.ts';
 import type { NormalizedMessage, SyncLease } from '../src/modules/sync/types.ts';
 
 test('real D1 synchronization commits an immutable page and its checkpoint under live fences', { timeout: 60_000 }, async context => {
@@ -258,7 +258,6 @@ test('real D1 synchronization commits an immutable page and its checkpoint under
     const page = Array.from({length:100},(_,index)=>content(String(BigInt('9007199254740993')+BigInt(index))));
     assert.ok(await commitMessages(await lease(id),page));
     assert.equal((await getStoreSync(db,actor,id))?.messageCount,100);
-    assert.ok((await listDueSyncStores(db)).some(item=>item.storeId===id));
   });
 });
 
@@ -282,7 +281,6 @@ test('source permissions and outcomes remain isolated behind one store lease', {
   assert.equal((await getSyncSource(db,actor,'store','products'))?.enabled,true);
   await assert.rejects(db.prepare("UPDATE store_coordinator SET lease_token='partial',lease_until=1 WHERE store_id='store'").run(), /store_coordinator_lease_complete/);
   assert.ok(await getStoreCoordinatorRuntime(db,scope));
-  assert.ok((await listDueSyncStores(db)).some(item=>item.storeId==='store'));
   const productLease=await claimSyncLease(db,{...scope,source:'products',token:'products-lease'}); assert.ok(productLease);
   assert.equal(productLease.source,'products');
   assert.ok(await setStoreSyncEnabled(db,actor,'store',0,false));

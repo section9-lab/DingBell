@@ -22,7 +22,7 @@ test('a manager validates a local callback, cuts over, and a product arrives in 
  expect(app.replyRequests).toHaveLength(0);await other.screenshot({path:test.info().outputPath('push-product-realtime.png')});
 });
 
-test('a read-state Push updates an open immutable message window without losing its cursor or unsent draft',async({page,application:app})=>{
+test('a read-state Push updates an open message window without losing the unsent draft',async({page,application:app})=>{
  await page.goto(app.baseURL+'/login');await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
  const storeId=crypto.randomUUID(),path=`/api/companies/company-a/stores/${storeId}`,headers={origin:app.baseURL};
  expect((await page.request.post(app.baseURL+'/api/companies/company-a/stores',{headers,data:{id:storeId,name:'消息状态推送测试店',clientId:'910009',apiKey:crypto.randomUUID()}})).status()).toBe(200);await app.prepareReplyStore(storeId);const history=await app.seedConversationHistory(storeId);
@@ -32,7 +32,6 @@ test('a read-state Push updates an open immutable message window without losing 
  expect((await page.request.post(app.baseURL+`/api/companies/company-a/conversations/${history.id}/commands`,{headers,data:{commandId:crypto.randomUUID(),expectedVersion:0,action:'claim'}})).status()).toBe(200);
  await page.goto(app.baseURL+`/workspace/messages?store=${storeId}&conversation=${history.id}`);const records=page.getByRole('region',{name:'消息记录'});await expect(records.getByText('平台未读',{exact:true})).toHaveCount(50);
  const draft=page.getByRole('textbox',{name:'回复原文',exact:true});await draft.fill('KEEP-READ-STATE-DRAFT');
- const cursor=()=>page.evaluate(()=>Object.entries(sessionStorage).filter(([key])=>key.startsWith('dingbell:conversation-position:')).map(([,value])=>JSON.parse(value).position.historyCursor));const before=await cursor();
  app.setPlatformRead(true);expect((await page.request.post(callbackUrl,{headers:{'X-DingBell-Local-Simulation':'1'},data:{message_type:'TYPE_MESSAGE_READ',seller_id:'999',chat_type:'BUYER_SELLER',chat_id:history.threadId,is_read:false}})).status()).toBe(200);
- await expect(records.getByText('平台已读',{exact:true})).toHaveCount(50,{timeout:15_000});await expect(draft).toHaveValue('KEEP-READ-STATE-DRAFT');expect(await cursor()).toEqual(before);expect(app.replyRequests).toHaveLength(0);
+ await expect(records.getByText('平台已读',{exact:true})).toHaveCount(50,{timeout:15_000});await expect(draft).toHaveValue('KEEP-READ-STATE-DRAFT');expect(app.replyRequests).toHaveLength(0);
 });

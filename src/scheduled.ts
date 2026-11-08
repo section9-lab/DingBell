@@ -1,6 +1,4 @@
-import { wakeStoreSync, type SyncBindings } from './modules/sync/bindings.ts';
-import {repairPushHistory} from './modules/ozon-push/storage.ts';
-import { listDueSyncStores } from './modules/sync/storage.ts';
+import type { SyncBindings } from './modules/sync/bindings.ts';
 import { getConversationController, type ControlBindings } from './modules/conversations/control-bindings.ts';
 import { deferControlRepair, listDueControlDirectories } from './modules/conversations/control-storage.ts';
 import type { ControlScope } from './modules/conversations/control-types.ts';
@@ -11,17 +9,10 @@ import { dispatchAiReceptions } from './modules/ai-runs/dispatch.ts';
 import type {TranslationBindings} from './modules/translations/bindings.ts';
 import {repairFinancialUsage} from './modules/usage-repair.ts';
 import {reconcileBudgetLedgers} from './modules/budget-audit/reconciliation.ts';
+import {runStartupBootstrap} from './modules/sync/bootstrap.ts';
 
 
 type Bindings=SyncBindings&ControlBindings&SupportBindings&TranslationBindings;
-async function wakeStores(env:Bindings) {
-  if(!env.DB||!env.STORE_COORDINATOR)return;
-  // Repair durable, explicitly requested historical jobs; never discover Ozon data on a timer after cutover.
-  await repairPushHistory(env.DB);
-  const stores=await listDueSyncStores(env.DB,50);
-  for(let index=0;index<stores.length;index+=5)
-    await Promise.allSettled(stores.slice(index,index+5).map(scope=>wakeStoreSync(env,scope)));
-}
 async function repairOne(env:Bindings,scope:ControlScope) {
   // Move each selected directory behind other due work before potentially failing RPC.
   await deferControlRepair(env.DB!,scope,Date.now()+60_000);
@@ -40,5 +31,7 @@ async function repairControls(env:Bindings) {
 
 export async function runScheduled(env:Bindings) {
     const reception=async()=>{try{await deliverInboundEvents(env);}finally{await dispatchAiReceptions(env);}};
-    await Promise.allSettled([wakeStores(env),reception(),repairControls(env),repairAiExecutions(env),repairFinancialUsage(env),reconcileBudgetLedgers(env)]);
+    // One-time startup bootstrap starts the initial full read; after that, Ozon data is webhook-only.
+    const bootstrap=async()=>{try{await runStartupBootstrap(env);}catch{/* The durable marker retries on the next tick. */}};
+    await Promise.allSettled([bootstrap(),reception(),repairControls(env),repairAiExecutions(env),repairFinancialUsage(env),reconcileBudgetLedgers(env)]);
 }

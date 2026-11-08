@@ -1,11 +1,12 @@
+import { NOW_MS, sqlManagesCompany } from '../../platform/database/sql.ts';
 import * as v from 'valibot';
 import {budgetAuditIdSchema,budgetAuditKindSchema,companyBudgetAuditSchema,companyBudgetReconciliationSummarySchema,type BudgetAuditKind,type CompanyBudgetAudit,type CompanyBudgetReconciliationSummary} from '../../shared/budget-audit.ts';
 import type {ControlActor} from '../conversations/control-types.ts';
 
 const actorSchema=v.strictObject({orgId:budgetAuditIdSchema,actorUserId:budgetAuditIdSchema,sessionId:budgetAuditIdSchema,expectedMemberId:v.optional(budgetAuditIdSchema)});
-const now="CAST(unixepoch('subsecond')*1000 AS INTEGER)";
+const now = NOW_MS;
 const manager=`SELECT actor.id AS memberId FROM member actor JOIN user caller ON caller.id=actor.user_id JOIN session login ON login.user_id=caller.id
-  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>${now} AND caller.email_verified=1 AND actor.role IN ('owner','admin')
+  WHERE actor.organization_id=? AND actor.user_id=? AND login.id=? AND login.expires_at>${now} AND caller.email_verified=1 AND ${sqlManagesCompany('actor.role')}
   AND (? IS NULL OR actor.id=?)`;
 const values=(actor:ControlActor)=>[actor.orgId,actor.actorUserId,actor.sessionId,actor.expectedMemberId??null,actor.expectedMemberId??null];
 const access=(db:D1Database,actor:ControlActor)=>db.prepare(manager).bind(...values(actor)).first<{memberId:string}>();

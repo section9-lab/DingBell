@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Context, Hono } from 'hono';
 import * as v from 'valibot';
 import { apiError, jsonResponse, type ApplicationEnv } from '../../http.ts';
+import { canManageCompany } from '../../shared/roles.ts';
 import { auditedChange, type AuditOutcome } from '../audit/operation.ts';
 import { companyFor, configured, limitedBody, signedIn } from '../identity/http.ts';
 import { member } from '../identity/schema.ts';
@@ -9,6 +10,7 @@ import type { StoreDependencies } from './bindings.ts';
 import { credentialConfig, CredentialError, decryptCredentials, encryptCredentials } from './credentials.ts';
 import { capabilityCodes, inspectOzonCapabilities, unknownCapabilities, type StoreCapability } from './ozon.ts';
 import { beginStoreCheck, changeStoreGrant, changeStoreOutbound, changeStoreState, findStore, finishStoreCheck, insertStore, listStoreGrants, listStores, rotateStoreCredentials, type StoreActor, type StoreRecord } from './storage.ts';
+import { bootstrapStoreSync } from '../sync/bootstrap.ts';
 
 const apiKey = v.pipe(v.string(), v.minLength(1), v.maxLength(4096), v.regex(/^[\x21-\x7e]+$/));
 const revision = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(Number.MAX_SAFE_INTEGER));
@@ -67,7 +69,7 @@ async function authorize(c: Context<ApplicationEnv>, manage: boolean, id?: strin
   const actor = actorFor(c);
   const company = await companyFor(c, actor.orgId, actor.actorUserId);
   if (!company) return notFound(c);
-  if (manage && company.role !== 'owner' && company.role !== 'admin') return apiError(c, 'FORBIDDEN', 'Only company owners and administrators may manage stores.', 403);
+  if (manage && !canManageCompany(company.role)) return apiError(c, 'FORBIDDEN', 'Only company owners and administrators may manage stores.', 403);
   if (!id) return null;
   return await findStore(c.env.DB!, actor, id, manage) ?? notFound(c);
 }
@@ -170,7 +172,9 @@ export function registerStoreRoutes(app: Hono<ApplicationEnv>, deps: StoreDepend
         return changed(c);
       }
       const capabilities = await inspectOzonCapabilities({ clientId: row.platformStoreId, apiKey: secret.apiKey }, deps.storeFetch);
-      return currentDTO(c, await finishStoreCheck(c.env.DB!, actor, { id: row.id, revision: row.revision, credentialVersion: row.credentialVersion, token }, capabilities));
+      const checked = await finishStoreCheck(c.env.DB!, actor, { id: row.id, revision: row.revision, credentialVersion: row.credentialVersion, token }, capabilities);
+      if (checked) { try { await bootstrapStoreSync(c.env, { orgId: actor.orgId, storeId: row.id }, { force: true }); } catch { /* the store can retry the initial bootstrap explicitly */ } }
+      return currentDTO(c, checked);
     }, row.revision);
   });
 

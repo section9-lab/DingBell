@@ -1,11 +1,12 @@
 import * as v from 'valibot';
+import { REPLY_BODY_MAX } from '../../shared/reply-body.ts';
 import { ApiError, request } from './api.ts';
 
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const count=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER));
 const timestamp=v.pipe(v.string(),v.isoTimestamp(),v.check(value=>Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value));
 const noteBody=v.pipe(v.string(),v.maxLength(4000),v.check(value=>!!value.trim()&&value.isWellFormed()&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)));
-const replyBody=v.pipe(noteBody,v.maxLength(1000));
+const replyBody=v.pipe(noteBody,v.maxLength(REPLY_BODY_MAX));
 const uuid=v.pipe(v.string(),v.uuid());
 const replyId=v.pipe(v.string(),v.check(value=>v.is(uuid,value.startsWith('ai-reply:')?value.slice(9):value)));
 const replyReason=v.nullable(v.pipe(v.string(),v.minLength(1),v.maxLength(128),v.regex(/^[A-Za-z][A-Za-z0-9_]*$/)));

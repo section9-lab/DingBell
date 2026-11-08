@@ -20,7 +20,7 @@ async function scope(c:Context<ApplicationEnv>,storeId:string,manage=false){
 }
 function search(c:Context<ApplicationEnv>,allowed:string[]){const params=new URL(c.req.url).searchParams;for(const key of params.keys())if(!allowed.includes(key)||params.getAll(key).length!==1)throw new RangeError();return Object.fromEntries(params);}
 function failed(c:Context<ApplicationEnv>,error:unknown){
-  if(error instanceof AccountingLimit)return apiError(c,'ACCOUNTING_LIMIT','Narrow the accounting period to at most 1000 parcels and expenses.',400);
+  if(error instanceof AccountingLimit)return apiError(c,'ACCOUNTING_LIMIT','Narrow the accounting period to at most 5000 parcels and expenses.',400);
   if(error instanceof AccountingConflict)return apiError(c,'ACCOUNTING_CONFLICT','Use a later effective date or refresh before retrying.',409);
   if(error instanceof RangeError)return invalid(c);throw error;
 }

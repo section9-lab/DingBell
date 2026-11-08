@@ -17,7 +17,7 @@ type Row = {
   markdown: string | null; source: string; contentHash: string;
 };
 export type KnowledgeVirtualFile = {
-  path: string; documentId: string; revision: number; contentHash: string; content: string;
+  path: string; documentId: string; revision: number; contentHash: string; title: string; content: string;
 };
 
 /**
@@ -45,7 +45,7 @@ export async function readKnowledgeVirtualFiles(db: D1Database, organizationId: 
     const content = row.markdown ?? renderKnowledgeMarkdown(row.title, row.productRef, v.parse(knowledgeSourceSchema, JSON.parse(row.source)));
     totalBytes += encoder.encode(content).length;
     if (totalBytes > MAX_CONTENT_BYTES) throw new Error('KNOWLEDGE_DIRECTORY_TOO_LARGE');
-    return { path: `/knowledge/${documentId}.md`, documentId, revision: row.revision, contentHash: row.contentHash, content };
+    return { path: `/knowledge/${documentId}.md`, documentId, revision: row.revision, contentHash: row.contentHash, title: row.title, content };
   });
   // Hashing/materialization can yield in other backends; never return a stale snapshot
   // after publication, scope or content changes between the two reads.
@@ -55,7 +55,7 @@ export async function readKnowledgeVirtualFiles(db: D1Database, organizationId: 
 }
 
 export type KnowledgeFileRead = {
-  path: string; documentId: string; revision: number; contentHash: string;
+  path: string; documentId: string; revision: number; contentHash: string; title: string;
   startLine: number; endLine: number; totalLines: number; content: string;
 };
 
@@ -74,7 +74,7 @@ export function readKnowledgeVirtualFile(
   const content = selected.join('\n');
   if (new TextEncoder().encode(content).length > MAX_READ_BYTES) throw new Error('KNOWLEDGE_READ_TOO_LARGE');
   return {
-    path: file.path, documentId: file.documentId, revision: file.revision, contentHash: file.contentHash,
+    path: file.path, documentId: file.documentId, revision: file.revision, contentHash: file.contentHash, title: file.title,
     startLine, endLine: selected.length ? startLine + selected.length - 1 : startLine - 1, totalLines: lines.length, content,
   };
 }

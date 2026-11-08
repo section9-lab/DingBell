@@ -45,9 +45,9 @@ test('merchant completes costing, sees charts and losses, freezes basis and audi
   await expect(page.getByRole('button',{name:'核算测试公司',exact:true})).toBeVisible();await page.getByRole('button',{name:'核算测试公司',exact:true}).click();
   const navigation=page.getByRole('link',{name:'核算中心',exact:true}).first();await expect(navigation).toBeVisible();await navigation.click();
   await expect(page.getByRole('heading',{name:'核算中心',exact:true})).toBeVisible();
-  await page.getByLabel('成本依据',{exact:true}).selectOption('historical');await page.getByRole('button',{name:'应用筛选',exact:true}).click();
+  await page.getByRole('button',{name:'核算筛选',exact:true}).click();await page.getByLabel('成本依据',{exact:true}).selectOption('historical');await page.getByRole('button',{name:'应用筛选',exact:true}).click();
   await expect(page.getByText('成本完整 0 / 1 个已送达包裹')).toBeVisible();
-  await page.getByRole('tab',{name:'核算明细',exact:true}).click();await expect(page.getByText('待补全',{exact:true})).toBeVisible();
+  await page.getByRole('tab',{name:'核算明细',exact:true}).click();await expect(page.getByRole('table').getByText('待补全',{exact:true})).toBeVisible();
   await page.getByRole('tab',{name:'成本与规则',exact:true}).click();
   await page.getByRole('button',{name:'新增规则版本',exact:true}).click();
   const rules=page.getByRole('dialog');await expect(rules.getByRole('heading',{name:'费用与汇率规则'})).toBeVisible();
@@ -97,9 +97,9 @@ test('imported sourcing stays readable and historical cost gaps do not erase sal
  await expect(page.getByText('尚未配置费用与汇率规则，物流及提现费用未知，因此暂不能给出完整利润。',{exact:true})).toBeVisible();
  const profit=page.locator('[data-slot="card"]').filter({has:page.getByText('预估经营利润',{exact:true})});await expect(profit.getByText('—',{exact:true})).toBeVisible();
  const subtotal=page.locator('[data-slot="card"]').filter({has:page.getByText('已知成本小计（部分）',{exact:true})});await expect(subtotal.getByText('¥18.00',{exact:true})).toBeVisible();
- await page.getByLabel('成本依据',{exact:true}).selectOption('historical');await page.getByRole('button',{name:'应用筛选',exact:true}).click();await expect(subtotal.getByText('—',{exact:true})).toBeVisible();await expect(page).toHaveURL(/costMode=historical/);
+ await page.getByRole('button',{name:'核算筛选',exact:true}).click();await page.getByLabel('成本依据',{exact:true}).selectOption('historical');await page.getByRole('button',{name:'应用筛选',exact:true}).click();await expect(subtotal.getByText('—',{exact:true})).toBeVisible();await expect(page).toHaveURL(/costMode=historical/);
  await page.getByRole('button',{name:'按当前成本预估历史订单',exact:true}).click();await expect(page.getByText('当前成本预估，不是历史实际成本',{exact:true})).toBeVisible();await expect(subtotal.getByText('¥18.00',{exact:true})).toBeVisible();await expect(profit.getByText('—',{exact:true})).toBeVisible();
- await page.reload();await expect(page.getByLabel('成本依据',{exact:true})).toHaveValue('current_estimate');await expect(subtotal.getByText('¥18.00',{exact:true})).toBeVisible();
+ await page.reload();await page.getByRole('button',{name:'核算筛选',exact:true}).click();await expect(page.getByLabel('成本依据',{exact:true})).toHaveValue('current_estimate');await page.keyboard.press('Escape');await expect(subtotal.getByText('¥18.00',{exact:true})).toBeVisible();
  const components=page.locator('[data-slot="card"]').filter({has:page.getByText('已知成本构成与覆盖率',{exact:true})});await expect(components.getByText('¥10.00',{exact:true})).toBeVisible();await expect(components.getByText('¥6.00',{exact:true})).toBeVisible();await expect(components.getByText('¥2.00',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'冻结当前核算依据',exact:true})).toBeDisabled();await expect(page.getByText('费用或采购成本尚未补全，暂不能计算利润。',{exact:true})).toBeVisible();
  await page.screenshot({path:test.info().outputPath('imported-cost-history-regression.png'),fullPage:true,animations:'disabled'});

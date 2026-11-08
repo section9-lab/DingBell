@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import type { Harness } from '@earendil-works/pi-durable';
 import type { AgentAuthority, AgentDriver } from './contracts.ts';
-import { context, openAgent, providerId, readResult } from './harness.ts';
+import { context, openAgent, providerId, readAgentLoop, readResult } from './harness.ts';
 
 export function createNodeAgentDriver(directory: string, authority: AgentAuthority, list: () => Promise<string[]>): AgentDriver {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -25,6 +25,7 @@ export function createNodeAgentDriver(directory: string, authority: AgentAuthori
       await authority.bind(uid, receipt); return receipt;
     },
     async read(uid, id) { return readResult(await open(uid), uid, id, authority); },
+    async activity(uid) { return readAgentLoop(await open(uid)); },
     async abort(uid) { await (await (await open(uid)).root(context)).abort(context); },
     async resumeAll() { for (const uid of await list()) (await open(uid)).resume(); },
     async close() { await Promise.allSettled([...opened.values()].map(async harness => (await harness).close(context))); },

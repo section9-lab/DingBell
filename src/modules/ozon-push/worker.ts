@@ -2,6 +2,7 @@ import {listOzonProducts,readOzonProductDetails} from '../products/ozon.ts';
 import {listOzonFbsPostings,listOzonFboPostings,listOzonFbpPostings,readOzonFbsPosting,readOzonFboPosting,readOzonFbpPosting} from '../orders/ozon.ts';
 import {importPushPosting,importPushProducts,importPushListings} from './ingest.ts';
 import {listOzonChats,readOzonMessages,OzonReadError,type OzonMessage} from '../conversations/ozon.ts';
+import {messageDirection} from '../ozon/chat-type.ts';
 import {CredentialError,decryptCredentials} from '../stores/credentials.ts';
 import {claimSyncLease,commitSyncPage,finishSyncFailure,getSyncRuntime,releaseSyncLease,syncLeaseCondition} from '../sync/storage.ts';
 import type {SyncBindings,SyncBucket} from '../sync/bindings.ts';
@@ -103,8 +104,8 @@ export async function runPushPage(env:SyncBindings&{DB:D1Database},scope:SyncSco
   const page=await readOzonMessages(credentials,{chatId,direction:'Backward',limit:100,fromMessageId:job.progress.cursor??undefined},options.fetcher,signal);
   for(let index=1;index<page.messages.length;index++)if(Date.parse(page.messages[index-1]!.createdAt)<Date.parse(page.messages[index]!.createdAt))throw new OzonReadError('invalid_response');
   const target=hint.messageId?page.messages.find(message=>message.id===hint.messageId):undefined;
-  const latestHuman=page.messages.find(message=>['Customer','Сustomer','Seller'].includes(message.senderType));
-  const live=!!target&&['Customer','Сustomer'].includes(target.senderType)&&target.id===latestHuman?.id&&!job.progress.cursor&&hint.action==='new'&&!job.simulated&&Date.parse(target.createdAt)>=(endpoint.cutoverAt??Date.now())&&Date.parse(target.createdAt)<=job.receivedAt+120_000;
+  const latestHuman=page.messages.find(message=>messageDirection(message.senderType)!=='unknown');
+  const live=!!target&&messageDirection(target.senderType)==='inbound'&&target.id===latestHuman?.id&&!job.progress.cursor&&hint.action==='new'&&!job.simulated&&Date.parse(target.createdAt)>=(endpoint.cutoverAt??Date.now())&&Date.parse(target.createdAt)<=job.receivedAt+120_000;
   const condition=syncLeaseCondition(lease);
   await db.prepare(`INSERT INTO sync_cursor(organization_id,store_id,thread_id,stream,conversation_id,cursor,revision,due_at,completed)
    SELECT organization_id,store_id,platform_thread_id,'incremental',id,NULL,0,?,0 FROM conversation WHERE id=? AND organization_id=? AND store_id=? AND ${condition.sql} ON CONFLICT DO NOTHING`).bind(Date.now(),conversation!.id,scope.orgId,scope.storeId,...condition.values).run();

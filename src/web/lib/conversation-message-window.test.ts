@@ -12,17 +12,17 @@ test('live windows apply a cursor once, preserve order and reject stale or repla
   const live=apply(initial,'u1',update);assert.deepEqual(live.messages.map((item:any)=>item.id),['0001','0004','0002','0003']);assert.equal(live.historyCursor,'h2');assert.equal(live.updatesCursor,'u2');
   assert.equal(apply(live,'u1',update),live);assert.equal(apply(initial,'u1',{...update,viewerMemberId:'rejoined'}),initial);assert.equal(apply(live,'u2',{...batch([]),historyCursor:'h2',nextCursor:'u2'}),live);
 });
-test('live windows remain a bounded suffix and expose old backfills through a persistent earliest locator',()=>{
+test('live windows keep every message, including backfills older than the loaded range',()=>{
   const start=method('startMessageWindow'),apply=method('applyMessageUpdates');const initial=start(page(Array.from({length:50},(_,i)=>m(i+51))));
   const live=apply(initial,'u1',batch([m(101,1),m(102,2),...Array.from({length:98},(_,i)=>m(i+103))]));
-  assert.equal(live.messages.length,100);assert.deepEqual(live.messages.slice(0,2).map((item:any)=>item.id),['0099','0100']);assert.equal(live.hasOlder,true);assert.deepEqual(live.earlierUpdate,{id:'0101',eventAt:m(101,1).eventAt});
-  const next=apply(live,'u2',batch([m(201,0)],'3'));assert.deepEqual(next.messages,live.messages);assert.deepEqual(next.earlierUpdate,{id:'0201',eventAt:m(201,0).eventAt});
+  assert.equal(live.messages.length,150);assert.deepEqual(live.messages.slice(0,2).map((item:any)=>item.id),['0101','0102']);assert.equal(live.messages.at(-1).id,'0200');
+  const next=apply(live,'u2',batch([m(201,0)],'3'));assert.equal(next.messages.length,151);assert.equal(next.messages[0].id,'0201');
   assert.equal(next.historyCursor,'h3');assert.equal(next.updatesCursor,'u3');
 });
-test('body budgets retain one whole oversized message and mark trimmed history as reachable',()=>{
+test('every message is retained regardless of body size',()=>{
   const start=method('startMessageWindow'),apply=method('applyMessageUpdates');const initial=start(page([m(1)]));
-  const live=apply(initial,'u1',batch([m(2,2,'Б'.repeat(600_000)),m(3,3,'Б'.repeat(600_000))]));assert.deepEqual(live.messages.map((item:any)=>item.id),['0003']);assert.equal(live.hasOlder,true);assert.equal(live.messages[0].content[0].length,600_000);
-  const oversized=apply(live,'u2',batch([m(4,4,'x'.repeat(2_000_000))],'3'));assert.equal(oversized.messages.length,1);assert.equal(oversized.messages[0].content[0].length,2_000_000);
+  const live=apply(initial,'u1',batch([m(2,2,'Б'.repeat(600_000)),m(3,3,'Б'.repeat(600_000))]));assert.deepEqual(live.messages.map((item:any)=>item.id),['0001','0002','0003']);assert.equal(live.messages[1].content[0].length,600_000);
+  const oversized=apply(live,'u2',batch([m(4,4,'x'.repeat(2_000_000))],'3'));assert.deepEqual(oversized.messages.map((item:any)=>item.id),['0001','0002','0003','0004']);assert.equal(oversized.messages[3].content[0].length,2_000_000);
 });
 test('status refresh patches existing records without advancing append cursors or importing other pages',()=>{
  const initial=method('startMessageWindow')(page([m(1),m(2)])),refresh=method('refreshMessageWindowMetadata');
@@ -31,5 +31,5 @@ test('status refresh patches existing records without advancing append cursors o
  assert.equal(refresh(initial,page([m(1)])),initial);
 });
 test('an initially empty conversation accepts a full update batch without inventing earlier history',()=>{
-  const live=method('applyMessageUpdates')(method('startMessageWindow')(page([])),'u1',batch([m(2,1),m(1,0)]));assert.deepEqual(live.messages.map((item:any)=>item.id),['0001','0002']);assert.equal(live.hasOlder,false);assert.equal(live.earlierUpdate,null);
+  const live=method('applyMessageUpdates')(method('startMessageWindow')(page([])),'u1',batch([m(2,1),m(1,0)]));assert.deepEqual(live.messages.map((item:any)=>item.id),['0001','0002']);
 });

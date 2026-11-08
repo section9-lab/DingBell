@@ -1,3 +1,5 @@
+import { sqlHasRole, sqlManagesCompany, NOW_MS } from '../../platform/database/sql.ts';
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import {noPushMessageReview} from '../ozon-push/barrier.ts';
 import { storeColumns, type StoreRecord } from '../stores/storage.ts';
@@ -6,7 +8,7 @@ import type { ControlScope } from './control-types.ts';
 import type { ReplySnapshot } from './reply-types.ts';
 
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
-const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 const scopeSchema=v.strictObject({organizationId:identifier,storeId:identifier,conversationId:identifier,controllerId:identifier});
 function parameters(scope:ControlScope){if(!v.is(scopeSchema,scope))throw new RangeError('INVALID_REPLY_SCOPE');return [scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId];}
 export interface ReplyDispatchContext { store:StoreRecord;outboundEnabled:boolean;platformThreadId:string;platformType:string;replyAvailable:boolean }
@@ -14,7 +16,7 @@ export async function readReplyDispatchContext(db:D1Database,scope:ControlScope,
   const bound=parameters(scope);
   if(!v.is(identifier,actorUserId)||!v.is(identifier,actorMemberId))throw new RangeError('INVALID_REPLY_ACTOR');
   const row=await db.prepare(`SELECT ${storeColumns},conversation.platform_thread_id AS platformThreadId,conversation.platform_type AS platformType,
-    CASE WHEN store.expires_at>CAST(unixepoch('subsecond')*1000 AS INTEGER) AND store.outbound_enabled=1 AND
+    CASE WHEN store.expires_at>${NOW_MS} AND store.outbound_enabled=1 AND
       EXISTS (SELECT 1 FROM json_each(store.capabilities)
         WHERE json_extract(value,'$.code')='auth' AND json_extract(value,'$.status')='available') THEN 1 ELSE 0 END AS replyAvailable
     FROM conversation_control AS control JOIN conversation ON conversation.id=control.conversation_id AND conversation.organization_id=control.organization_id AND conversation.store_id=control.store_id
@@ -22,7 +24,7 @@ export async function readReplyDispatchContext(db:D1Database,scope:ControlScope,
     JOIN member AS actor ON actor.organization_id=store.organization_id AND actor.user_id=? AND actor.id=?
     JOIN user AS caller ON caller.id=actor.user_id
     WHERE control.controller_id=? AND control.organization_id=? AND control.store_id=? AND control.conversation_id=? AND caller.email_verified=1
-      AND (actor.role IN ('owner','admin') OR (actor.role='member' AND EXISTS (SELECT 1 FROM store_grant AS permission
+      AND (${sqlManagesCompany('actor.role')} OR (${sqlHasRole('actor.role','member')} AND EXISTS (SELECT 1 FROM store_grant AS permission
         WHERE permission.organization_id=store.organization_id AND permission.store_id=store.id AND permission.member_id=actor.id)))`)
     .bind(actorUserId,actorMemberId,...bound).first<StoreRecord & {outboundEnabled:number;platformThreadId:string;platformType:string;replyAvailable:number}>();
   if(!row)return null;
@@ -32,7 +34,7 @@ export async function readReplyDispatchContext(db:D1Database,scope:ControlScope,
 // This reads the channel only; an AI run still needs its separate, current authority review.
 export async function readAiReplyDispatchContext(db:D1Database,scope:ControlScope):Promise<ReplyDispatchContext|null>{
   const row=await db.prepare(`SELECT ${storeColumns},conversation.platform_thread_id AS platformThreadId,conversation.platform_type AS platformType,
-    CASE WHEN store.expires_at>CAST(unixepoch('subsecond')*1000 AS INTEGER) AND store.outbound_enabled=1 AND ${noPushMessageReview('conversation')} AND
+    CASE WHEN store.expires_at>${NOW_MS} AND store.outbound_enabled=1 AND ${noPushMessageReview('conversation')} AND
       EXISTS (SELECT 1 FROM json_each(store.capabilities)
         WHERE json_extract(value,'$.code')='auth' AND json_extract(value,'$.status')='available') THEN 1 ELSE 0 END AS replyAvailable
     FROM conversation_control AS control JOIN conversation ON conversation.id=control.conversation_id AND conversation.organization_id=control.organization_id AND conversation.store_id=control.store_id

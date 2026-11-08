@@ -1,9 +1,10 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 import type {OrderHistory,OrderHistoryCommand,PostingSource} from '../../shared/order-history.ts';
 import {storeAccess,type StoreActor} from '../stores/storage.ts';
 import {syncLeaseCondition,syncPageCondition} from '../sync/storage.ts';
 import type {SyncLease,SyncSQL} from '../sync/types.ts';
 import type {FbsListWork} from './types.ts';
-const nowSQL="CAST(unixepoch('subsecond')*1000 AS INTEGER)",windowMaximum=31*86400000,hour=3600000;
+const nowSQL = NOW_MS,windowMaximum=31*86400000,hour=3600000;
 type HistoryRow={storeId:string;source:PostingSource;epoch:number;commandRevision:number;generation:number;revision:number;requestedFrom:number;requestedTo:number;coveredFrom:number;since:number;to:number;cursor:string|null;recentCursors:string;state:'active'|'complete'|'cancelled';dueAt:number;pagesRead:number;lastLane:'live'|'history'|'details'};
 const columns='history.store_id AS storeId,history.source,history.epoch,history.command_revision AS commandRevision,history.generation,history.revision,history.requested_from AS requestedFrom,history.requested_to AS requestedTo,history.covered_from AS coveredFrom,history.since,history."to",history.cursor,history.recent_cursors AS recentCursors,history.state,history.due_at AS dueAt,history.pages_read AS pagesRead,history.last_lane AS lastLane';
 function dto(row:HistoryRow):OrderHistory{return {source:row.source,commandRevision:row.commandRevision,state:row.state,requestedFrom:new Date(row.requestedFrom).toISOString(),requestedTo:new Date(row.requestedTo).toISOString(),coveredFrom:new Date(row.coveredFrom).toISOString(),windowSince:new Date(row.since).toISOString(),windowTo:new Date(row.to).toISOString(),pagesRead:row.pagesRead};}

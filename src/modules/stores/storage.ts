@@ -1,3 +1,4 @@
+import { NOW_MS, sqlHasRole, sqlManagesCompany } from '../../platform/database/sql.ts';
 import type { CredentialEnvelope } from './credentials.ts';
 import type { StoreCapability } from './ozon.ts';
 
@@ -18,7 +19,7 @@ export const storeColumns = `store.id, store.organization_id AS organizationId, 
   store.credential_ciphertext AS credentialCiphertext, store.capabilities,
   store.checked_at AS checkedAt, store.expires_at AS expiresAt, store.check_token AS checkToken,
   store.check_until AS checkUntil, store.next_check_at AS nextCheckAt, store.outbound_enabled AS outboundEnabled`;
-const nowSQL = "CAST(unixepoch('subsecond') * 1000 AS INTEGER)";
+const nowSQL = NOW_MS;
 
 // All final writes include current authorization. A preflight membership lookup
 // cannot protect a request that lost its session or permission while awaiting I/O.
@@ -28,7 +29,7 @@ export function storeAccess(organization: string, manage = true) {
     JOIN session AS login ON login.user_id = actor.user_id
     WHERE actor.organization_id = ${organization} AND actor.user_id = ? AND login.id = ?
       AND login.expires_at > ${nowSQL} AND caller.email_verified = 1
-      AND (actor.role IN ('owner','admin')${manage ? '' : ` OR (actor.role = 'member' AND EXISTS (
+      AND (${sqlManagesCompany('actor.role')}${manage ? '' : ` OR (${sqlHasRole('actor.role','member')} AND EXISTS (
         SELECT 1 FROM store_grant AS permission WHERE permission.organization_id = store.organization_id
           AND permission.store_id = store.id AND permission.member_id = actor.id))`}))`;
 }
@@ -118,13 +119,13 @@ export function changeStoreGrant(db: D1Database, actor: StoreActor, input: { sto
   if (input.granted) {
     return db.prepare(`INSERT INTO store_grant (organization_id,store_id,member_id,created_at)
       SELECT store.organization_id,store.id,target.id,${nowSQL} FROM store
-      JOIN member AS target ON target.organization_id=store.organization_id AND target.id=? AND target.role='member'
+      JOIN member AS target ON target.organization_id=store.organization_id AND target.id=? AND ${sqlHasRole('target.role','member')}
       WHERE store.id=? AND store.organization_id=? AND ${storeAccess('store.organization_id')}
       ON CONFLICT DO NOTHING RETURNING member_id AS memberId,1 AS granted`)
       .bind(input.memberId, input.storeId, actor.orgId, ...actorParameters(actor)).first<{ memberId: string; granted: number }>();
   }
   return db.prepare(`DELETE FROM store_grant WHERE store_id=? AND organization_id=? AND member_id=?
-    AND EXISTS (SELECT 1 FROM member AS target WHERE target.id=store_grant.member_id AND target.organization_id=store_grant.organization_id AND target.role='member')
+    AND EXISTS (SELECT 1 FROM member AS target WHERE target.id=store_grant.member_id AND target.organization_id=store_grant.organization_id AND ${sqlHasRole('target.role','member')})
     AND ${storeAccess('store_grant.organization_id')} RETURNING member_id AS memberId,0 AS granted`)
     .bind(input.storeId, actor.orgId, input.memberId, ...actorParameters(actor)).first<{ memberId: string; granted: number }>();
 }

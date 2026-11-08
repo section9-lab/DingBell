@@ -1,3 +1,5 @@
+import { workspaceRoutes } from '../lib/routes';
+import { canManageCompany } from '../lib/roles';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
@@ -23,7 +25,6 @@ import { clearPendingReplies } from '../lib/conversation-reply-pending';
 import { clearPendingPreviews } from '../lib/conversation-preview-pending';
 import { clearAiResumptions } from '../lib/ai-reception-pending';
 import { clearReplyDrafts } from '../lib/conversation-draft';
-import { clearConversationPositions } from '../lib/conversation-position';
 import { useConversationMessages } from '../hooks/use-conversation-messages';
 import {CompanyConversationActivityDialog} from '../components/company-conversation-activity-dialog';
 import {downloadConversationCsv,exportConversationCsv} from '../lib/conversation-export-api';
@@ -81,24 +82,24 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
   const stores = useInfiniteQuery({
     queryKey: storesInfiniteQueryKey(company.id), initialPageParam: 0,
     queryFn: ({ pageParam, signal }) => readStores(company.id, pageParam, signal),
-    getNextPageParam: page => page.nextOffset ?? undefined, gcTime: 0, retry: false,
+    getNextPageParam: page => page.nextOffset ?? undefined, gcTime: 0,
   });
   const conversations = useQuery({
     queryKey: ['conversations', company.id, storeId, search, queue, state, cursor, revision],
     queryFn: ({ signal }) => readConversations(company.id, { ...(storeId ? { storeId } : {}), ...(search ? { search } : {}), queue, state, cursor, limit: 50 }, signal),
-    gcTime: 0, retry: false,
+    gcTime: 0,
   });
   const detail = useQuery({
     queryKey: ['conversation', company.id, selected, revision],
     queryFn: ({ signal }) => readConversation(company.id, selected, signal), enabled: !!selected,
-    gcTime: 0, retry: false,
+    gcTime: 0,
   });
   const history = useConversationMessages(userId, company.id, selected);
   const denied = [stores.error, conversations.error, detail.error, history.error, controlDenied].find(error => error instanceof ApiError && ['NOT_FOUND', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(error.code));
   useEffect(() => {
     if (!denied || clearing.current) return;
     clearing.current = true;
-    try { clearPendingReplies(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearPendingPreviews(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearAiResumptions(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearReplyDrafts(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearConversationPositions(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); } catch { /* Never expose drafts when access cannot be confirmed. */ }
+    try { clearPendingReplies(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearPendingPreviews(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearAiResumptions(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearReplyDrafts(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); } catch { /* Never expose drafts when access cannot be confirmed. */ }
     setParams({}, { replace: true });
     void refresh(denied);
   }, [denied, refresh, setParams, userId, company.id, selected]);
@@ -142,7 +143,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
   return <>
     <div className="flex shrink-0 items-center justify-between gap-3">
       <div className="min-w-0 shrink-0"><h1 className="whitespace-nowrap text-xl font-semibold tracking-tight sm:text-2xl">消息中心</h1><p className="mt-1 hidden text-sm text-muted-foreground sm:block">查看消费者会话，认领并跟进处理进度。</p></div>
-      <div className="flex items-center justify-end gap-1.5">{['owner','admin'].includes(company.role)&&<Popover><PopoverTrigger render={<Button variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" disabled={exporting} aria-label={exporting ? '正在导出…' : '导出 CSV'}/> }><Download data-icon="inline-start"/><span className="hidden sm:inline">{exporting?'正在导出…':'导出 CSV'}</span></PopoverTrigger><PopoverContent className="grid w-72 gap-3"><PopoverTitle>冻结范围导出</PopoverTitle><p className="text-xs text-muted-foreground">会话汇总</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','conversations')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','conversations')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','conversations')}>当前会话</Button>}</div><p className="text-xs text-muted-foreground">消息明细</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','messages')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','messages')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','messages')}>当前会话</Button>}</div></PopoverContent></Popover>}<Button ref={companyActivityButton} variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="公司日志" onClick={()=>setCompanyActivityOpen(true)}><History /><span className="hidden sm:inline">公司日志</span></Button><Button variant="outline" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="刷新消息" disabled={refreshing} onClick={reload}>{refreshing ? <Spinner aria-hidden="true" /> : <RefreshCw data-icon="inline-start" />}<span className="hidden sm:inline">刷新消息</span></Button></div>
+      <div className="flex items-center justify-end gap-1.5">{canManageCompany(company.role)&&<Popover><PopoverTrigger render={<Button variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" disabled={exporting} aria-label={exporting ? '正在导出…' : '导出 CSV'}/> }><Download data-icon="inline-start"/><span className="hidden sm:inline">{exporting?'正在导出…':'导出 CSV'}</span></PopoverTrigger><PopoverContent className="grid w-72 gap-3"><PopoverTitle>冻结范围导出</PopoverTitle><p className="text-xs text-muted-foreground">会话汇总</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','conversations')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','conversations')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','conversations')}>当前会话</Button>}</div><p className="text-xs text-muted-foreground">消息明细</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','messages')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','messages')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','messages')}>当前会话</Button>}</div></PopoverContent></Popover>}<Button ref={companyActivityButton} variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="公司日志" onClick={()=>setCompanyActivityOpen(true)}><History /><span className="hidden sm:inline">公司日志</span></Button><Button variant="outline" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="刷新消息" disabled={refreshing} onClick={reload}>{refreshing ? <Spinner aria-hidden="true" /> : <RefreshCw data-icon="inline-start" />}<span className="hidden sm:inline">刷新消息</span></Button></div>
     </div>
     <ConversationWorkspace selected={!!selected} list={
       <aside aria-label="会话列表" className={cn('h-full w-full min-w-0 flex-col bg-sidebar/40 lg:flex', selected ? 'hidden' : 'flex')}>
@@ -193,15 +194,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
           {conversation && <ConversationHeader key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} back={() => choose('')} />}
           {!conversation && loading && <Reading text="正在读取会话…" />}
           {conversation && <ConversationControlPanel key={`${company.id}:${selected}`} userId={userId} companyId={company.id} conversationId={selected} storeId={conversation.store.id} onDenied={setControlDenied}>
-          <div className="flex min-h-0 flex-1">{loading ? <Reading text="正在读取消息…" /> : <MessageTimeline companyId={company.id} conversationId={selected} messages={messages} pageKey={history.pageKey} earlier={history.earlier} anchorId={history.anchorId} view={history.view} onPosition={history.position} />}</div>
-          <div role="group" className="flex shrink-0 flex-wrap items-center gap-1 border-t px-3 py-1.5" aria-label="消息导航">
-            <Button variant="ghost" size="sm" disabled={!history.hasOlder || history.navigating} onClick={history.older}>查看更早消息</Button>
-            <Button variant="ghost" size="sm" disabled={!history.hasNewer || history.navigating} onClick={history.newer}>返回较新消息</Button>
-            {history.hasEarlierUpdate && <Button variant="outline" size="sm" disabled={history.navigating} onClick={history.earlierUpdate}>查看较早更新</Button>}
-            {history.hasNew ? <Button size="sm" disabled={history.navigating} onClick={history.showLatest}>显示新消息</Button> : history.earlier && <Button variant="outline" size="sm" disabled={history.navigating} onClick={history.showLatest}>回到最新消息</Button>}
-            {history.catchingUp && !history.earlier && <span role="status" className="text-xs text-muted-foreground">正在补读新消息…</span>}
-            {history.positionWarning && <p role="status" className="w-full text-xs text-muted-foreground">阅读位置恢复不可用；当前消息仍可查看，请勿依赖刷新后恢复位置。</p>}
-          </div>
+          <div className="flex min-h-0 flex-1">{loading ? <Reading text="正在读取消息…" /> : <MessageTimeline companyId={company.id} conversationId={selected} messages={messages} pageKey={history.pageKey} />}</div>
           </ConversationControlPanel>}
         </>}
       </section>
@@ -209,7 +202,7 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
     </ConversationWorkspace>
     {exportResult&&<Alert><AlertDescription>{exportResult.error?<ErrorNotice error={exportResult.error}/>:exportResult.text}</AlertDescription></Alert>}
     {(stores.isError || conversations.isError) && <Alert><AlertDescription>读取未完成，已隐藏不可确认的数据。请检查网络并刷新消息。</AlertDescription></Alert>}
-    {!availableStores.length && !stores.isPending && !stores.isError && <p className="shrink-0 text-xs text-muted-foreground">尚无可访问店铺。<Link to="/workspace/stores" className="underline underline-offset-4">前往店铺管理</Link></p>}
+    {!availableStores.length && !stores.isPending && !stores.isError && <p className="shrink-0 text-xs text-muted-foreground">尚无可访问店铺。<Link to={workspaceRoutes.stores} className="underline underline-offset-4">前往店铺管理</Link></p>}
     <CompanyConversationActivityDialog companyId={company.id} stores={availableStores} open={companyActivityOpen} onOpenChange={setCompanyActivityOpen} onDenied={setControlDenied} onConversation={choose} finalFocus={()=>companyActivityButton.current}/>
   </>;
 }

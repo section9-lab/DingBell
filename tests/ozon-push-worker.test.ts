@@ -6,12 +6,12 @@ import {ensureControlDirectory} from '../src/modules/conversations/control-stora
 import {readAiReplyDispatchContext,readReplyDispatchContext} from '../src/modules/conversations/reply-storage.ts';
 import {runSyncPage} from '../src/modules/sync/runner.ts';
 import {setTimeout as delay} from 'node:timers/promises';
-import {listDueSyncStores,getStoreCoordinatorRuntime} from '../src/modules/sync/storage.ts';
+import {getStoreCoordinatorRuntime} from '../src/modules/sync/storage.ts';
 
 test('after explicit cutover there are no discovery sweeps; a pushed message is read canonically exactly once',{timeout:60_000},async t=>{
  const f=await pushFixture();t.after(f.close);const url=await f.activate(),scope={orgId:'company',storeId:'store-a'},requests:string[]=[];
  const fetcher=(async(input)=>{requests.push(new URL(String(input)).pathname);return Response.json({has_next:false,messages:[{message_id:'18446744073709551616',created_at:new Date().toISOString(),user:{id:'9007199254740993',type:'Customer'},data:['Verified platform text'],is_image:false,is_read:false}]});}) as typeof fetch;
- await runSyncPage(f.env as never,scope,{fetcher});assert.deepEqual(requests,[]);assert.equal(await getStoreCoordinatorRuntime(f.DB,scope),null);assert.equal((await listDueSyncStores(f.DB)).some(row=>row.storeId==='store-a'),false);
+ await runSyncPage(f.env as never,scope,{fetcher});assert.deepEqual(requests,[]);assert.equal(await getStoreCoordinatorRuntime(f.DB,scope),null);
  const body={message_type:'TYPE_NEW_MESSAGE',seller_id:'1',chat_id:'18446744073709551615',chat_type:'BUYER_SELLER',message_id:'18446744073709551616',created_at:new Date().toISOString(),data:['Never trust this text']};
  assert.equal((await f.callback(url,body)).status,200);
  await runSyncPage(f.env as never,scope,{fetcher});

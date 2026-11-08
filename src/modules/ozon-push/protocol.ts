@@ -1,3 +1,4 @@
+import { isBuyerChatType } from '../ozon/chat-type.ts';
 export type PushHint={kind:'message'|'chat'|'products'|'posting'|'reconcile'|'ignored';source:'chat'|'products'|'fbs_postings'|'fbo_postings'|'fbp_postings'|'none';chatId?:string;messageId?:string;productIds?:string[];skus?:string[];postingNumber?:string;reason?:string;action?:'new'|'update'|'read'|'closed'|'history';createdAt?:number};
 const integerFields=new Set(['seller_id','product_id','sku','message_id','last_read_message_id','user_id']);
 export function parsePushJSON(text:string):Record<string,unknown>{
@@ -18,7 +19,7 @@ export function pushType(body:Record<string,unknown>){const type=identifier(body
 export function normalizePush(body:Record<string,unknown>):PushHint{
  const type=pushType(body);
  if(['TYPE_NEW_MESSAGE','TYPE_UPDATE_MESSAGE','TYPE_MESSAGE_READ','TYPE_CHAT_CLOSED'].includes(type)){
-  const chatId=identifier(body.chat_id);if(body.chat_type!==undefined&&body.chat_type!=='BUYER_SELLER')return {kind:'ignored',source:'none',reason:'unsupported_chat_type'};
+  const chatId=identifier(body.chat_id);if(typeof body.chat_type==='string'&&!isBuyerChatType(body.chat_type))return {kind:'ignored',source:'none',reason:'unsupported_chat_type'};
   if(type==='TYPE_CHAT_CLOSED')return {kind:'chat',source:'chat',chatId,action:'closed'};
   if(type==='TYPE_MESSAGE_READ')return {kind:'chat',source:'chat',chatId,action:'read'};
   return {kind:'message',source:'chat',chatId,messageId:identifier(body.message_id,true),action:type==='TYPE_NEW_MESSAGE'?'new':'update',createdAt:timestamp(body.created_at)};

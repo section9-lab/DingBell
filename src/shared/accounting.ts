@@ -51,6 +51,7 @@ export const accountingOverview=v.object({
   counts:v.object({eligible:v.number(),complete:v.number(),frozen:v.number(),excluded:v.number(),undated:v.number(),revenueKnown:v.number(),purchaseKnown:v.number(),currentEstimate:v.number()}),
   totals:v.object({revenue:v.number(),knownPurchase:v.number(),knownContribution:v.number(),knownCost:v.optional(int),cost:nullableMoney,profit:nullableMoney,margin:v.nullable(v.number()),purchase:nullableMoney,label:nullableMoney,commission:nullableMoney,freight:nullableMoney,withdrawal:nullableMoney,advertising:v.number(),other:v.number()}),
   trend:v.array(v.object({date:v.string(),revenue:v.number(),cost:nullableMoney,profit:nullableMoney,knownCost:v.optional(nullableMoney),knownContribution:v.optional(v.number())})),
+  trendGranularity:v.optional(v.picklist(['day','month'])),
 });
 export type AccountingOverview=v.InferOutput<typeof accountingOverview>;
 const costingRecord=v.object({...costingInput.entries,id:v.string()});

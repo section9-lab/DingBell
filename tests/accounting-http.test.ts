@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as v from 'valibot';
 import {test} from 'node:test';
 import {conversationsFixture} from './fixtures/conversations.ts';
-import {accountingConfig,accountingOverview,type AccountingOverview} from '../src/shared/accounting.ts';
+import {accountingConfig,accountingOverview} from '../src/shared/accounting.ts';
 
 async function fixture(){
   const f=await conversationsFixture();
@@ -73,7 +73,7 @@ test('frozen parcel identity is lane scoped and changed products fail closed',{t
   await f.DB.prepare("UPDATE fbs_posting SET list_facts=json_set(list_facts,'$.products[0].quantity',3)").run();
   const data=await f.read(),changed=data.postings.find(row=>row.fulfillment==='fbs')!;
   assert.equal(changed.profit,null);assert.ok(changed.missing.some(text=>text.includes('冻结依据不一致')));assert.equal(data.counts.complete,1);
-  await f.DB.prepare(`WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<1001)
+  await f.DB.prepare(`WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<5001)
     INSERT INTO fbs_posting(posting_number,organization_id,store_id,order_id,order_number,list_facts,list_observed_at,detail_epoch,detail_generation,detail_due_at)
     SELECT 'bulk-'||n,'company','store-a','2','bulk-order',json_object('postingNumber','bulk-'||n,'orderId','2','orderNumber','bulk-order','status','delivered','orderDate','2026-10-01T00:00:00Z','products',json('[]')),1,1,1,9999999999999 FROM numbers`).run();
   const limited=await f.request(f.query);assert.equal(limited.status,400);assert.equal((await limited.json() as {error:{code:string}}).error.code,'ACCOUNTING_LIMIT','large periods fail explicitly rather than returning partial totals');

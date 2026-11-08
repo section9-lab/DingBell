@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Context, Hono } from 'hono';
 import * as v from 'valibot';
 import { apiError, authError, jsonResponse, type ApplicationEnv } from '../../http.ts';
+import { hasRole, isOwner } from '../../shared/roles.ts';
 import { auditedChange } from '../audit/operation.ts';
 import { companyFor, configured, limitedBody, recorder, signedIn } from '../identity/http.ts';
 import { member } from '../identity/schema.ts';
@@ -39,7 +40,8 @@ function lastOwnerError(error: unknown) {
 async function changedOrUnauthorized(c: Context<ApplicationEnv>, input: MemberChange) {
   const company = await companyFor(c, input.organizationId, input.actorUserId);
   if (!company) return apiError(c, 'NOT_FOUND', 'The company or member is not available.', 404);
-  if (company.role !== 'owner' && (company.role !== 'admin' || input.expectedRole === 'owner' || input.role === 'owner')) {
+  // Owners may change anyone. Administrators may only change non-owner members.
+  if (!isOwner(company.role) && (!hasRole(company.role, 'admin') || input.expectedRole === 'owner' || input.role === 'owner')) {
     return apiError(c, 'FORBIDDEN', 'This member change is not permitted.', 403);
   }
   const target = await c.get('identity').db.select({ role: member.role }).from(member).where(and(eq(member.id, input.memberId), eq(member.organizationId, input.organizationId))).get();

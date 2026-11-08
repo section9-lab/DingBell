@@ -9,6 +9,7 @@ import { Spinner } from './ui/spinner';
 import { cn } from '../lib/utils';
 import { ConversationReplyComposer, type ReplySubmission } from './conversation-reply-composer';
 import { AiReceptionControl } from './ai-reception-control';
+import { AiLoopActivity } from './ai-loop-activity';
 
 type ControlResponse = Awaited<ReturnType<typeof readConversationControl>>;
 const denied = (error: unknown): error is ApiError => error instanceof ApiError && ['UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND'].includes(error.code);
@@ -21,8 +22,8 @@ function hostingText(state: ConversationControlState | undefined) {
   if (!state) return { label: '正在读取托管状态', description: '', tone: 'idle' as const };
   if (state.lifecycle === 'resolved') return { label: '会话已解决', description: '已解决的会话不能继续回复。', tone: 'idle' as const };
   if (state.reception === 'ai') return { label: 'AI 托管中', description: 'AI 会按回复策略起草回复，经人工确认后发送给消费者。', tone: 'ai' as const };
-  if (state.reception === 'human') return { label: 'AI 托管已关闭', description: '当前由你人工回复；重新开启后 AI 只处理此后的新消息。', tone: 'human' as const };
-  return { label: 'AI 托管已暂停', description: 'AI 已暂停接待；可以重新交给 AI，也可以自己回复。', tone: 'paused' as const };
+  if (state.reception === 'human') return { label: '人工回复中', description: '当前由你人工回复；开启 AI 托管后，AI 只处理此后的新消息。', tone: 'human' as const };
+  return { label: '未接管', description: '会话尚未接管，暂不能发送。开始人工回复后可认领并发送，也可以交给 AI 托管。', tone: 'paused' as const };
 }
 
 export function ConversationControlPanel({ userId, companyId, conversationId, storeId, children, onDenied }: {
@@ -36,7 +37,7 @@ export function ConversationControlPanel({ userId, companyId, conversationId, st
   const busy = useRef(false), active = useRef(true), reported = useRef(false);
   const control = useQuery({
     queryKey, queryFn: ({ signal }) => readConversationControl(companyId, conversationId, signal),
-    enabled: !pending && !locked, gcTime: 0, retry: false, refetchInterval: 10_000,
+    enabled: !pending && !locked, gcTime: 0, refetchInterval: 10_000,
   });
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   useEffect(() => {
@@ -65,7 +66,8 @@ export function ConversationControlPanel({ userId, companyId, conversationId, st
       });
       void cache.invalidateQueries({ queryKey: ['conversations', companyId] });
       void cache.invalidateQueries({ queryKey: ['conversation-replies', companyId, conversationId] });
-      if (command.action !== 'send_reply') setNotice(command.action === 'claim' || command.action === 'takeover' ? '已取消 AI 托管，现在由你回复消费者。' : '处理状态已保存。');
+      if (command.action !== 'send_reply') setNotice(command.action === 'claim' ? '已认领会话，现在由你回复消费者。'
+        : command.action === 'takeover' ? '已接管会话，现在由你回复消费者。' : '处理状态已保存。');
       return { outcome: 'accepted', receipt: result.receipt };
     } catch (error) {
       if (!active.current) return;
@@ -109,7 +111,9 @@ export function ConversationControlPanel({ userId, companyId, conversationId, st
               view={view!} disabled={disabled} onChanged={reread} onDenied={onDenied} />}
         </div>
       </div>
-      {!!hosting.description && <p className="mt-1 text-xs text-muted-foreground">{hosting.description}</p>}
+      {state?.reception === 'ai' && view
+        ? <AiLoopActivity key={`${companyId}:${conversationId}:${view.viewerMemberId}`} companyId={companyId} conversationId={conversationId} memberId={view.viewerMemberId} />
+        : !!hosting.description && <p className="mt-1 text-xs text-muted-foreground">{hosting.description}</p>}
       {!!notice && <p role="status" className="mt-1 text-xs text-muted-foreground">{notice}</p>}
       {control.isError && <div className="mt-2 flex flex-wrap items-center gap-2"><ErrorNotice error={control.error} />
         <Button size="sm" variant="outline" disabled={pending || control.isFetching} onClick={() => void reread().then(confirmed => { if (confirmed) setNotice('已重新读取会话状态。'); })}>刷新托管状态</Button></div>}
@@ -118,7 +122,7 @@ export function ConversationControlPanel({ userId, companyId, conversationId, st
       {exhausted && <p role="alert" className="mt-1 text-xs text-destructive">会话版本已达到上限，请联系部署管理员检查。</p>}
     </div>
     {children}
-    {state?.lifecycle === 'open' && (state.reception === 'human' || state.reception === 'paused') && view &&
+    {state?.lifecycle === 'open' && state.reception === 'human' && view &&
       <ConversationReplyComposer key={view.viewerMemberId} userId={userId} companyId={companyId} conversationId={conversationId} storeId={storeId}
         view={view} pending={pending} locked={locked || control.isFetching} onSubmit={submit} onReadControl={reread} onDenied={onDenied} />}
   </>;

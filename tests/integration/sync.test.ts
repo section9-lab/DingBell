@@ -79,7 +79,7 @@ test('real StoreCoordinator serializes per-store permits and preserves buckets a
   assert.equal(await permit('store-a','fbp-detail',2_000),3_000);
 });
 
-test('native Cron recovers a lost wake, alarms import a page, and pause removes future work across restart', { timeout: 30_000 }, async context => {
+test('native Cron never polls Ozon, an explicit wake imports a page, and pause removes future work across restart', { timeout: 30_000 }, async context => {
   const statePath = await mkdtemp(join(tmpdir(), 'dingbell-sync-alarm-'));
   const requests: string[] = [];
   const keys = { STORE_CREDENTIAL_KEYS: JSON.stringify({ v1: btoa('b'.repeat(32)) }), STORE_CREDENTIAL_ACTIVE_KEY: 'v1' };
@@ -118,7 +118,13 @@ test('native Cron recovers a lost wake, alarms import a page, and pause removes 
     return response.json();
   }
   assert.equal(requests.length, 0);
+  // The scheduled path must not discover or poll Ozon stores.
   await command('cron');
+  await delay(100);
+  assert.deepEqual(requests, []);
+  assert.equal(await db.prepare('SELECT count(*) FROM message').first('count(*)'), 0);
+  // Only an explicit wake (webhook/admin) drives synchronization now.
+  await command('wake');
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline && await db.prepare('SELECT count(*) FROM message').first('count(*)') !== 1) await delay(25);
   assert.deepEqual(requests, ['/v3/chat/list', '/v3/chat/history']);
@@ -133,12 +139,13 @@ test('native Cron recovers a lost wake, alarms import a page, and pause removes 
   mf = new Miniflare(options);
   db = await mf.getD1Database('DB');
   await command('cron');
+  await delay(100);
+  assert.deepEqual(requests, ['/v3/chat/list', '/v3/chat/history'], 'Cron must not recover or poll a stopped store');
   assert.equal(await db.prepare('SELECT enabled FROM store_sync_source').first('enabled'), 0);
   assert.equal(await db.prepare('SELECT count(*) FROM message').first('count(*)'), 1);
   assert.deepEqual((await db.prepare('SELECT message_id,conversation_id,sequence FROM message_append').all()).results,append);
   assert.equal(await db.prepare('SELECT message_sequence FROM conversation').first('message_sequence'),1);
   assert.equal(await command('inspect'), null);
-  assert.equal(requests.length, 2);
 });
 
 test('native product-only alarms hydrate facts and keep stopped synchronization stopped after restart', { timeout: 30_000 }, async context => {
@@ -184,7 +191,7 @@ test('native product-only alarms hydrate facts and keep stopped synchronization 
   await database.prepare("UPDATE store_sync_source SET due_at=? WHERE source='products'").bind(reservedAt+500).run();
   await command('wake');
   assert.ok(Number(await command('inspect')) >= reservedAt+1_000, 'alarm scheduling must respect persisted rate permits before claiming another source');
-  await command('cron');
+  await command('wake');
   const deadline = Date.now()+10_000;
   while (Date.now()<deadline && await database.prepare("SELECT count(*) FROM product WHERE facts IS NOT NULL AND detail_state='complete'").first('count(*)') !== 1) await delay(25);
   assert.equal(await database.prepare("SELECT count(*) FROM product WHERE facts IS NOT NULL AND detail_state='complete'").first('count(*)'),1);
@@ -196,7 +203,9 @@ test('native product-only alarms hydrate facts and keep stopped synchronization 
   assert.equal(await command('inspect'),null);
   const beforeRestart=requests.length;
   await mf.dispose(); mf=new Miniflare(options); database=await mf.getD1Database('DB');
-  await command('cron');
+  await database.prepare("INSERT OR REPLACE INTO sync_bootstrap(id,completed_at) VALUES('startup',?)").bind(Date.now()).run();
+  await database.prepare("INSERT OR REPLACE INTO sync_bootstrap(id,completed_at) VALUES('store',?)").bind(Date.now()).run();
+  await command('cron');await delay(100);
   assert.equal(await command('inspect'),null);
   assert.equal(await database.prepare('SELECT count(*) FROM product').first('count(*)'),1);
   assert.equal(requests.length,beforeRestart);
@@ -237,13 +246,13 @@ for(const mode of ['fbs','fbo','fbp'] as const)test(`native ${mode.toUpperCase()
     const response=await mf.dispatchFetch('http://fixture.invalid',{method:'POST',body:JSON.stringify({op,name:JSON.stringify([scope.orgId,scope.storeId]),scope})});
     assert.equal(response.status,200);return response.json();
   }
-  await command('cron');
+  await command('wake');
   const firstDeadline=Date.now()+8_000;
   while(Date.now()<firstDeadline && await database.prepare(`SELECT cursor FROM ${mode}_sync_window`).first('cursor')!=='frozen-next')await delay(25);
   const checkpoint=await database.prepare(`SELECT since,"to",cursor FROM ${mode}_sync_window`).first<{since:number;to:number;cursor:string}>();
   assert.equal(checkpoint?.cursor,'frozen-next');
   await mf.dispose();mf=new Miniflare(options);database=await mf.getD1Database('DB');
-  await command('cron');
+  await command('wake');
   const completedDeadline=Date.now()+10_000;
   while(Date.now()<completedDeadline && (await database.prepare(`SELECT last_completed_to FROM ${mode}_sync_window`).first('last_completed_to')!==checkpoint!.to || await database.prepare(`SELECT detail_facts FROM ${mode}_posting`).first('detail_facts')===null))await delay(25);
   assert.equal(await database.prepare(`SELECT last_completed_to FROM ${mode}_sync_window`).first('last_completed_to'),checkpoint!.to);

@@ -1,3 +1,4 @@
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import type { DurableObject } from 'cloudflare:workers';
 import type { SyncBindings, SyncBucket } from './bindings.ts';
 import type { SyncScope } from './types.ts';
@@ -40,7 +41,7 @@ return class StoreCoordinator extends Base {
   }
 
   async recordSendRateLimit(scope: SyncScope, until: number): Promise<void> {
-    if (!Number.isSafeInteger(until) || until < 0 || until > 8_640_000_000_000_000) throw new Error('Invalid send cooldown.');
+    if (!Number.isSafeInteger(until) || until < 0 || until > MAX_TIMESTAMP_MS) throw new Error('Invalid send cooldown.');
     await this.sendScope(scope);
     await this.ctx.storage.transaction(async transaction => {
       const limits = await transaction.get<{ all: number; buckets: Record<string, number> }>('rate') ?? { all: 0, buckets: {} };

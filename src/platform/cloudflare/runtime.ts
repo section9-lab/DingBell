@@ -20,6 +20,7 @@ export function withRuntime(env: CloudflareEnv): CloudflareEnv {
     prepare: run => object('support',run.id).supportPrepare(run), dispatch: run => object('support',run.id).supportDispatch(run),
     recover: run => object('support',run.id).supportRecover(run), cancel: run => object('support',run.id).supportCancel(run),
     read: run => object('support',run.id).supportRead(run), abort: run => object('support',run.id).supportAbort(run), close: run => object('support',run.id).supportClose(run),
+    activity: run => object('support',run.id).supportActivity(run),
   };
   return { ...env, AGENT_RUNTIME: { translation, support } };
 }

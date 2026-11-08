@@ -48,10 +48,22 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    --color-brand: var(--brand);
+    --color-brand-hover: var(--brand-hover);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-brand-mark: var(--brand-mark);
+    --color-brand-mark-accent: var(--brand-mark-accent);
 }
 
 :root {
     --workspace-sidebar-width: 15rem;
+    /* Brand surfaces (sidebar CTA, help card, avatar) and the logo mark.
+       Keep contrast of --brand-foreground on --brand at >= 4.5:1. */
+    --brand: oklch(0.5871 0.2372 285.74);
+    --brand-hover: oklch(0.5407 0.2378 284.06);
+    --brand-foreground: oklch(1 0 0);
+    --brand-mark: oklch(0.5513 0.1986 277.35);
+    --brand-mark-accent: oklch(0.7981 0.1188 178.66);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);

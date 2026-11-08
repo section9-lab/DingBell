@@ -1,3 +1,5 @@
+import { sqlHasRole, sqlManagesCompany } from '../../platform/database/sql.ts';
+import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import {checkedAiReceipt} from './ai-state.ts';
 import {checkedAiListeningReceipt} from './ai-listening.ts';
@@ -9,7 +11,7 @@ import { checkedReplyTranslation, controlCommandSchema, normalizeControlState, s
 import type { ControlAccess, ControlActor, ControlAssignee, ControlDirectory, ControlOutboxEvent as ControlEvent, ControlScope, ControlState, StoredControlState, TransferTarget, TransferTargetsPage } from './control-types.ts';
 
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
-const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8_640_000_000_000_000));
+const timestamp=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(MAX_TIMESTAMP_MS));
 const scopeSchema=v.strictObject({organizationId:identifier,storeId:identifier,conversationId:identifier,controllerId:identifier});
 const receiptMetadataSchema=v.strictObject({actorUserId:identifier,actorMemberId:identifier,appliedState:storedControlStateSchema});
 type DirectoryRow=Omit<ControlState,'schemaVersion'|'workStatus'> & {schemaVersion:number;workStatus:string|null;organizationId:string;storeId:string;conversationId:string;controllerId:string;repairDueAt:number};
@@ -18,7 +20,7 @@ const columns=`control.organization_id AS organizationId,control.store_id AS sto
   control.assigned_member_id AS assignedMemberId,control.updated_at AS updatedAt,control.work_status AS workStatus,control.repair_due_at AS repairDueAt`;
 const scopeWhere='controller_id=? AND organization_id=? AND store_id=? AND conversation_id=?';
 const targetEligibility=`target.organization_id=store.organization_id AND person.email_verified=1
-  AND (target.role IN ('owner','admin') OR (target.role='member' AND EXISTS (SELECT 1 FROM store_grant AS permission
+  AND (${sqlManagesCompany('target.role')} OR (${sqlHasRole('target.role','member')} AND EXISTS (SELECT 1 FROM store_grant AS permission
     WHERE permission.organization_id=store.organization_id AND permission.store_id=store.id AND permission.member_id=target.id)))`;
 function parameters(scope:ControlScope){if(!v.is(scopeSchema,scope))throw new RangeError('INVALID_CONTROL_SCOPE');return [scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId];}
 function time(value:number){if(!v.is(timestamp,value))throw new RangeError('INVALID_CONTROL_TIME');}

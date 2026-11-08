@@ -1,3 +1,4 @@
+import { NOW_MS } from '../../platform/database/sql.ts';
 export type MemberRole = 'owner' | 'admin' | 'member';
 export interface MemberChange {
   organizationId: string;
@@ -17,7 +18,7 @@ export async function changeMember(database: D1Database, input: MemberChange) {
     JOIN session AS login ON login.user_id = actor.user_id
     WHERE actor.organization_id = member.organization_id
       AND actor.user_id = ? AND login.id = ?
-      AND login.expires_at > CAST(unixepoch('subsecond') * 1000 AS INTEGER)
+      AND login.expires_at > ${NOW_MS}
       AND caller.email_verified = 1
       AND (actor.role = 'owner' OR (actor.role = 'admin'
         AND member.role IN ('admin', 'member') AND ? <> 'owner'))
