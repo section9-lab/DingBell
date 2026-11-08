@@ -22,6 +22,12 @@ export function createApplicationConfig(command: ConfigEnv['command'], options: 
       if(source.endsWith('/runtime-flue.ts'))return fileURLToPath(new URL('./src/platform/node/legacy-unavailable.ts',import.meta.url));
     }},resolveRuntime(),...(command==='build'?[artifactGate({cloudflare:true})]:[])] : [flue()]), react(), tailwindcss(), cloudflare({
       ...options.cloudflare,
+      // A production build may point at a deployment-specific Wrangler configuration that
+      // carries the real D1 database ID. Local development keeps the checked-in local-only
+      // placeholder so `demo:local` cannot seed a remote database.
+      configPath: options.cloudflare?.configPath ?? (process.env.DINGBELL_WRANGLER_CONFIG
+        ? fileURLToPath(new URL(process.env.DINGBELL_WRANGLER_CONFIG, import.meta.url))
+        : undefined),
       config(config) {
         if(pi)config.main=fileURLToPath(new URL('./src/platform/cloudflare/worker.ts',import.meta.url));
         else {

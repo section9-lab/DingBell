@@ -54,6 +54,7 @@ export function StoreSyncPanel({ source = 'chat', companyId, storeId, management
   const [confirm, setConfirm] = useState<{ enabled: boolean; expectedEpoch: number } | null>(null);
   const query = useQuery({
     queryKey: ['store-sync', companyId, storeId, source], queryFn: ({ signal }) => readSync(source, companyId, storeId, signal),
+    refetchInterval: 10_000,
   });
   useEffect(() => {
     if (query.error instanceof ApiError && ['NOT_FOUND', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(query.error.code)) void refresh(query.error);

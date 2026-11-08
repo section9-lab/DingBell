@@ -28,6 +28,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/build-cloudflare.mjs",
+    "build:cloudflare:production": "DINGBELL_WRANGLER_CONFIG=wrangler.production.jsonc node scripts/build-cloudflare.mjs",
     "deploy": "node scripts/deploy-cloudflare.ts",
     "deploy:cloudflare": "npm run deploy --",
     "check:types": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
