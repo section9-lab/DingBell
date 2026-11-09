@@ -385,3 +385,24 @@ test('outbound echoes merge with the platform copy instead of duplicating messag
   }
   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM message WHERE store_id='echo'").first('n'), 2);
 });
+
+test('sync commit indexes keep the message projection from scanning a whole store', () => {
+  const db = fixture();
+  try {
+    const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => String(row.name));
+    assert.ok(indexes.includes('message_store_platform_idx'), 'message projection index must exist');
+    assert.ok(indexes.includes('conversation_store_thread_idx'), 'conversation thread lookup index must exist');
+    const json = '[]';
+    const plan = db.prepare(`EXPLAIN QUERY PLAN
+      SELECT message.id FROM message
+      JOIN conversation ON conversation.id=message.conversation_id AND conversation.store_id=message.store_id
+        AND conversation.organization_id=message.organization_id AND conversation.platform_thread_id='thread'
+      JOIN json_each(?) AS item ON json_extract(item.value,'$.platformMessageId')=message.platform_message_id
+      WHERE message.store_id='store' AND message.organization_id='org'
+        AND message.platform_message_id IN (SELECT json_extract(value,'$.platformMessageId') FROM json_each(?))`)
+      .all(json, json).map(row => String(row.detail));
+    assert.ok(plan.some(detail => detail.includes('message_store_platform_idx (store_id=? AND platform_message_id=?)')),
+      `message lookup must seek by store and platform message id:\n${plan.join('\n')}`);
+    assert.ok(!plan.some(detail => /^SCAN message$/.test(detail)), `message must not be scanned:\n${plan.join('\n')}`);
+  } finally { db.close(); }
+});

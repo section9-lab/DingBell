@@ -23,7 +23,7 @@ const EXECUTABLE_API = 'openai-completions';
 
 function displayName(id: string, name: string | undefined): string {
   const value = typeof name === 'string' ? name.trim() : '';
-  return value && value.isWellFormed() && !/[\u0000-\u001f\u007f]/.test(value) ? value : id;
+  return value?.isWellFormed() && !/[\u0000-\u001f\u007f]/.test(value) ? value : id;
 }
 
 function buildCatalog(): ProviderEntry[] {

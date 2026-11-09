@@ -12,22 +12,27 @@ const stateColumns = `store.organization_id AS orgId,store.id AS storeId,? AS so
   COALESCE(authority.epoch,0) AS epoch,COALESCE(coordinator.fence,0) AS fence,authority.credential_version AS credentialVersion,
   MAX(COALESCE(authority.due_at,0),COALESCE(coordinator.blocked_until,0)) AS dueAt,authority.last_success_at AS lastSuccessAt,authority.last_error AS lastError,
   COALESCE(authority.failures,0) AS failures,authority.last_attempt_at AS lastAttemptAt,
-  CASE WHEN coordinator.lease_source=authority.source THEN coordinator.lease_until ELSE NULL END AS leaseUntil,coordinator.blocked_until AS blockedUntil,
-  (SELECT count(*) FROM conversation WHERE conversation.store_id=store.id) AS conversationCount,
-  (SELECT count(*) FROM message WHERE message.store_id=store.id) AS messageCount`;
+  CASE WHEN coordinator.lease_source=authority.source THEN coordinator.lease_until ELSE NULL END AS leaseUntil,coordinator.blocked_until AS blockedUntil`;
 const stateFrom = `FROM store LEFT JOIN store_coordinator AS coordinator ON coordinator.store_id=store.id
   LEFT JOIN store_sync_source AS authority ON authority.store_id=store.id AND authority.source=?`;
 const validSource = `authority.enabled=1 AND store.status NOT IN ('paused','disconnected') AND store.credential_version=authority.credential_version`;
 function sourceValue(source: SyncSource) { if (source!=='chat' && source!=='products' && source!=='fbs_postings' && source!=='fbo_postings' && source!=='fbp_postings') throw new Error('INVALID_SYNC_SOURCE'); return source; }
-function state(row: StoreSyncRecord | null): StoreSyncRecord | null { return row ? {...row,enabled:!!row.enabled} : null; }
+function state(row: StoreSyncRecord | null): StoreSyncRecord | null { return row ? {...row,enabled:!!row.enabled,conversationCount:row.conversationCount??0,messageCount:row.messageCount??0} : null; }
+/** Display-only totals. Kept out of the per-page commit path, where the scan dominated D1 reads. */
+async function readCounts(db:D1Database,storeId:string,orgId:string):Promise<{conversationCount:number;messageCount:number}> {
+  return await db.prepare(`SELECT (SELECT count(*) FROM conversation WHERE conversation.store_id=? AND conversation.organization_id=?) AS conversationCount,
+    (SELECT count(*) FROM message WHERE message.store_id=? AND message.organization_id=?) AS messageCount`)
+    .bind(storeId,orgId,storeId,orgId).first<{conversationCount:number;messageCount:number}>() ?? {conversationCount:0,messageCount:0};
+}
 async function readState(db:D1Database,scope:SyncScope,source:SyncSource) {
   return state(await db.prepare(`SELECT ${stateColumns} ${stateFrom} WHERE store.id=? AND store.organization_id=?`)
     .bind(source,source,scope.storeId,scope.orgId).first<StoreSyncRecord>());
 }
 export async function getSyncSource(db:D1Database,actor:StoreActor,storeId:string,source:SyncSource):Promise<SyncSourceRecord|null> {
   sourceValue(source);
-  return state(await db.prepare(`SELECT ${stateColumns} ${stateFrom} WHERE store.id=? AND store.organization_id=? AND ${storeAccess('store.organization_id',false)}`)
+  const current=state(await db.prepare(`SELECT ${stateColumns} ${stateFrom} WHERE store.id=? AND store.organization_id=? AND ${storeAccess('store.organization_id',false)}`)
     .bind(source,source,storeId,actor.orgId,actor.actorUserId,actor.sessionId).first<StoreSyncRecord>());
+  return current ? {...current,...await readCounts(db,storeId,actor.orgId)} : null;
 }
 export async function getStoreSync(db:D1Database,actor:StoreActor,storeId:string):Promise<StoreSyncRecord|null> {
   return await getSyncSource(db,actor,storeId,'chat') as StoreSyncRecord|null;
@@ -273,14 +278,16 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
         CASE WHEN json_extract(item.value,'$.liveObserved')=1 AND ?='incremental' AND (message.platform_message_id IS NOT ? OR EXISTS(SELECT 1 FROM ozon_push_live_message WHERE message_id=message.id AND push_event_id=?)) AND message.direction='inbound' THEN 'pending'
           WHEN message.ingest_mode='backfill' THEN 'historical' ELSE 'observed' END,
         CASE WHEN json_extract(item.value,'$.liveObserved')=1 AND ?='incremental' AND (message.platform_message_id IS NOT ? OR EXISTS(SELECT 1 FROM ozon_push_live_message WHERE message_id=message.id AND push_event_id=?)) THEN ${nowSQL} ELSE NULL END,?,${nowSQL}
-      FROM json_each(?) AS item JOIN conversation ON conversation.store_id=? AND conversation.organization_id=?
-        AND conversation.platform_thread_id=json_extract(item.value,'$.platformThreadId')
-      JOIN message ON message.conversation_id=conversation.id AND message.platform_message_id=json_extract(item.value,'$.platformMessageId')
-      WHERE ${accepted} ON CONFLICT(message_id) DO UPDATE SET
+      FROM message JOIN conversation ON conversation.id=message.conversation_id AND conversation.store_id=message.store_id
+        AND conversation.organization_id=message.organization_id AND conversation.platform_thread_id=?
+      JOIN json_each(?) AS item ON json_extract(item.value,'$.platformMessageId')=message.platform_message_id
+      WHERE message.store_id=? AND message.organization_id=?
+        AND message.platform_message_id IN (SELECT json_extract(value,'$.platformMessageId') FROM json_each(?))
+        AND ${accepted} ON CONFLICT(message_id) DO UPDATE SET
         state=CASE WHEN ingest_event.state IN ('historical','observed') AND excluded.state='pending' AND excluded.live_observed_at IS NOT NULL
           AND (ingest_event.state='historical' OR EXISTS(SELECT 1 FROM ozon_push_live_message WHERE message_id=ingest_event.message_id AND push_event_id=?)) THEN 'pending' ELSE ingest_event.state END,
         live_observed_at=COALESCE(ingest_event.live_observed_at,excluded.live_observed_at)`)
-      .bind(ingestMode,page.cursor.cursor,lease.push?.id??null,ingestMode,page.cursor.cursor,lease.push?.id??null,token,messageJSON,lease.storeId,lease.orgId,...acceptedValues,lease.push?.id??null),
+      .bind(ingestMode,page.cursor.cursor,lease.push?.id??null,ingestMode,page.cursor.cursor,lease.push?.id??null,token,page.cursor.threadId,messageJSON,lease.storeId,lease.orgId,messageJSON,...acceptedValues,lease.push?.id??null),
     ...(lease.push?[db.prepare(`UPDATE ozon_push_event SET requires_review=0 WHERE store_id=? AND organization_id=? AND requires_review=1 AND json_extract(hint,'$.chatId')=?
       AND json_extract(hint,'$.messageId') IN (SELECT json_extract(value,'$.platformMessageId') FROM json_each(?)) AND ${accepted}`).bind(lease.storeId,lease.orgId,page.cursor.threadId,messageJSON,...acceptedValues)]:[]),
     db.prepare(`UPDATE message SET is_read=(SELECT json_extract(value,'$.isRead') FROM json_each(?) WHERE json_extract(value,'$.platformMessageId')=message.platform_message_id)
