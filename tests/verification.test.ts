@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { URL } from 'node:url';
 import { Hono } from 'hono';
 import { Miniflare } from 'miniflare';
+import { applyMigrations } from './fixtures/migrations.ts';
 import { apiError, type ApplicationEnv } from '../src/http.ts';
 import { bootstrapServices, services } from '../src/modules/identity/services.ts';
 import { registerVerificationRoutes } from '../src/modules/identity/verification-http.ts';
@@ -14,10 +14,7 @@ test('public verification and recovery use the real Better Auth SDK and isolated
     compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
   context.after(() => mf.dispose());
   const db = await mf.getD1Database('DB');
-  for (const name of (await readdir(new URL('../migrations/', import.meta.url))).filter(name => name.endsWith('.sql')).sort()) {
-    const sql = await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8');
-    for (const statement of sql.split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await db.prepare(statement).run();
-  }
+  await applyMigrations(db);
   const env = { DB: db as unknown as D1Database, APP_BASE_URL: 'https://dingbell.example', BETTER_AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID() };
   const password = crypto.randomUUID() + '!Aa1';
   const messages: MailMessage[] = [];

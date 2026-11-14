@@ -4,14 +4,13 @@ import type { services } from './modules/identity/services.ts';
 import type { StoreBindings } from './modules/stores/bindings.ts';
 import type { SyncBindings } from './modules/sync/bindings.ts';
 import type { ControlBindings } from './modules/conversations/control-bindings.ts';
-import type { TranslationBindings } from './modules/translations/bindings.ts';
 import type { SupportBindings } from './modules/ai-runs/execution.ts';
 import type {ExportR2Bindings} from './modules/exports/r2.ts';
 
 export type IdentityServices = NonNullable<ReturnType<typeof services>>;
 export type IdentitySession = NonNullable<Awaited<ReturnType<IdentityServices['auth']['api']['getSession']>>>;
 export type ApplicationEnv = {
-  Bindings: IdentityBindings & StoreBindings & SyncBindings & ControlBindings & TranslationBindings & SupportBindings & ExportR2Bindings;
+  Bindings: IdentityBindings & StoreBindings & SyncBindings & ControlBindings & SupportBindings & ExportR2Bindings;
   Variables: { requestId: string; identity: IdentityServices; identitySession: IdentitySession };
 };
 

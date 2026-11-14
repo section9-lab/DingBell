@@ -227,10 +227,10 @@ test.skip('the read-only center has independent scrolling, keyboard details and 
 });
 
 
-async function queueCounts(page: Page, all: number, mine: number, unassigned: number) {
+async function queueCounts(page: Page, all: number, mine: number, ai: number) {
   await expect(page.getByRole('button', { name: '全部会话', exact: true })).toHaveText(`全部${all}`);
   await expect(page.getByRole('button', { name: '我负责', exact: true })).toHaveText(`我负责${mine}`);
-  await expect(page.getByRole('button', { name: '未分配', exact: true })).toHaveText(`未分配${unassigned}`);
+  await expect(page.getByRole('button', { name: 'AI负责', exact: true })).toHaveText(`AI负责${ai}`);
 }
 
 async function applyCommand(page: Page, application: Application, id: string, expectedVersion: number, action: Record<string, string>) {
@@ -383,7 +383,7 @@ for (const firstCheck of ['list', 'identity'] as const) test(`queue counts and m
     await login(member, application, 'member');
     await applyCommand(member, application, history.id, 0, { action: 'claim' });
     await member.goto(messagesURL(application));
-    await queueCounts(member, 52, 1, 51);
+    await queueCounts(member, 52, 1, 0);
     const list = member.getByRole('complementary', { name: '会话列表', exact: true });
     await expect(list.getByRole('button', { name: `打开会话 ${hidden.threadId}`, exact: true })).toHaveCount(0);
     expect((await member.request.get(`${application.baseURL}/api/companies/company-a/conversations?storeId=${second}`)).status()).toBe(404);
@@ -414,16 +414,16 @@ for (const firstCheck of ['list', 'identity'] as const) test(`queue counts and m
     expect(observation.some(item => item.cursor && item.status === 400)).toBe(true);
     await expect(member.getByRole('button', { name: '全部会话', exact: true })).toHaveText('全部—');
     await member.getByRole('button', { name: '返回第一页会话', exact: true }).click();
-    await queueCounts(member, 52, 0, 51);
+    await queueCounts(member, 52, 0, 0);
     await expect(list.getByText('第 1 页', { exact: true })).toBeVisible();
     await expect(member.getByRole('button', { name: '返回第一页会话', exact: true })).toHaveCount(0);
     expect(observation.some(item => !item.cursor && item.status === 200 && item.viewerMemberId === 'member-a-rejoined')).toBe(true);
     await writeFile(test.info().outputPath('membership-order.json'), JSON.stringify({ firstCheck, observation }, null, 2));
     await expect(list.getByRole('button', { name: `打开会话 ${history.threadId}`, exact: true })).toContainText('负责人已移除');
     await member.getByRole('button', { name: '我负责', exact: true }).click();
-    await queueCounts(member, 52, 0, 51);
+    await queueCounts(member, 52, 0, 0);
     await expect(list.getByRole('button', { name: /^打开会话 / })).toHaveCount(0);
-    await member.getByRole('button', { name: '未分配', exact: true }).click();
+    await member.getByRole('button', { name: 'AI负责', exact: true }).click();
     await expect(list.getByRole('button', { name: `打开会话 ${history.threadId}`, exact: true })).toHaveCount(0);
     await member.getByRole('button', { name: '全部会话', exact: true }).click();
     await list.getByRole('button', { name: `打开会话 ${history.threadId}`, exact: true }).click();

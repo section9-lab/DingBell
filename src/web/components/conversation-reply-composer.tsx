@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Languages, Send, X } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { REPLY_BODY_MAX } from '../../shared/reply-body.ts';
 import { ApiError } from '../lib/api';
 import {
@@ -8,8 +8,6 @@ import {
   type ConversationCommandReceipt, type ConversationControlView,
 } from '../lib/conversation-control-api';
 import { readPendingReply, savePendingReply, clearPendingReply, clearPendingReplies, type PendingReplyCommand } from '../lib/conversation-reply-pending';
-import { readReplyPreview, submitReplyPreview, isReplyPreviewRejected, type ReplyPreview, type ReplyPreviewRequest } from '../lib/conversation-preview-api';
-import { readPendingPreview, savePendingPreview, clearPendingPreview, clearPendingPreviews } from '../lib/conversation-preview-pending';
 import { readReplyDraft, saveReplyDraft, clearReplyDrafts } from '../lib/conversation-draft';
 import { readStore, updateStore } from '../lib/stores-api';
 import { ErrorNotice } from './identity-shared';
@@ -33,9 +31,8 @@ function storage() { try { return window.sessionStorage; } catch { return null; 
 const denied = (error: unknown): error is ApiError => error instanceof ApiError && ['UNAUTHENTICATED', 'FORBIDDEN', 'NOT_FOUND'].includes(error.code);
 
 /**
- * 人工回复：原文 → 可选俄语翻译 → 直接发送。
- * 没有校验步骤；只要原文非空就可以发送，译文存在时发送译文。
- * 输入与发送分开判断：外发开关、会话归属没就绪时仍然可以写草稿和翻译，
+ * 人工回复：原文直接发送。
+ * 输入与发送分开判断：外发开关、会话归属没就绪时仍然可以写草稿，
  * 只是发不出去——否则用户连字都打不了，也就无从准备内容。
  */
 export function ConversationReplyComposer({ userId, companyId, conversationId, storeId, view, pending, locked, onSubmit, onReadControl, onDenied }: {
@@ -52,15 +49,9 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
   const [checking, setChecking] = useState(false);
   const [canRetry, setCanRetry] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [translationJournal, setTranslationJournal] = useState(() => readPendingPreview(storage(), scope));
-  const [translation, setTranslation] = useState<ReplyPreview | null>(null);
-  const [translationText, setTranslationText] = useState('');
-  const [translating, setTranslating] = useState(false);
-  const [translationRetry, setTranslationRetry] = useState(false);
-  const [translationNotice, setTranslationNotice] = useState<string | null>(null);
   const [outboundBusy, setOutboundBusy] = useState(false);
   const [outboundNotice, setOutboundNotice] = useState<string | null>(null);
-  const draft = useRef({ body, revision: 0 }), translationBusy = useRef(false), identity = useRef(false);
+  const draft = useRef({ body, revision: 0 }), identity = useRef(false);
   const active = useRef(true), busy = useRef(false), reported = useRef(false), changedMember = useRef<string | null>(null);
   const draftInput = useRef<HTMLTextAreaElement>(null);
 
@@ -73,7 +64,7 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
   useEffect(() => {
     if (denied(replies.error) && !reported.current) {
       reported.current = true; clearPendingReplies(storage(), { userId, companyId, conversationId });
-      clearPendingPreviews(storage(), { userId, companyId, conversationId }); clearReplyDrafts(storage(), { userId, companyId, conversationId }); onDenied(replies.error);
+      clearReplyDrafts(storage(), { userId, companyId, conversationId }); onDenied(replies.error);
     }
   }, [replies.error, userId, companyId, conversationId, onDenied]);
   const data = replies.isError ? undefined : replies.data;
@@ -88,15 +79,12 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
 
   const current = data?.viewerMemberId === view.viewerMemberId && data.controlVersion === view.state.version;
   const exhausted = [view.state.version, view.state.sequence].some(value => value >= Number.MAX_SAFE_INTEGER);
-  // composing：可以在这里写草稿、翻译。sendable：还满足对外发送的全部条件。
+  // composing：可以在这里写草稿。sendable：还满足对外发送的全部条件。
   const composing = !!data && identityConfirmed && current && data.historyReady && view.state.lifecycle === 'open' && !exhausted
     && view.state.reception === 'human';
   const ready = composing && data!.readiness.allowed;
   const valid = isValidConversationReplyBody(body);
-  const translationMatches = !!translation && translation.status === 'ready' && translation.source === body;
-  const usingTranslation = translationMatches && isValidConversationReplyBody(translationText);
-  const outbound = usingTranslation ? translationText : body;
-  const translationDisabled = !composing || translating || !identityConfirmed || pending || locked;
+  const outbound = body;
   const blocked = pending || checking || locked || !ready || journal.state !== 'none';
   const gate = view.state.lifecycle === 'resolved' ? '会话已解决，无法回复。'
     : exhausted ? '会话版本已达到上限，请联系部署管理员。'
@@ -127,66 +115,6 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
     setDraftUnavailable(!saveReplyDraft(storage(), scope, value));
     setNotice(null);
   }
-  function resetTranslation() {
-    setTranslation(null); setTranslationText(''); setTranslationNotice(null); setTranslationRetry(false);
-  }
-  function releaseTranslation(request: ReplyPreviewRequest) {
-    if (!clearPendingPreview(storage(), scope, request)) {
-      setTranslationJournal(readPendingPreview(storage(), scope));
-      setTranslationNotice('翻译结果已返回，但本机记录未能清理。请再次核对。'); return false;
-    }
-    setTranslationJournal({ state: 'none' }); return true;
-  }
-
-  async function translate(request: ReplyPreviewRequest, operation: 'new' | 'retry' | 'read') {
-    if (translationBusy.current || translationDisabled) return;
-    translationBusy.current = true; setTranslating(true); setTranslationRetry(false);
-    if (operation !== 'read' && !savePendingPreview(storage(), scope, request)) {
-      setTranslationJournal(readPendingPreview(storage(), scope));
-      setTranslationNotice('浏览器无法可靠保存翻译请求，尚未提交。请检查浏览器存储设置。');
-      translationBusy.current = false; setTranslating(false); return;
-    }
-    if (operation !== 'read') { setTranslationJournal({ state: 'pending', request }); setTranslationNotice(null); }
-    if (operation === 'new') resetTranslation();
-    try {
-      const result = operation === 'read' ? await readReplyPreview(companyId, conversationId, scope.memberId, request)
-        : await submitReplyPreview(companyId, conversationId, scope.memberId, request);
-      if (!active.current || !identity.current) return;
-      if (result.preview.status === 'ready' && result.preview.translation !== null) {
-        releaseTranslation(request);
-        setTranslation(result.preview); setTranslationText(result.preview.translation);
-        setTranslationNotice(result.preview.source === draft.current.body ? null : '原文已修改，请重新翻译，或直接发送原文。');
-      } else if (result.preview.status === 'unavailable') {
-        releaseTranslation(request); setTranslationNotice('未能生成俄语译文，可以直接发送原文。');
-      } else if (result.preview.status === 'pending') {
-        setTranslationJournal({ state: 'pending', request }); setTranslationNotice('译文仍在生成，稍后核对。');
-      } else {
-        setTranslationJournal({ state: 'pending', request }); setTranslationRetry(operation === 'read');
-        setTranslationNotice('翻译结果尚未确认，请核对原请求。');
-      }
-    } catch (error) {
-      if (!active.current || !identity.current) return;
-      // 翻译记录的 404 多数是「请求没到达服务器」，先用控制读取确认权限，再决定是重试还是按无权限处理。
-      if (operation === 'read' && error instanceof ApiError && error.code === 'NOT_FOUND') {
-        const stillAllowed = await onReadControl();
-        if (!active.current) return;
-        if (stillAllowed) {
-          setTranslationRetry(true); setTranslationNotice('暂未找到原翻译请求，可以重试；系统沿用同一编号和原文。'); return;
-        }
-      }
-      if (denied(error)) {
-        clearPendingPreviews(storage(), { userId, companyId, conversationId });
-        clearPendingReplies(storage(), { userId, companyId, conversationId }); clearReplyDrafts(storage(), { userId, companyId, conversationId }); onDenied(error);
-      } else if (operation !== 'read' && isReplyPreviewRejected(error)) {
-        releaseTranslation(request);
-        setTranslationNotice(error instanceof ApiError && error.code === 'TRANSLATION_DISABLED'
-          ? '此工作区尚未开启俄语翻译，可以直接发送原文。'
-          : error instanceof ApiError && error.code === 'BUDGET_UNAVAILABLE' ? '翻译额度暂不可用，可以直接发送原文。'
-            : '俄语翻译暂不可用，可以直接发送原文。');
-      } else setTranslationNotice('翻译请求结果尚未确认。原文和编号已保留，请先核对。');
-    } finally { translationBusy.current = false; if (active.current) setTranslating(false); }
-  }
-
   function release(command: PendingReplyCommand, discardDraft = false) {
     if (discardDraft && !saveReplyDraft(storage(), scope, '')) {
       setDraftUnavailable(true); setNotice('消息已提交，但本机草稿尚未清理。请恢复浏览器存储后再次核对。'); return false;
@@ -209,7 +137,7 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
       const result = await onSubmit(command, scope.memberId);
       if (!active.current || !result) return;
       if (result.outcome === 'accepted' && result.receipt.action === 'send_reply') {
-        if (release(command, true)) { changeBody(''); resetTranslation(); setNotice('已提交发送，等待平台送达结果。'); }
+        if (release(command, true)) { changeBody(''); setNotice('已提交发送，等待平台送达结果。'); }
         await replies.refetch();
       } else if (result.outcome === 'rejected' && result.code !== 'COMMAND_CONFLICT') {
         if (release(command)) {
@@ -230,10 +158,10 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
     try {
       const result = await readConversationReply(companyId, conversationId, command.commandId);
       if (!active.current) return;
-      if (result.reply.body !== command.body || result.reply.previewRequestId !== command.previewRequestId) {
+      if (result.reply.body !== command.body) {
         setNotice('服务器记录与本机确认内容不一致，已停止操作。请联系管理员核对提交编号。'); return;
       }
-      if (release(command, true)) { changeBody(''); resetTranslation(); setNotice('已找到这条提交，没有再次发送。'); }
+      if (release(command, true)) { changeBody(''); setNotice('已找到这条提交，没有再次发送。'); }
       await replies.refetch();
     } catch (error) {
       if (!active.current) return;
@@ -242,7 +170,7 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
         if (active.current && confirmed) { setCanRetry(true); setNotice('暂未找到原提交，可以重试；系统沿用同一编号，不会创建第二条记录。'); }
       } else if (denied(error)) {
         clearPendingReplies(storage(), { userId, companyId, conversationId });
-        clearPendingPreviews(storage(), { userId, companyId, conversationId }); clearReplyDrafts(storage(), { userId, companyId, conversationId }); onDenied(error);
+        clearReplyDrafts(storage(), { userId, companyId, conversationId }); onDenied(error);
       } else setNotice('暂时无法核对提交。原文和编号已保留，请恢复连接后再核对。');
     } finally { busy.current = false; if (active.current) setChecking(false); }
   }
@@ -250,14 +178,13 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
     if (blocked || !isValidConversationReplyBody(outbound)) return;
     void submit({
       commandId: crypto.randomUUID(), expectedVersion: view.state.version, action: 'send_reply', body: outbound,
-      ...(usingTranslation && translation ? { previewRequestId: translation.requestId } : {}),
     });
   }
 
-  return <div role="group" aria-label="回复编辑器" className="flex shrink-0 flex-col gap-2 border-t px-4 py-3">
+  return <div role="group" aria-label="回复编辑器" className="flex shrink-0 flex-col gap-2 border-t border-border/60 px-4 py-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <span className="text-sm font-medium">回复消费者</span>
-      <span className="text-xs text-muted-foreground">消息会直接发送给 Ozon，发送前可翻译成俄语。</span>
+      <span className="text-xs text-muted-foreground">消息会直接发送给 Ozon。</span>
     </div>
     {!identityConfirmed ? <p role="status" className="text-xs text-muted-foreground">正在确认当前成员身份，暂不展示本机提交内容。</p>
       : journal.state === 'blocked' ? <Alert variant="destructive"><AlertDescription>本机提交记录无法读取，已暂停新发送。请联系管理员核对已有消息，避免重复发送。</AlertDescription></Alert>
@@ -275,32 +202,11 @@ export function ConversationReplyComposer({ userId, companyId, conversationId, s
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">{body.length} / {REPLY_BODY_MAX} 字符</span>
               <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" size="sm" variant="outline" disabled={translationDisabled || !valid || translationJournal.state !== 'none' || usingTranslation}
-                  onClick={() => void translate({ requestId: crypto.randomUUID(), source: body, sourceRevision: draft.current.revision }, 'new')}>
-                  {translating ? <Spinner aria-hidden="true" /> : <Languages data-icon="inline-start" />}翻译成俄语
-                </Button>
                 {valid && <Button type="submit" size="sm" disabled={blocked || !isValidConversationReplyBody(outbound)}>
                   {pending ? <Spinner aria-hidden="true" /> : <Send data-icon="inline-start" />}发送
                 </Button>}
               </div>
             </div>
-            {usingTranslation && <div className="mt-2 rounded-lg border bg-muted/30 p-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">俄语译文 · 发送时以此为准，可直接修改</span>
-                <Button type="button" size="xs" variant="ghost" onClick={resetTranslation}><X data-icon="inline-start" />改用原文</Button>
-              </div>
-              <Textarea lang="ru" aria-label="俄语译文" value={translationText} onChange={event => setTranslationText(event.target.value)}
-                disabled={pending || checking} maxLength={REPLY_BODY_MAX} rows={3} className="mt-2 max-h-40 min-h-20 border-0 bg-transparent shadow-none" />
-            </div>}
-            {!!translation && !translationMatches && <p role="status" className="mt-2 text-xs text-muted-foreground">原文已修改，译文未更新。请重新翻译，或直接发送原文。</p>}
-            {translationMatches && !usingTranslation && <p role="status" className="mt-2 text-xs text-muted-foreground">译文为空，将发送原文。</p>}
-            {translationJournal.state === 'blocked' && <p role="alert" className="mt-2 text-xs text-destructive">本机翻译请求无法读取，已暂停新翻译；原文发送仍可使用。</p>}
-            {translationJournal.state === 'pending' && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-muted-foreground">有一条翻译请求尚待核对。</span>
-              <Button type="button" size="xs" variant="outline" disabled={translationDisabled} onClick={() => void translate(translationJournal.request, 'read')}>核对翻译结果</Button>
-              {translationRetry && <Button type="button" size="xs" variant="ghost" disabled={translationDisabled} onClick={() => void translate(translationJournal.request, 'retry')}>重试原翻译</Button>}
-            </div>}
-            {!!translationNotice && <p role="status" className="mt-2 text-xs text-muted-foreground">{translationNotice}</p>}
             {gate && <div role="status" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{gate}</span>
               {data?.readiness.code === 'OUTBOUND_DISABLED' && !!storeId && view.state.reception === 'human' &&
                 <Button type="button" size="xs" variant="outline" disabled={outboundBusy || pending || checking} onClick={() => void enableOutbound()}>

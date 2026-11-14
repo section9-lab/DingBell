@@ -1,6 +1,7 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "dingbell-platform-probe",
+  "main": "src/worker.ts",
   "workers_dev": true,
   "preview_urls": false,
   "compatibility_date": "2026-06-01",

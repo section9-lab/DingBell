@@ -79,7 +79,7 @@ export function BootstrapPage({ reset }: { reset: () => Promise<void> }) {
     <AuthFrame>
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">首次安装 DingBell</h1>
+          <h1 className="page-title">首次安装 DingBell</h1>
           <p className="text-sm leading-6 text-muted-foreground">创建第一个公司工作区及其所有者账号。已开始的安装会从保存的进度继续。</p>
         </div>
         <ol aria-label="安装步骤" className="flex gap-4 border-b pb-5 text-xs">

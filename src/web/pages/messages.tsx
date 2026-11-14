@@ -1,77 +1,138 @@
-import { workspaceRoutes } from '../lib/routes';
-import { canManageCompany } from '../lib/roles';
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  MessageCircle,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { RefreshCw, Search, ChevronLeft, ChevronRight, Download, History, MessageCircle } from 'lucide-react';
-import { ApiError, type Company } from '../lib/api';
-import { readStores } from '../lib/stores-api';
-import { storesInfiniteQueryKey } from '../lib/query-keys';
-import { readConversations, readConversation, type ConversationSummary } from '../lib/conversations-api';
-import { cn } from '../lib/utils';
-import { ErrorNotice } from '../components/identity-shared';
-import { ConversationAside, ConversationHeader, MessageEmpty, MessageTimeline } from '../components/message-thread';
+import { useCompanySettings } from '../components/company-settings-provider';
 import { ConversationControlPanel } from '../components/conversation-control-panel';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Field, FieldGroup, FieldLabel } from '../components/ui/field';
-import { NativeSelect, NativeSelectOption } from '../components/ui/native-select';
-import { Spinner } from '../components/ui/spinner';
+import { ConversationWorkspace } from '../components/conversation-workspace';
+import { ErrorNotice } from '../components/identity-shared';
+import {
+  ConversationAside,
+  ConversationHeader,
+  MessageEmpty,
+  MessageTimeline,
+} from '../components/message-thread';
+import { NavigationSelection } from '../components/motion';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Field, FieldLabel } from '../components/ui/field';
+import { Input } from '../components/ui/input';
+import { NativeSelect, NativeSelectOption } from '../components/ui/native-select';
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '../components/ui/popover';
+import { Spinner } from '../components/ui/spinner';
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group';
-import {Popover,PopoverContent,PopoverTitle,PopoverTrigger} from '../components/ui/popover';
-import { clearPendingReplies } from '../lib/conversation-reply-pending';
-import { clearPendingPreviews } from '../lib/conversation-preview-pending';
-import { clearAiResumptions } from '../lib/ai-reception-pending';
-import { clearReplyDrafts } from '../lib/conversation-draft';
 import { useConversationMessages } from '../hooks/use-conversation-messages';
-import {CompanyConversationActivityDialog} from '../components/company-conversation-activity-dialog';
-import {downloadConversationCsv,exportConversationCsv} from '../lib/conversation-export-api';
+import { clearAiResumptions } from '../lib/ai-reception-pending';
+import { ApiError, type Company } from '../lib/api';
+import { clearReplyDrafts } from '../lib/conversation-draft';
+import { downloadConversationCsv, exportConversationCsv } from '../lib/conversation-export-api';
+import { clearPendingReplies } from '../lib/conversation-reply-pending';
+import {
+  type ConversationSummary,
+  readConversation,
+  readConversations,
+} from '../lib/conversations-api';
+import { storesInfiniteQueryKey } from '../lib/query-keys';
+import { canManageCompany } from '../lib/roles';
+import { workspaceRoutes } from '../lib/routes';
+import { readStores } from '../lib/stores-api';
+import { cn } from '../lib/utils';
 
-import { ConversationWorkspace } from '../components/conversation-workspace';
-import { NavigationSelection } from '../components/motion';
-import { useCompanySettings } from '../components/company-settings-provider';
-
-const queues = [{ value: 'all', label: '全部', aria: '全部会话' }, { value: 'mine', label: '我负责', aria: '我负责' }, { value: 'unassigned', label: '未分配', aria: '未分配' }] as const;
-const states = [{ value: 'all', label: '全部状态' }, { value: 'needs_reply', label: '待商家回复' }, { value: 'waiting_customer', label: '待用户回复' }, { value: 'waiting_internal', label: '待内部处理' }, { value: 'resolved', label: '已解决' }] as const;
+const queues = [
+  { value: 'all', label: '全部', aria: '全部会话' },
+  { value: 'mine', label: '我负责', aria: '我负责' },
+  { value: 'ai', label: 'AI负责', aria: 'AI负责' },
+] as const;
+const states = [
+  { value: 'all', label: '全部状态' },
+  { value: 'needs_reply', label: '待商家回复' },
+  { value: 'waiting_customer', label: '待用户回复' },
+  { value: 'waiting_internal', label: '待内部处理' },
+  { value: 'resolved', label: '已解决' },
+] as const;
 
 // The platform exposes no buyer name. Show the same identifiers the platform does: an order
 // number when the reported sender id is really an order, otherwise the full sender id.
-function buyerLabel(item: Pick<ConversationSummary, 'buyerSenderId' | 'buyerOrderNumber' | 'platformThreadId'>) {
+function buyerLabel(
+  item: Pick<ConversationSummary, 'buyerSenderId' | 'buyerOrderNumber' | 'platformThreadId'>,
+) {
   if (item.buyerOrderNumber) return `订单 ${item.buyerOrderNumber}`;
   if (item.buyerSenderId) return `买家 ${item.buyerSenderId}`;
   return `会话 ${item.platformThreadId}`;
 }
-function buyerTitle(item: Pick<ConversationSummary, 'buyerSenderId' | 'buyerOrderNumber' | 'platformThreadId'>) {
+function buyerTitle(
+  item: Pick<ConversationSummary, 'buyerSenderId' | 'buyerOrderNumber' | 'platformThreadId'>,
+) {
   if (item.buyerOrderNumber) return `订单号 ${item.buyerOrderNumber}`;
   if (item.buyerSenderId) return `买家平台 ID ${item.buyerSenderId}`;
   return `平台会话 ID ${item.platformThreadId}`;
 }
 
 function Reading({ text }: { text: string }) {
-  return <p role="status" className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground"><Spinner aria-hidden="true" />{text}</p>;
+  return (
+    <p
+      role="status"
+      className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+    >
+      <Spinner aria-hidden="true" />
+      {text}
+    </p>
+  );
 }
 
-export function MessagesPage({ company, userId, refresh }: { company: Company; userId: string; refresh: (notice?: unknown) => Promise<void> }) {
+export function MessagesPage({
+  company,
+  userId,
+  refresh,
+}: {
+  company: Company;
+  userId: string;
+  refresh: (notice?: unknown) => Promise<void>;
+}) {
   const { date: messageDate, timeZone } = useCompanySettings();
-  const listDate = useMemo(() => new Intl.DateTimeFormat('zh-CN', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }), [timeZone]);
+  const listDate = useMemo(
+    () =>
+      new Intl.DateTimeFormat('zh-CN', {
+        timeZone,
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }),
+    [timeZone],
+  );
   const [params, setParams] = useSearchParams();
   const selected = params.get('conversation') ?? '';
   const storeId = params.get('store') ?? '';
   const search = params.get('search') ?? '';
-  const queue = queues.find(item => item.value === params.get('queue'))?.value ?? 'all';
-  const state = states.find(item => item.value === params.get('state'))?.value ?? 'all';
+  const queue = queues.find((item) => item.value === params.get('queue'))?.value ?? 'all';
+  const state = states.find((item) => item.value === params.get('state'))?.value ?? 'all';
   const listScope = JSON.stringify([company.id, storeId, search, queue, state]);
   const [draft, setDraft] = useState(search);
-  const [companyActivityOpen,setCompanyActivityOpen]=useState(false);
-  const [exporting,setExporting]=useState(false);
-  const [exportResult,setExportResult]=useState<{text:string;error?:ApiError}|null>(null);
-  const companyActivityButton=useRef<HTMLButtonElement>(null);
-  const [pagination, setPagination] = useState<{ scope: string; pages: string[] }>({ scope: '', pages: [] });
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<{ text: string; error?: ApiError } | null>(null);
+  const [pagination, setPagination] = useState<{ scope: string; pages: string[] }>({
+    scope: '',
+    pages: [],
+  });
   const listPages = pagination.scope === listScope ? pagination.pages : [];
   function setListPages(value: string[] | ((pages: string[]) => string[])) {
-    setPagination(current => ({ scope: listScope, pages: typeof value === 'function' ? value(current.scope === listScope ? current.pages : []) : value }));
+    setPagination((current) => ({
+      scope: listScope,
+      pages:
+        typeof value === 'function'
+          ? value(current.scope === listScope ? current.pages : [])
+          : value,
+    }));
   }
   const [revision, setRevision] = useState(0);
   const [controlDenied, setControlDenied] = useState<ApiError | null>(null);
@@ -80,41 +141,90 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
   const cursor = listPages.at(-1);
   // Each visible page is bounded. Old pages leave the cache when no longer used.
   const stores = useInfiniteQuery({
-    queryKey: storesInfiniteQueryKey(company.id), initialPageParam: 0,
+    queryKey: storesInfiniteQueryKey(company.id),
+    initialPageParam: 0,
     queryFn: ({ pageParam, signal }) => readStores(company.id, pageParam, signal),
-    getNextPageParam: page => page.nextOffset ?? undefined, gcTime: 0,
+    getNextPageParam: (page) => page.nextOffset ?? undefined,
+    gcTime: 0,
   });
   const conversations = useQuery({
     queryKey: ['conversations', company.id, storeId, search, queue, state, cursor, revision],
-    queryFn: ({ signal }) => readConversations(company.id, { ...(storeId ? { storeId } : {}), ...(search ? { search } : {}), queue, state, cursor, limit: 50 }, signal),
+    queryFn: ({ signal }) =>
+      readConversations(
+        company.id,
+        {
+          ...(storeId ? { storeId } : {}),
+          ...(search ? { search } : {}),
+          queue,
+          state,
+          cursor,
+          limit: 50,
+        },
+        signal,
+      ),
     gcTime: 0,
   });
   const detail = useQuery({
     queryKey: ['conversation', company.id, selected, revision],
-    queryFn: ({ signal }) => readConversation(company.id, selected, signal), enabled: !!selected,
+    queryFn: ({ signal }) => readConversation(company.id, selected, signal),
+    enabled: !!selected,
     gcTime: 0,
   });
   const history = useConversationMessages(userId, company.id, selected);
-  const denied = [stores.error, conversations.error, detail.error, history.error, controlDenied].find(error => error instanceof ApiError && ['NOT_FOUND', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(error.code));
+  const denied = [
+    stores.error,
+    conversations.error,
+    detail.error,
+    history.error,
+    controlDenied,
+  ].find(
+    (error) =>
+      error instanceof ApiError &&
+      ['NOT_FOUND', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(error.code),
+  );
   useEffect(() => {
     if (!denied || clearing.current) return;
     clearing.current = true;
-    try { clearPendingReplies(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearPendingPreviews(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearAiResumptions(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); clearReplyDrafts(window.sessionStorage, { userId, companyId: company.id, ...(selected ? { conversationId: selected } : {}) }); } catch { /* Never expose drafts when access cannot be confirmed. */ }
+    try {
+      clearPendingReplies(window.sessionStorage, {
+        userId,
+        companyId: company.id,
+        ...(selected ? { conversationId: selected } : {}),
+      });
+      clearAiResumptions(window.sessionStorage, {
+        userId,
+        companyId: company.id,
+        ...(selected ? { conversationId: selected } : {}),
+      });
+      clearReplyDrafts(window.sessionStorage, {
+        userId,
+        companyId: company.id,
+        ...(selected ? { conversationId: selected } : {}),
+      });
+    } catch {
+      /* Never expose drafts when access cannot be confirmed. */
+    }
     setParams({}, { replace: true });
     void refresh(denied);
   }, [denied, refresh, setParams, userId, company.id, selected]);
-  useEffect(() => { setDraft(search); }, [search]);
+  useEffect(() => {
+    setDraft(search);
+  }, [search]);
   // List pagination is scoped during render, before a changed filter can start a request.
   useEffect(() => {
     if (!selected && returnFocus.current) {
-      (document.getElementById(`conversation-${returnFocus.current}`) ?? document.getElementById('message-search'))?.focus();
+      (
+        document.getElementById(`conversation-${returnFocus.current}`) ??
+        document.getElementById('message-search')
+      )?.focus();
       returnFocus.current = null;
     }
   }, [selected]);
   function choose(id: string) {
     if (!id) returnFocus.current = selected;
     const next = new URLSearchParams(window.location.search);
-    if (id) next.set('conversation', id); else next.delete('conversation');
+    if (id) next.set('conversation', id);
+    else next.delete('conversation');
     setParams(next);
   }
   function changeFilter(changes: Partial<Record<'store' | 'search' | 'queue' | 'state', string>>) {
@@ -123,86 +233,534 @@ export function MessagesPage({ company, userId, refresh }: { company: Company; u
     const next = new URLSearchParams(window.location.search);
     next.delete('conversation');
     for (const [key, value] of Object.entries(changes)) {
-      if (!value || (key === 'queue' || key === 'state') && value === 'all') next.delete(key);
+      if (!value || ((key === 'queue' || key === 'state') && value === 'all')) next.delete(key);
       else next.set(key, value);
     }
     next.delete('field');
     setParams(next);
   }
-  function reload() { setListPages([]); setRevision(value => value + 1); if (selected) history.refresh(); }
-  async function exportCsv(scope:'all'|'page'|'selected',kind:'conversations'|'messages') {const ids=scope==='page'?conversationPage?.conversations.map(item=>item.id):scope==='selected'&&selected?[selected]:undefined;if(scope!=='all'&&!ids?.length)return;setExporting(true);setExportResult(null);try{const result=await exportConversationCsv(company.id,{kind,scope,filters:{...(storeId?{storeId}:{}),queue,state,...(search?{search}:{})},...(ids?{conversationIds:ids}:{})});downloadConversationCsv(result);setExportResult({text:`已生成 ${result.rowCount} 行${kind==='conversations'?'会话汇总':'消息明细'}，快照 ${messageDate(result.snapshotAt)}。`});}catch(error){setExportResult({text:'导出失败。',error:error instanceof ApiError?error:new ApiError('EXPORT_UNAVAILABLE')});}finally{setExporting(false);}}
+  function reload() {
+    setListPages([]);
+    setRevision((value) => value + 1);
+    if (selected) history.refresh();
+  }
+  async function exportCsv(scope: 'all' | 'page' | 'selected', kind: 'conversations' | 'messages') {
+    const ids =
+      scope === 'page'
+        ? conversationPage?.conversations.map((item) => item.id)
+        : scope === 'selected' && selected
+          ? [selected]
+          : undefined;
+    if (scope !== 'all' && !ids?.length) return;
+    setExporting(true);
+    setExportResult(null);
+    try {
+      const result = await exportConversationCsv(company.id, {
+        kind,
+        scope,
+        filters: { ...(storeId ? { storeId } : {}), queue, state, ...(search ? { search } : {}) },
+        ...(ids ? { conversationIds: ids } : {}),
+      });
+      downloadConversationCsv(result);
+      setExportResult({
+        text: `已生成 ${result.rowCount} 行${kind === 'conversations' ? '会话汇总' : '消息明细'}，快照 ${messageDate(result.snapshotAt)}。`,
+      });
+    } catch (error) {
+      setExportResult({
+        text: '导出失败。',
+        error: error instanceof ApiError ? error : new ApiError('EXPORT_UNAVAILABLE'),
+      });
+    } finally {
+      setExporting(false);
+    }
+  }
   if (denied) return <ErrorNotice error={denied} />;
   const conversationPage = conversations.isError ? undefined : conversations.data;
   const conversation = !detail.isError ? detail.data?.conversation : undefined;
   const messages = !history.error ? history.messages : [];
   const conversationError = detail.error ?? history.error;
   const loading = detail.isPending || history.isPending;
-  const refreshing = conversations.isFetching || (!!selected && (detail.isFetching || history.isFetching));
-  const availableStores = stores.isError ? [] : stores.data?.pages.flatMap(page => page.stores) ?? [];
+  const refreshing =
+    conversations.isFetching || (!!selected && (detail.isFetching || history.isFetching));
+  const availableStores = stores.isError
+    ? []
+    : (stores.data?.pages.flatMap((page) => page.stores) ?? []);
 
-  return <>
-    <div className="flex shrink-0 items-center justify-between gap-3">
-      <div className="min-w-0 shrink-0"><h1 className="whitespace-nowrap text-xl font-semibold tracking-tight sm:text-2xl">消息中心</h1><p className="mt-1 hidden text-sm text-muted-foreground sm:block">查看消费者会话，认领并跟进处理进度。</p></div>
-      <div className="flex items-center justify-end gap-1.5">{canManageCompany(company.role)&&<Popover><PopoverTrigger render={<Button variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" disabled={exporting} aria-label={exporting ? '正在导出…' : '导出 CSV'}/> }><Download data-icon="inline-start"/><span className="hidden sm:inline">{exporting?'正在导出…':'导出 CSV'}</span></PopoverTrigger><PopoverContent className="grid w-72 gap-3"><PopoverTitle>冻结范围导出</PopoverTitle><p className="text-xs text-muted-foreground">会话汇总</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','conversations')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','conversations')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','conversations')}>当前会话</Button>}</div><p className="text-xs text-muted-foreground">消息明细</p><div className="flex flex-wrap gap-1"><Button size="sm" variant="outline" disabled={!conversationPage?.conversations.length} onClick={()=>void exportCsv('page','messages')}>当前页</Button><Button size="sm" variant="outline" onClick={()=>void exportCsv('all','messages')}>全部筛选</Button>{selected&&<Button size="sm" variant="outline" onClick={()=>void exportCsv('selected','messages')}>当前会话</Button>}</div></PopoverContent></Popover>}<Button ref={companyActivityButton} variant="ghost" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="公司日志" onClick={()=>setCompanyActivityOpen(true)}><History /><span className="hidden sm:inline">公司日志</span></Button><Button variant="outline" className="size-8 p-0 sm:w-auto sm:px-2.5" aria-label="刷新消息" disabled={refreshing} onClick={reload}>{refreshing ? <Spinner aria-hidden="true" /> : <RefreshCw data-icon="inline-start" />}<span className="hidden sm:inline">刷新消息</span></Button></div>
-    </div>
-    <ConversationWorkspace selected={!!selected} list={
-      <aside aria-label="会话列表" className={cn('h-full w-full min-w-0 flex-col bg-sidebar/40 lg:flex', selected ? 'hidden' : 'flex')}>
-        <form className="shrink-0 border-b bg-background p-3" onSubmit={event => { event.preventDefault(); changeFilter({ search: draft.trim() }); }}>
-          <FieldGroup className="grid grid-cols-2 gap-2">
-            <Field className="col-span-2"><FieldLabel className="sr-only">会话队列</FieldLabel><ToggleGroup aria-label="会话队列" variant="outline" size="sm" spacing={0} className="w-full" value={[queue]} onValueChange={values => {
-              const next = queues.find(item => item.value === values[0]);
-              if (next) changeFilter({ queue: next.value });
-            }}>
-              {queues.map(item => <ToggleGroupItem key={item.value} value={item.value} aria-label={item.aria} className="min-w-0 flex-1 gap-1.5 text-xs"><span>{item.label}</span><span className="max-w-full truncate text-xs text-muted-foreground tabular-nums" title={String(conversationPage?.counts[item.value] ?? '')}>{conversationPage?.counts[item.value] ?? '—'}</span></ToggleGroupItem>)}
-            </ToggleGroup></Field>
-            <Field><FieldLabel htmlFor="message-state" className="sr-only">筛选处理状态</FieldLabel><NativeSelect id="message-state" className="w-full" value={state} onChange={event => {
-              const next = states.find(item => item.value === event.target.value);
-              if (next) changeFilter({ state: next.value });
-            }}>{states.map(item => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}</NativeSelect></Field>
-            <Field><FieldLabel htmlFor="message-store" className="sr-only">筛选店铺</FieldLabel><NativeSelect id="message-store" className="w-full" value={storeId} onChange={event => changeFilter({ store: event.target.value })}>
-              <NativeSelectOption value="">全部授权店铺</NativeSelectOption>
-              {storeId && !availableStores.some(store => store.id === storeId) && <NativeSelectOption value={storeId}>当前筛选店铺</NativeSelectOption>}
-              {availableStores.map(store => <NativeSelectOption key={store.id} value={store.id}>{store.name}</NativeSelectOption>)}
-            </NativeSelect></Field>
-            {stores.hasNextPage && <Button type="button" variant="ghost" size="sm" disabled={stores.isFetchingNextPage} onClick={() => void stores.fetchNextPage()}>加载更多店铺</Button>}
-            <Field className="col-span-2"><FieldLabel htmlFor="message-search" className="sr-only">平台会话 ID 或订单号</FieldLabel><div className="flex gap-2"><Input id="message-search" autoComplete="off" placeholder="输入完整平台会话 ID 或订单号" maxLength={256} value={draft} onChange={event => setDraft(event.target.value)} /><Button type="submit" variant="outline" size="icon" aria-label="查找"><Search /></Button></div></Field>
-          </FieldGroup>
-          {search && <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => changeFilter({ search: '' })}>清除搜索</Button>}
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">当前筛选统计 · 标识仅精确匹配</p>
-        </form>
-        <div role="region" className="flex min-h-0 flex-1 flex-col overflow-y-auto gap-1 p-2" tabIndex={0} aria-label="会话条目">
-          {conversations.isPending ? <Reading text="正在读取会话…" /> : conversations.isError ? <div className="p-2"><ErrorNotice error={conversations.error} />{conversations.error instanceof ApiError && conversations.error.code === 'INVALID_REQUEST' && <Button variant="outline" className="mt-3" onClick={reload}>返回第一页会话</Button>}</div> : !conversations.data?.conversations.length ? <MessageEmpty title={storeId || search || queue !== 'all' || state !== 'all' ? '没有匹配的会话' : '暂无已导入会话'} description={storeId || search || queue !== 'all' || state !== 'all' ? '检查标识，或更换队列、状态与店铺筛选。' : '在店铺管理启用会话同步后，已导入的记录会显示在这里。'} /> : conversations.data.conversations.map(item => {
-            const latestSender = item.latestMessage?.direction === 'outbound' ? '商家' : item.latestMessage?.direction === 'inbound' ? '买家' : '消息';
-            const preview = item.latestMessage ? item.latestMessage.isImage ? '图片消息' : item.latestMessage.content.join(' ') + (item.latestMessage.previewTruncated ? '…' : '') : null;
-            const assignment = item.workflow.assignedMemberId === null ? '未分配' : item.workflow.assigneeName === null ? '负责人已移除' : `负责人：${item.workflow.assigneeName.trim() || '未填写姓名'}`;
-            return <Button key={item.id} id={`conversation-${item.id}`} variant={selected === item.id ? 'secondary' : 'ghost'} aria-current={selected === item.id ? 'true' : undefined} aria-label={`打开会话 ${item.platformThreadId}`} className="relative isolate h-auto w-full shrink-0 justify-start gap-2.5 rounded-lg px-3 py-3 text-left" onClick={() => choose(item.id)}>
-              <NavigationSelection active={selected === item.id} />
-              <span className="flex size-8 shrink-0 self-start items-center justify-center rounded-lg border bg-background text-muted-foreground" aria-hidden="true"><MessageCircle className="size-4" /></span>
-              <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium" title={buyerTitle(item)}>{buyerLabel(item)}</span><time className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums" dateTime={item.lastMessageAt ?? undefined} title={messageDate(item.lastMessageAt)}>{item.lastMessageAt ? listDate.format(new Date(item.lastMessageAt)) : '—'}</time></span>
-                <span className="line-clamp-2 whitespace-normal break-words text-xs leading-5 font-normal text-muted-foreground [overflow-wrap:anywhere]">{preview===null?<span className="text-muted-foreground">消息尚未导入</span>:<><span className="text-muted-foreground">{latestSender}：</span>{preview}</>}</span>
-                <span className="flex flex-wrap items-center gap-1"><Badge variant="outline">{states.find(value => value.value === (item.workflow.lifecycle === 'resolved' ? 'resolved' : item.workflow.workStatus))?.label}</Badge>{item.workflow.assignedMemberId === conversationPage?.viewerMemberId ? <Badge variant="secondary">我负责</Badge> : item.workflow.assignedMemberId === null ? <span className="text-xs text-muted-foreground">未分配</span> : null}<span aria-hidden="true" className="text-xs text-muted-foreground">·</span><span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{item.store.name}</span></span>
-                <span className="sr-only">{assignment}</span>
-              </div>
-            </Button>;
-          })}
+  return (
+    <>
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <div className="min-w-0 shrink-0">
+          <h1 className="page-title whitespace-nowrap">消息中心</h1>
+          <p className="mt-1 hidden page-subtitle sm:block">查看消费者会话，认领并跟进处理进度。</p>
         </div>
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t bg-background px-3 py-2"><Button variant="ghost" size="icon-sm" aria-label="上一页会话" disabled={!listPages.length || conversations.isFetching} onClick={() => setListPages(pages => pages.slice(0, -1))}><ChevronLeft /></Button><span className="text-xs text-muted-foreground">第 {listPages.length + 1} 页</span><Button variant="ghost" size="icon-sm" aria-label="下一页会话" disabled={!conversations.data?.nextCursor || conversations.isFetching} onClick={() => setListPages(pages => [...pages, conversations.data!.nextCursor!])}><ChevronRight /></Button></div>
-      </aside>} >
-      <section aria-label="会话内容" className={cn('min-h-0 min-w-0 flex-1 flex-col lg:flex', selected ? 'flex' : 'hidden')}>
-        {!selected ? <MessageEmpty title="选择一个会话" description="从左侧选择会话，查看平台原文和同步范围。" /> : conversationError ? <div className="p-4"><ErrorNotice error={conversationError} /><Button variant="outline" className="mt-3" onClick={() => choose('')}>返回会话列表</Button></div> : <>
-          {conversation && <ConversationHeader key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} back={() => choose('')} />}
-          {!conversation && loading && <Reading text="正在读取会话…" />}
-          {conversation && <ConversationControlPanel key={`${company.id}:${selected}`} userId={userId} companyId={company.id} conversationId={selected} storeId={conversation.store.id} onDenied={setControlDenied}>
-          <div className="flex min-h-0 flex-1">{loading ? <Reading text="正在读取消息…" /> : <MessageTimeline companyId={company.id} conversationId={selected} messages={messages} pageKey={history.pageKey} />}</div>
-          </ConversationControlPanel>}
-        </>}
-      </section>
-      {conversation && !conversationError && <ConversationAside key={selected} companyId={company.id} viewerMemberId={conversationPage?.viewerMemberId} onDenied={setControlDenied} conversation={conversation} messages={messages} />}
-    </ConversationWorkspace>
-    {exportResult&&<Alert><AlertDescription>{exportResult.error?<ErrorNotice error={exportResult.error}/>:exportResult.text}</AlertDescription></Alert>}
-    {(stores.isError || conversations.isError) && <Alert><AlertDescription>读取未完成，已隐藏不可确认的数据。请检查网络并刷新消息。</AlertDescription></Alert>}
-    {!availableStores.length && !stores.isPending && !stores.isError && <p className="shrink-0 text-xs text-muted-foreground">尚无可访问店铺。<Link to={workspaceRoutes.stores} className="underline underline-offset-4">前往店铺管理</Link></p>}
-    <CompanyConversationActivityDialog companyId={company.id} stores={availableStores} open={companyActivityOpen} onOpenChange={setCompanyActivityOpen} onDenied={setControlDenied} onConversation={choose} finalFocus={()=>companyActivityButton.current}/>
-  </>;
+        <div className="flex items-center justify-end gap-1.5">
+          {canManageCompany(company.role) && (
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    className="size-8 p-0 sm:w-auto sm:px-2.5"
+                    disabled={exporting}
+                    aria-label={exporting ? '正在导出…' : '导出 CSV'}
+                  />
+                }
+              >
+                <Download data-icon="inline-start" />
+                <span className="hidden sm:inline">{exporting ? '正在导出…' : '导出 CSV'}</span>
+              </PopoverTrigger>
+              <PopoverContent className="grid w-72 gap-3">
+                <PopoverTitle>冻结范围导出</PopoverTitle>
+                <p className="text-xs text-muted-foreground">会话汇总</p>
+                <div className="flex flex-wrap gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!conversationPage?.conversations.length}
+                    onClick={() => void exportCsv('page', 'conversations')}
+                  >
+                    当前页
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void exportCsv('all', 'conversations')}
+                  >
+                    全部筛选
+                  </Button>
+                  {selected && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void exportCsv('selected', 'conversations')}
+                    >
+                      当前会话
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">消息明细</p>
+                <div className="flex flex-wrap gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!conversationPage?.conversations.length}
+                    onClick={() => void exportCsv('page', 'messages')}
+                  >
+                    当前页
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void exportCsv('all', 'messages')}
+                  >
+                    全部筛选
+                  </Button>
+                  {selected && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void exportCsv('selected', 'messages')}
+                    >
+                      当前会话
+                    </Button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+          <Button
+            variant="outline"
+            className="size-8 p-0 sm:w-auto sm:px-2.5"
+            aria-label="刷新消息"
+            disabled={refreshing}
+            onClick={reload}
+          >
+            {refreshing ? <Spinner aria-hidden="true" /> : <RefreshCw data-icon="inline-start" />}
+            <span className="hidden sm:inline">刷新消息</span>
+          </Button>
+        </div>
+      </div>
+      <div className={cn('flex w-full flex-col gap-2', selected && 'hidden lg:flex')}>
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+          <ToggleGroup
+            aria-label="会话队列"
+            variant="outline"
+            size="sm"
+            spacing={0}
+            className="w-fit shrink-0 rounded-[10px] bg-[var(--bg-sunken)] p-[3px]"
+            value={[queue]}
+            onValueChange={(values) => {
+              const next = queues.find((item) => item.value === values[0]);
+              if (next) changeFilter({ queue: next.value });
+            }}
+          >
+            {queues.map((item) => (
+              <ToggleGroupItem
+                key={item.value}
+                value={item.value}
+                aria-label={item.aria}
+                className="h-8 min-w-0 gap-1.5 rounded-lg px-3 text-[13.5px]"
+              >
+                <span>{item.label}</span>
+                <span
+                  className="max-w-full truncate text-xs text-[var(--text-3)] tabular-nums"
+                  title={String(conversationPage?.counts[item.value] ?? '')}
+                >
+                  {conversationPage?.counts[item.value] ?? '—'}
+                </span>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+
+          <div className="flex min-w-0 flex-1 flex-wrap items-end justify-end gap-2.5 max-lg:justify-start lg:max-w-[680px]">
+            <Field className="w-[140px] max-sm:w-full">
+              <FieldLabel htmlFor="message-state" className="field-cap">
+                状态
+              </FieldLabel>
+              <NativeSelect
+                id="message-state"
+                aria-label="筛选处理状态"
+                className="w-full"
+                value={state}
+                onChange={(event) => {
+                  const next = states.find((item) => item.value === event.target.value);
+                  if (next) changeFilter({ state: next.value });
+                }}
+              >
+                {states.map((item) => (
+                  <NativeSelectOption key={item.value} value={item.value}>
+                    {item.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field className="w-[170px] max-sm:w-full">
+              <FieldLabel htmlFor="message-store" className="field-cap">
+                授权店铺
+              </FieldLabel>
+              <NativeSelect
+                id="message-store"
+                aria-label="筛选店铺"
+                className="w-full"
+                value={storeId}
+                onChange={(event) => changeFilter({ store: event.target.value })}
+              >
+                <NativeSelectOption value="">全部授权店铺</NativeSelectOption>
+                {storeId && !availableStores.some((store) => store.id === storeId) && (
+                  <NativeSelectOption value={storeId}>当前筛选店铺</NativeSelectOption>
+                )}
+                {availableStores.map((store) => (
+                  <NativeSelectOption key={store.id} value={store.id}>
+                    {store.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <form
+              className="flex min-w-[220px] flex-1 items-end gap-2 max-sm:w-full"
+              onSubmit={(event) => {
+                event.preventDefault();
+                changeFilter({ search: draft.trim() });
+              }}
+            >
+              <Field className="min-w-0 flex-1">
+                <FieldLabel htmlFor="message-search" className="field-cap">
+                  搜索会话
+                </FieldLabel>
+                <Input
+                  id="message-search"
+                  aria-label="平台会话 ID 或订单号"
+                  autoComplete="off"
+                  placeholder="输入完整平台会话 ID 或订单号"
+                  title="标识仅精确匹配"
+                  maxLength={256}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
+              </Field>
+              <Button type="submit" variant="outline" size="icon" aria-label="查找">
+                <Search />
+              </Button>
+            </form>
+          </div>
+        </div>
+
+        {(stores.hasNextPage || !!search) && (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {stores.hasNextPage && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="h-6 px-1.5"
+                disabled={stores.isFetchingNextPage}
+                onClick={() => void stores.fetchNextPage()}
+              >
+                加载更多店铺
+              </Button>
+            )}
+            {search && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="h-6 px-1.5"
+                onClick={() => changeFilter({ search: '' })}
+              >
+                清除搜索
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <ConversationWorkspace
+        selected={!!selected}
+        list={
+          <aside
+            aria-label="会话列表"
+            className={cn('h-full w-full min-w-0 flex-col lg:flex', selected ? 'hidden' : 'flex')}
+          >
+            <div
+              role="region"
+              className="flex min-h-0 flex-1 flex-col overflow-y-auto gap-1 p-2"
+              tabIndex={0}
+              aria-label="会话条目"
+            >
+              {conversations.isPending ? (
+                <Reading text="正在读取会话…" />
+              ) : conversations.isError ? (
+                <div className="p-2">
+                  <ErrorNotice error={conversations.error} />
+                  {conversations.error instanceof ApiError &&
+                    conversations.error.code === 'INVALID_REQUEST' && (
+                      <Button variant="outline" className="mt-3" onClick={reload}>
+                        返回第一页会话
+                      </Button>
+                    )}
+                </div>
+              ) : !conversations.data?.conversations.length ? (
+                <MessageEmpty
+                  title={
+                    storeId || search || queue !== 'all' || state !== 'all'
+                      ? '没有匹配的会话'
+                      : '暂无已导入会话'
+                  }
+                  description={
+                    storeId || search || queue !== 'all' || state !== 'all'
+                      ? '检查标识，或更换队列、状态与店铺筛选。'
+                      : '在店铺管理启用会话同步后，已导入的记录会显示在这里。'
+                  }
+                />
+              ) : (
+                conversations.data.conversations.map((item) => {
+                  const latestSender =
+                    item.latestMessage?.direction === 'outbound'
+                      ? '商家'
+                      : item.latestMessage?.direction === 'inbound'
+                        ? '买家'
+                        : '消息';
+                  const preview = item.latestMessage
+                    ? item.latestMessage.isImage
+                      ? '图片消息'
+                      : item.latestMessage.content.join(' ') +
+                        (item.latestMessage.previewTruncated ? '…' : '')
+                    : null;
+                  const assignment =
+                    item.workflow.assignedMemberId === null
+                      ? '未分配'
+                      : item.workflow.assigneeName === null
+                        ? '负责人已移除'
+                        : `负责人：${item.workflow.assigneeName.trim() || '未填写姓名'}`;
+                  return (
+                    <Button
+                      key={item.id}
+                      id={`conversation-${item.id}`}
+                      variant={selected === item.id ? 'secondary' : 'ghost'}
+                      aria-current={selected === item.id ? 'true' : undefined}
+                      aria-label={`打开会话 ${item.platformThreadId}`}
+                      className="relative isolate h-auto w-full shrink-0 justify-start gap-2.5 rounded-lg px-3 py-3 text-left"
+                      onClick={() => choose(item.id)}
+                    >
+                      <NavigationSelection active={selected === item.id} />
+                      <span
+                        className="flex size-8 shrink-0 self-start items-center justify-center rounded-lg bg-[var(--bg-sunken)] text-[var(--text-2)]"
+                        aria-hidden="true"
+                      >
+                        <MessageCircle className="size-4" />
+                      </span>
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="min-w-0 flex-1 truncate font-medium"
+                            title={buyerTitle(item)}
+                          >
+                            {buyerLabel(item)}
+                          </span>
+                          <time
+                            className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums"
+                            dateTime={item.lastMessageAt ?? undefined}
+                            title={messageDate(item.lastMessageAt)}
+                          >
+                            {item.lastMessageAt
+                              ? listDate.format(new Date(item.lastMessageAt))
+                              : '—'}
+                          </time>
+                        </span>
+                        <span className="line-clamp-2 whitespace-normal break-words text-xs leading-5 font-normal text-muted-foreground [overflow-wrap:anywhere]">
+                          {preview === null ? (
+                            <span className="text-muted-foreground">消息尚未导入</span>
+                          ) : (
+                            <>
+                              <span className="text-muted-foreground">{latestSender}：</span>
+                              {preview}
+                            </>
+                          )}
+                        </span>
+                        <span className="flex flex-wrap items-center gap-1">
+                          <Badge variant="outline">
+                            {
+                              states.find(
+                                (value) =>
+                                  value.value ===
+                                  (item.workflow.lifecycle === 'resolved'
+                                    ? 'resolved'
+                                    : item.workflow.workStatus),
+                              )?.label
+                            }
+                          </Badge>
+                          {item.workflow.assignedMemberId === conversationPage?.viewerMemberId ? (
+                            <Badge variant="secondary">我负责</Badge>
+                          ) : item.workflow.assignedMemberId === null ? (
+                            <span className="text-xs text-muted-foreground">未分配</span>
+                          ) : null}
+                          <span aria-hidden="true" className="text-xs text-muted-foreground">
+                            ·
+                          </span>
+                          <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">
+                            {item.store.name}
+                          </span>
+                        </span>
+                        <span className="sr-only">{assignment}</span>
+                      </div>
+                    </Button>
+                  );
+                })
+              )}
+            </div>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-3 py-2">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="上一页会话"
+                disabled={!listPages.length || conversations.isFetching}
+                onClick={() => setListPages((pages) => pages.slice(0, -1))}
+              >
+                <ChevronLeft />
+              </Button>
+              <span className="text-xs text-muted-foreground">第 {listPages.length + 1} 页</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="下一页会话"
+                disabled={!conversations.data?.nextCursor || conversations.isFetching}
+                onClick={() => setListPages((pages) => [...pages, conversations.data!.nextCursor!])}
+              >
+                <ChevronRight />
+              </Button>
+            </div>
+          </aside>
+        }
+      >
+        <section
+          aria-label="会话内容"
+          className={cn('min-h-0 min-w-0 flex-1 flex-col lg:flex', selected ? 'flex' : 'hidden')}
+        >
+          {!selected ? (
+            <MessageEmpty
+              title="选择一个会话"
+              description="从左侧选择会话，查看平台原文和同步范围。"
+            />
+          ) : conversationError ? (
+            <div className="p-4">
+              <ErrorNotice error={conversationError} />
+              <Button variant="outline" className="mt-3" onClick={() => choose('')}>
+                返回会话列表
+              </Button>
+            </div>
+          ) : (
+            <>
+              {conversation && (
+                <ConversationHeader
+                  key={selected}
+                  companyId={company.id}
+                  viewerMemberId={conversationPage?.viewerMemberId}
+                  onDenied={setControlDenied}
+                  conversation={conversation}
+                  messages={messages}
+                  back={() => choose('')}
+                />
+              )}
+              {!conversation && loading && <Reading text="正在读取会话…" />}
+              {conversation && (
+                <ConversationControlPanel
+                  key={`${company.id}:${selected}`}
+                  userId={userId}
+                  companyId={company.id}
+                  conversationId={selected}
+                  storeId={conversation.store.id}
+                  onDenied={setControlDenied}
+                >
+                  <div className="flex min-h-0 flex-1">
+                    {loading ? (
+                      <Reading text="正在读取消息…" />
+                    ) : (
+                      <MessageTimeline
+                        companyId={company.id}
+                        conversationId={selected}
+                        messages={messages}
+                        pageKey={history.pageKey}
+                      />
+                    )}
+                  </div>
+                </ConversationControlPanel>
+              )}
+            </>
+          )}
+        </section>
+        {conversation && !conversationError && (
+          <ConversationAside
+            key={selected}
+            companyId={company.id}
+            viewerMemberId={conversationPage?.viewerMemberId}
+            onDenied={setControlDenied}
+            conversation={conversation}
+            messages={messages}
+          />
+        )}
+      </ConversationWorkspace>
+      {exportResult && (
+        <Alert>
+          <AlertDescription>
+            {exportResult.error ? <ErrorNotice error={exportResult.error} /> : exportResult.text}
+          </AlertDescription>
+        </Alert>
+      )}
+      {(stores.isError || conversations.isError) && (
+        <Alert>
+          <AlertDescription>
+            读取未完成，已隐藏不可确认的数据。请检查网络并刷新消息。
+          </AlertDescription>
+        </Alert>
+      )}
+      {!availableStores.length && !stores.isPending && !stores.isError && (
+        <div className="mt-auto flex shrink-0 flex-wrap items-center justify-center gap-1.5 border-t border-border px-6 py-3 text-[13px] text-[var(--text-2)]">
+          尚无可访问店铺。
+          <Link to={workspaceRoutes.stores} className="link-accent">
+            前往店铺管理
+          </Link>
+        </div>
+      )}
+    </>
+  );
 }

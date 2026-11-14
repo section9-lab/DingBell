@@ -8,7 +8,7 @@ import {sealModelKey} from '../src/modules/company-model/security.ts';
 import type {ModelRecord} from '../src/modules/company-model/storage.ts';
 const env={STORE_CREDENTIAL_KEYS:JSON.stringify({v1:Buffer.alloc(32,8).toString('base64')}),STORE_CREDENTIAL_ACTIVE_KEY:'v1'};
 const key='synthetic-private-probe-key',baseUrl='https://api.openai.com/v1',model='synthetic-chat';
-async function row():Promise<ModelRecord>{return {companyId:'company',revision:1,provider:'custom',api:'openai-completions',baseUrl,model,execution:null,...await sealModelKey(env,'company',1,baseUrl,model,key)};}
+async function row():Promise<ModelRecord>{return {companyId:'company',revision:1,provider:'custom',api:'openai-completions',authType:'api_key',baseUrl,model,execution:null,...await sealModelKey(env,'company',1,baseUrl,model,key)};}
 const stream=(choice:unknown,done=true)=>new Response(`data: ${JSON.stringify({choices:[choice]})}\n\n${done?'data: [DONE]\n\n':''}`,{headers:{'content-type':'text/event-stream'}});
 const tool=(name='connection_probe')=>({index:0,delta:{tool_calls:[{index:0,id:'probe',type:'function',function:{name,arguments:'{"ok":true}'}}]},finish_reason:'tool_calls'});
 
@@ -27,7 +27,7 @@ test('connection diagnostics retain safe HTTP classifications without exposing b
  const record=await row();
  for(const [status,failureCode] of [[401,'unauthorized'],[403,'forbidden'],[404,'not_found'],[400,'request_rejected'],[422,'request_rejected'],[429,'rate_limited'],[503,'provider_unavailable'],[302,'redirect_refused']] as const){
   let calls=0;
-  const result=await probeCompanyModel(env,record,async(input,init)=>{calls++;assert.equal(String(input),baseUrl+'/chat/completions');assert.equal(init?.redirect,'manual');assert.equal(new Headers(init?.headers).get('authorization'),`Bearer ${key}`);assert.equal(Object.hasOwn(JSON.parse(String(init?.body)),'max_tokens'),false);return new Response(key+' raw-provider-details',{status});},new AbortController().signal,async()=>true);
+  const result=await probeCompanyModel(env,record,async(input,init)=>{calls++;assert.equal(String(input),baseUrl+'/chat/completions');assert.equal(init?.redirect,'manual');assert.equal(new Headers(init?.headers).get('authorization'),`Bearer ${key}`);const body=JSON.parse(String(init?.body));assert.equal(Object.hasOwn(body,'max_tokens'),false);assert.equal(body.tool_choice,'auto');return new Response(key+' raw-provider-details',{status});},new AbortController().signal,async()=>true);
   assert.deepEqual(result,{status:'failed',failureCode,providerStatus:status});assert.equal(calls,1);assert.equal(JSON.stringify(result).includes(key),false);
  }
 });
@@ -35,6 +35,7 @@ test('connection diagnostics retain safe HTTP classifications without exposing b
 test('connection diagnostics distinguish tool support, truncated output and invalid SSE from HTTP permission errors',async()=>{
  const record=await row(),run=(response:Response)=>probeCompanyModel(env,record,async()=>response,new AbortController().signal,async()=>true);
  assert.deepEqual(await run(stream(tool())),{status:'passed',failureCode:null,providerStatus:200});
+ assert.deepEqual(await run(stream({...tool(),finish_reason:'stop'})),{status:'passed',failureCode:null,providerStatus:200});
  assert.equal((await run(stream({index:0,delta:{reasoning_content:'thinking'},finish_reason:'length'}))).failureCode,'output_limit');
  assert.equal((await run(stream({index:0,delta:{content:'Hello'},finish_reason:'stop'}))).failureCode,'tool_call_missing');
  assert.equal((await run(stream(tool(),false))).failureCode,'invalid_response');

@@ -6,8 +6,6 @@ import { storeDTO } from '../stores/http.ts';
 import { syncConfigured } from '../sync/bindings.ts';
 import { canEnableSync, type SyncSourceKind } from '../sync/capability.ts';
 import { companySupportConfigurationView } from '../company-model/runtime.ts';
-import { readTranslationDeploymentConfig } from '../translations/deployment-config.ts';
-import { translationApiKey } from '../translations/company-key.ts';
 
 const path = '/api/companies/:companyId/readiness';
 const sources: readonly SyncSourceKind[] = ['chat', 'products', 'fbs_postings', 'fbo_postings','fbp_postings'];
@@ -27,11 +25,9 @@ const iso = (value: number | null) => value === null ? null : new Date(value).to
 async function deployment(c: Context<ApplicationEnv>) {
   const env = c.env;
   const ai = await companySupportConfigurationView(env, c.req.param('companyId')!);
-  const translationKey = await translationApiKey({ DB: env.DB, NVAPI_KEY: env.NVAPI_KEY }, c.req.param('companyId')!);
   return {
     sync: syncConfigured(env),
     outbound: env.OUTBOUND_ENABLED === 'true',
-    translation: { enabled: env.TRANSLATION_ENABLED === 'true', configured: !!readTranslationDeploymentConfig(env), model: !!translationKey },
     ai: { enabled: ai.enabled, modelConfigured: ai.modelConfigured, pricesConfigured: ai.pricesConfigured },
     aiOutbound: env.AI_OUTBOUND_ENABLED === 'true',
     knowledge: { text: true },

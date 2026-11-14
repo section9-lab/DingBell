@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
-import type {PreviewSql} from '../src/modules/translations/ledger.ts';
+import type {SupportSql} from '../src/modules/ai-runs/ledger.ts';
 import type {AiExecution} from '../src/modules/ai-runs/storage.ts';
 async function fixture(){
  const m=await import('../src/modules/ai-runs/ledger.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.SupportLedger,'function','native Support needs durable per-generation HTTP and closure evidence');
- const db=new DatabaseSync(':memory:'),sql:PreviewSql={exec(query,...values){const rows=db.prepare(query).all(...values as any[]);return {toArray:()=>rows as any[]};}};
+ const db=new DatabaseSync(':memory:'),sql:SupportSql={exec(query,...values){const rows=db.prepare(query).all(...values as any[]);return {toArray:()=>rows as any[]};}};
  return {db,sql,ledger:new m!.SupportLedger(sql),restore:()=>new m!.SupportLedger(sql)};
 }
 function run(){return {id:'run',budgetId:'budget',agent:'Support',instanceId:'ai-support:run',dispatchKey:'run',payload:{schemaVersion:1,run:{scope:{organizationId:'org'}},target:{agent:'Support',instanceId:'ai-support:run',dispatchKey:'run'},modelInput:{untrustedCustomerQuestion:'question'}},modelInput:{untrustedCustomerQuestion:'question'},config:{maxGenerations:2,model:{promptVersion:'support-v1'}},reservedMicros:20,perGenerationMicros:10,createdAt:1,receipt:null,closure:null,generations:[],remainingReservedMicros:20,status:'open'} as unknown as AiExecution;}

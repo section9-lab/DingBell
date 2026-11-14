@@ -20,13 +20,7 @@ const ledgers={
     CASE WHEN count(g.run_id)<>r.generations OR COALESCE(max(g.sequence),0)<>r.generations THEN 1 ELSE 0 END AS invalid
     FROM selected b JOIN ai_execution r ON r.budget_id=b.id AND r.organization_id=b.organization_id
     LEFT JOIN ai_generation g ON g.run_id=r.id GROUP BY r.id`},
-  translation:{budget:'translation_budget_bucket',counts:false,entries:runEntries('reply_preview_run')},
 } as const;
-function runEntries(table:'reply_preview_run'){
-  return `SELECT CASE WHEN r.settlement='held' THEN r.reserved_micros ELSE 0 END AS reserved,
-    COALESCE(r.charged_micros,0) AS spent,1 AS admitted,0 AS embedding,0 AS correlated,0 AS invalid
-    FROM selected b JOIN ${table} r ON r.budget_id=b.id AND r.organization_id=b.organization_id`;
-}
 type AuditRow={at:number;reserved:string;spent:string;admitted:string|null;expectedReserved:string;expectedSpent:string;expectedAdmitted:string|null;embedding:string;correlated:string;invalid:number;commitToken:string|null};
 type MonitoringRow={status:'balanced'|'mismatch'|null;observedAt:number|null;nextDueAt:number;mismatchSince:number|null;consecutiveMismatches:number;lastErrorAt:number|null;lastErrorCode:'AUDIT_UNAVAILABLE'|null;consecutiveFailures:number};
 type SummaryRow={at:number;tracked:number;pending:number;balanced:number;mismatch:number;unavailable:number;alerting:number};

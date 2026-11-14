@@ -13,7 +13,7 @@ for(const value of ['.dev','.dev.vars','dist','test-results','data','backups','.
 const wrangler=JSON.parse((await readFile(resolve(root,'wrangler.jsonc'),'utf8')).replace(/^\s*\/\/.*$/gm,''));
 if((wrangler.r2_buckets??[]).length)failures.push('Default deployment unexpectedly binds optional R2.');
 const example=await readFile(resolve(root,'config/runtime.env.example'),'utf8');
-for(const flag of ['OUTBOUND_ENABLED','TRANSLATION_ENABLED','AI_OUTBOUND_ENABLED']){
+for(const flag of ['OUTBOUND_ENABLED','AI_OUTBOUND_ENABLED']){
  if(!new RegExp(`^${flag}=false$`,'m').test(example)||wrangler.vars?.[flag]!=='false')failures.push(`${flag} must default to false in both configuration examples and Cloudflare bindings.`);
 }
 for(const [name,command] of Object.entries(pkg.scripts??{})){

@@ -1,7 +1,7 @@
--- Runtime bindings are distinct from legacy Flue identities. Never reinterpret an old receipt.
+-- Runtime bindings are distinct from legacy runtime identities. Never reinterpret an old receipt.
 CREATE TABLE runtime_agent_binding (
   instance_id TEXT PRIMARY KEY NOT NULL,
-  kind TEXT NOT NULL CONSTRAINT runtime_agent_binding_kind CHECK(kind IN ('translation','reply-test','support')),
+  kind TEXT NOT NULL CONSTRAINT runtime_agent_binding_kind CHECK(kind IN ('reply-test','support')),
   run_id TEXT NOT NULL,
   uid TEXT NOT NULL,
   definition TEXT NOT NULL CONSTRAINT runtime_agent_binding_definition CHECK(json_valid(definition)),

@@ -29,13 +29,12 @@ async function stop(child: ChildProcess) {
   try { await exited; } finally { clearTimeout(timer); }
 }
 
-export async function startLocalApplication(configured = true, options: { mail?: boolean; empty?: boolean; team?: 'roles' | 'two-owners'; stores?: 'configured' | 'unconfigured'; sync?: boolean; control?: boolean; replies?: boolean; preview?: boolean; knowledge?: boolean; answerTest?:boolean; aiConfiguration?:string; aiReception?:boolean; aiDraft?:boolean } = {}) {
+export async function startLocalApplication(configured = true, options: { mail?: boolean; empty?: boolean; team?: 'roles' | 'two-owners'; stores?: 'configured' | 'unconfigured'; sync?: boolean; control?: boolean; replies?: boolean; knowledge?: boolean; answerTest?:boolean; aiConfiguration?:string; aiReception?:boolean; aiDraft?:boolean } = {}) {
   const statePath = await mkdtemp(join(tmpdir(), 'dingbell-web-identity-'));
   const children = new Set<ChildProcess>();
   const mailbox: MailMessage[] = [];
   const mailboxPath = `/${crypto.randomUUID()}`;
   const storePath = `/${crypto.randomUUID()}`;
-  const previewToken=options.preview?crypto.randomUUID():'';
   const knowledgeToken = options.knowledge ? crypto.randomUUID() : '';
   const aiDraftToken = options.aiDraft ? crypto.randomUUID() : '';
   const answerToken=options.answerTest?crypto.randomUUID():'';
@@ -192,8 +191,6 @@ export async function startLocalApplication(configured = true, options: { mail?:
         ('member-a','company-a','web-member','member',${now}),
         ('member-b','company-b','web-member','member',${now});
     `);
-    if(options.preview)await sql(`INSERT INTO translation_budget_bucket(id,organization_id,starts_at,ends_at,enabled,limit_micros)
-      VALUES ('web-preview-budget','company-a',${now-1000},${now+3600000},1,1000000);`);
     if (options.knowledge) await sql(`CREATE TABLE test_index_call(id INTEGER PRIMARY KEY,kind TEXT NOT NULL);
       CREATE TABLE test_index_gate(visible INTEGER NOT NULL,mode TEXT NOT NULL); INSERT INTO test_index_gate VALUES(1,'normal');
       CREATE TABLE test_index_vector(id TEXT PRIMARY KEY,value TEXT NOT NULL);`);
@@ -220,7 +217,6 @@ export async function startLocalApplication(configured = true, options: { mail?:
         DINGBELL_TEST_SYNC: options.sync ? 'true' : '',
         DINGBELL_TEST_CONTROL: options.control ? 'true' : '',
         DINGBELL_TEST_REPLIES: options.replies ? 'true' : '',
-        DINGBELL_TEST_PREVIEW_TOKEN: previewToken,
         DINGBELL_TEST_KNOWLEDGE_TOKEN: knowledgeToken,
         DINGBELL_TEST_ANSWER_TOKEN: answerToken,
         DINGBELL_TEST_AI_DRAFT_TOKEN: aiDraftToken,
@@ -230,7 +226,7 @@ export async function startLocalApplication(configured = true, options: { mail?:
         DINGBELL_WEB_CONFIG_PATH: workerConfigPath,
         DINGBELL_WEB_BOOTSTRAP_SECRET: options.mail ? installationSecret : '' };
     let startupOutput = '';
-    const diagnostics = () => [authSecret, installationSecret, mailboxURL, storeCheckerURL, storeKeys, storeKey,previewToken,knowledgeToken,answerToken].filter(Boolean)
+    const diagnostics = () => [authSecret, installationSecret, mailboxURL, storeCheckerURL, storeKeys, storeKey,knowledgeToken,answerToken].filter(Boolean)
       .reduce((output, secret) => output.replaceAll(secret, '[synthetic credential]'), startupOutput);
     const capture = (child: ChildProcess) => {
       children.add(child);
@@ -262,11 +258,6 @@ export async function startLocalApplication(configured = true, options: { mail?:
       await delay(150);
     }
     assert.ok(ready, `local application starts before browser interaction${ready ? '' : `: ${diagnostics()}`}`);
-    if(options.preview){
-      const response=await fetch(`${baseURL}/api/__test/translation`,{headers:{authorization:`Bearer ${previewToken}`},signal:AbortSignal.timeout(3_000)});
-      assert.equal(response.status,200,'synthetic translation DI is active before browser interaction');
-      assert.deepEqual(await response.json(),{dispatches:0,reads:0,requests:[]});
-    }
     return {
       baseURL, password, close, mailbox, installationSecret, storeRequests, replyRequests, releaseReplies, diagnostics,
       async answerTest(action?:{seedStoreId?:string;mode?:'ready'|'pending'|'unknown';append?:boolean}){
@@ -296,17 +287,6 @@ export async function startLocalApplication(configured = true, options: { mail?:
         assert.ok(options.replies);assert.match(storeId,/^[0-9a-f-]{36}$/i);
         await sql(`INSERT INTO store_coordinator(store_id,organization_id,blocked_until) VALUES ('${storeId}','company-a',${Date.now()+120_000}) ON CONFLICT(store_id) DO UPDATE SET blocked_until=excluded.blocked_until;`);
       },
-      async previewState(){
-        assert.ok(options.preview);const response=await fetch(`${baseURL}/api/__test/translation`,{headers:{authorization:`Bearer ${previewToken}`}});assert.equal(response.status,200);
-        return await response.json() as {dispatches:number;reads:number;requests:{requestId:string;source:string;sourceRevision:number;memberId:string;conversationId:string}[]};
-      },
-      async setPreviewBehavior(mode:'ready'|'pending'|'no-usage'|'failed',text?:string){
-        assert.ok(options.preview);const response=await fetch(`${baseURL}/api/__test/translation`,{method:'POST',headers:{authorization:`Bearer ${previewToken}`,'content-type':'application/json'},body:JSON.stringify({mode,text})});assert.equal(response.status,200);
-      },
-      async releasePreviews(){
-        assert.ok(options.preview);const response=await fetch(`${baseURL}/api/__test/translation`,{method:'POST',headers:{authorization:`Bearer ${previewToken}`,'content-type':'application/json'},body:'{"release":true}'});assert.equal(response.status,200);
-      },
-      async setPreviewBudget(enabled:boolean){assert.ok(options.preview);await sql(`UPDATE translation_budget_bucket SET enabled=${enabled?1:0},revision=revision+1 WHERE id='web-preview-budget'`);},
       async aiDraft(body:{conversationId?:string;withdraw?:string}) {
         assert.ok(options.aiDraft);const response=await fetch(`${baseURL}/api/__test/ai-draft`,{method:'POST',headers:{authorization:`Bearer ${aiDraftToken}`,'content-type':'application/json'},body:JSON.stringify(body)});assert.equal(response.status,200,await response.clone().text());return response.json() as Promise<{runId:string;documentId:string;body:string;question:string}>;
       },

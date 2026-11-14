@@ -41,3 +41,22 @@ export async function openModelKey(env:CompanyModelBindings,companyId:string,rev
   const value=await crypto.subtle.decrypt({name:'AES-GCM',iv:decode(envelope.nonce),additionalData:aad(companyId,revision,baseUrl,model)},key,decode(envelope.ciphertext));
   const secret=new TextDecoder('utf-8',{fatal:true,ignoreBOM:false}).decode(value);if(!/^[\x21-\x7e]{1,4096}$/.test(secret))throw new Error('MODEL_SECRET_UNAVAILABLE');return secret;
 }
+// OAuth credentials and short-lived device codes are not model keys, so they use a
+// separate domain-separated AAD. The same deployment key ring still owns both.
+function secretAad(companyId:string,provider:string,purpose:string,version:number){
+  return new TextEncoder().encode(JSON.stringify(['dingbell.company-model-secret',1,companyId,provider,purpose,version]));
+}
+export async function sealModelSecret(env:CompanyModelBindings,companyId:string,provider:string,purpose:string,version:number,value:string):Promise<ModelSecret>{
+  const config=credentialConfig(env);if(!config)throw new Error('MODEL_ENCRYPTION_UNAVAILABLE');
+  if(value.length<1||value.length>16384)throw new Error('MODEL_SECRET_INVALID');
+  const key=await crypto.subtle.importKey('raw',config.keys.get(config.activeKeyVersion)!,'AES-GCM',false,['encrypt']),nonce=crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:secretAad(companyId,provider,purpose,version)},key,new TextEncoder().encode(value));
+  return {keyVersion:config.activeKeyVersion,nonce:encode(nonce),ciphertext:encode(new Uint8Array(ciphertext))};
+}
+export async function openModelSecret(env:CompanyModelBindings,companyId:string,provider:string,purpose:string,version:number,envelope:ModelSecret):Promise<string>{
+  const config=credentialConfig(env),bytes=config?.keys.get(envelope.keyVersion);if(!bytes)throw new Error('MODEL_ENCRYPTION_UNAVAILABLE');
+  const key=await crypto.subtle.importKey('raw',bytes,'AES-GCM',false,['decrypt']);
+  const value=await crypto.subtle.decrypt({name:'AES-GCM',iv:decode(envelope.nonce),additionalData:secretAad(companyId,provider,purpose,version)},key,decode(envelope.ciphertext));
+  const secret=new TextDecoder('utf-8',{fatal:true,ignoreBOM:false}).decode(value);
+  if(secret.length<1||secret.length>16384)throw new Error('MODEL_SECRET_UNAVAILABLE');return secret;
+}

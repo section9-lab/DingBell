@@ -4,14 +4,18 @@
 
 **2026-10-29 架构更新：** 完整部署目标已扩展为 Cloudflare、Vercel、自建服务器，采用共用业务核心、Pi Durable 与平台适配层。以[ADR-11](04-research-and-decisions.md#adr-11-共用核心与三个完整部署目标2026-10-29)确定新方向与迁移验收。2026-10-30 的实际运行时与业务适配见[7.74](#774-pi-durable-与三种宿主2026-10-30)及[部署证据](../probes/deployment/README.md)。下文 Flue 章节保留历史 Cloudflare 合同和升级依据；原回执、预算和发送保护继续保留。
 
+**2026-11-14 Flue 清理：** Flue 运行时、`@flue/*` 依赖、Flue 专用 Agent/探针/测试夹具与构建分支已移除。当前 Cloudflare、Vercel、Node 均只使用 Pi Durable；下文所有 Flue 章节仅作历史合同与升级依据，不再代表可执行代码。Durable Object 迁移 v3–v5 的历史类名仍保留在迁移历史中；v7 将其重命名为中性的 `Legacy*Archive` 类，并保留既有命名空间与数据。
+
+**2026-11-14 翻译预览清理：** 人工回复的独立翻译预览（`/reply-previews`、`reply_preview_run`/`reply_preview_output`、翻译预算/permit、翻译 UI）已删除；人工回复直接发送原文。AI 客服按回复策略的 `language` 生成目标语言回复。下文相关翻译章节仅作历史设计记录。
+
 **2026-11-04 首轮生产加固：** 当前知识路径已统一为 SQLite FTS5 文本检索；Node 显式并发门控、最终 SQL 授权、无隐式无限预算/免费价格及退役数据归档合同见[生产加固](16-production-hardening.md)。下文向量/旧回复测试台章节属于历史设计，不表示当前仍有对应绑定；已应用迁移与原始审批/财务回执不改写。
 
-本文件给出拟实施合同。Flue、Cloudflare 和 Ozon 的能力边界见[调研与决策](04-research-and-decisions.md)；阶段与验收见[实施计划](01-implementation-plan.md)和[验收清单](03-acceptance.md)。
+本文件给出拟实施合同。Cloudflare 和 Ozon 的能力边界见[调研与决策](04-research-and-decisions.md)；阶段与验收见[实施计划](01-implementation-plan.md)和[验收清单](03-acceptance.md)。
 
 ## 1. 架构原则与技术基线
 
 1. 一个 TypeScript 工程、一个主要应用 Worker，按业务模块组织；模块不是微服务。
-2. 复用 Flue 的模型、工具与持久执行；复用 Hono 路由，不额外增加另一套后端框架。
+2. 复用 Pi Durable 的模型、工具与持久执行；复用 Hono 路由，不额外增加另一套后端框架。
 3. 用成熟库处理身份、表单、类型、CSV 等通用能力；自己实现公司隔离、客服状态和发送正确性。
 4. 业务规则保存为有结构、经校验的配置；权限、收件人校验、幂等和预算检查由确定性代码执行。
 5. 公共 HTTP/API、数据库、对象存储及第三方平台之间没有全局事务；跨边界通过持久记录、幂等与核对恢复。
@@ -23,18 +27,18 @@
 | 页面数据 | TanStack Query、TanStack Table、React Hook Form | 不再同时增加多个全局状态管理库 |
 | 路由与 API | Hono、Hono RPC、Valibot | 共用输入合同；所有运行时边界仍做校验 |
 | 身份与组织 | Better Auth、Organization 插件、D1 支持 | 公司数据和店铺权限仍由业务层限制 |
-| AI | Flue | 不叠加 LangChain/Mastra 等第二套执行框架 |
+| AI | Pi Durable | 不叠加 LangChain/Mastra 等第二套执行框架 |
 | 业务数据库 | D1、Drizzle | 主库保存业务记录；认证表由 Better Auth 官方生成方案管理 |
 | 搜索 | 独立派生 D1 搜索库的 FTS5 | 可重建；不与主库备份混在一起 |
 | 会话协调 | 自有 ConversationController Durable Object | 只管客服控制状态、命令去重、发送意图和结果 |
-| AI 持久化 | Flue 生成的 Durable Object | 保存 Flue 的会话及执行状态，不手写替代品 |
+| AI 持久化 | Pi Durable Agent Durable Object | 保存 Pi 的会话及执行状态，不手写替代品 |
 | 店铺协调 | 自有 StoreCoordinator Durable Object | 同步游标、并发租约与共享 API 限流；不保存全量订单正文 |
-| 异步任务 | Cloudflare Queues、Cron Triggers | 同步、导入、通知、导出；AI 执行由 Flue 自己负责 |
+| 异步任务 | Cloudflare Queues、Cron Triggers | 同步、导入、通知、导出；AI 执行由 Pi 自己负责 |
 | 文件 | 私有 R2 | 附件、知识原文件、导出和备份 |
 | 知识检索 | Vectorize 为基线；AI Search 按 ADR-08 优先验证替代 | 只实施一套；元数据、发布事实与权限仍在 D1 |
 | 邮件 | Resend 为首个候选，封装小型邮件接口 | 邮件服务须配置；缺失时明确禁用邀请邮件/找回邮件 |
 | CSV | json2csv 的 WHATWG 实现 | CSV 转义及流式格式化；公式防护和权限由应用实现 |
-| 监控 | Flue 事件、Workers 日志与指标 | Sentry 等外部平台可选，不作为自部署启动条件 |
+| 监控 | Pi 事件、Workers 日志与指标 | Sentry 等外部平台可选，不作为自部署启动条件 |
 | 商业订阅 | Better Auth Stripe 插件为候选 | 模块可关闭；实际支付供应商待经营条件确认 |
 
 同步运行规则见 [Ozon Push 同步](15-ozon-push-sync.md)：启动时一次性引导所有已验证店铺的聊天/商品/订单读取，之后 Push 是增量同步唯一入口；平台通知只标识任务，经持久接收与协调器按对象核对事实。停止周期发现，不以暂停或失败偷偷恢复扫描。定时任务不再处理该店铺的 Ozon 同步；内部 AI/控制/财务修复独立保留，人工回补必须显式触发；浏览器 SSE 只更新本地读模型。
@@ -70,7 +74,7 @@ flowchart LR
 
 图中的模块默认属于同一个应用部署。自有 DO 与 Flue DO 的职责不同：前者管理客服业务的授权状态及外发，后者运行 AI。额外的协调对象用于补齐 Flue 未提供的业务功能，不重新实现 Agent 调度。
 
-Flue 提供公开的 extend({ base, wrap }) 扩展，可使用底层 Agents SDK 的定时、队列与自定义方法。单 Agent 的这些需求优先复用；是否合并业务控制对象须验证接管顺序、删除与备份边界，当前仍以独立业务控制为基线。不能覆盖 Flue 的 fetch、onRequest、alarm、onFiberRecovered 等保留生命周期。[文档与源码核对](05-flue-documentation-audit.md)
+Flue 提供公开的 extend({ base, wrap }) 扩展，可使用底层 Agents SDK 的定时、队列与自定义方法。单 Agent 的这些需求优先复用；是否合并业务控制对象须验证接管顺序、删除与备份边界，当前仍以独立业务控制为基线。不能覆盖 Flue 的 fetch、onRequest、alarm、onFiberRecovered 等保留生命周期。[文档与源码核对](archive/05-flue-documentation-audit.md)
 
 StoreCoordinator 返回限流许可，不替控制对象排队后自行发送。真正的平台请求仍由 ConversationController 的统一出口发起，确保等待限流后仍会重新检查人工接管状态。
 
@@ -286,7 +290,7 @@ Better Auth 提供组织、成员、邀请与角色基础能力，本表中店�
 | 接待方式 | ai、human、paused | 谁可以产生下一次自动回复 |
 | 工作状态 | needs_reply、waiting_customer、waiting_internal；resolved 时为 null | 当前等待谁，独立于负责人 |
 
-assigned_member_id 允许为空，表示未分配。AI 运行中是执行状态而非生命周期。页面上“待我”“未分配”“全部”是这些字段与权限组合出的视图。
+assigned_member_id 允许为空，表示未分配。AI 运行中是执行状态而非生命周期。页面上“我负责”“AI负责”“全部”是这些字段与权限组合出的视图；AI 负责队列对应 `reception='ai'`，仍属于未分配负责人。
 
 业务阶段 presale/order/aftersale/unknown 用于分流和分析；AI 判断可被人工修正，不能据此授权访问未关联订单。
 
@@ -1638,7 +1642,7 @@ AI 与人工复用原解密、店铺级请求预算、排队、单次 attempt、
 
 预算汇总和逐笔合计在同一 SQL 语句中读取，避免并发结算时读取两个不同状态造成假差异。整数 `SUM` 后转十进制字符串再返回，差额使用 `BigInt`，保留超过 JS 安全整数范围的精确结果；SQLite 64 位整数溢出直接报告不可读取，不使用浮点近似或零值兜底。检测生成计数/序号缺口及遗留预算事务标记；报告 `balanced` 仅说明这些账面合计相等，不证明执行快照、供应商账单或正文事实有效。`canRelease` 与 `supplierCostsVerified` 始终为 false。
 
-新增 `GET /api/companies/:companyId/budget-audits/:kind/:budgetId`，kind 只允许 `ai`、`translation`、`reply-test`。仅当前已验证的公司所有者/管理员可读，要求规范编码的 `X-DingBell-Member-Id`，首次读取、财务语句及返回前都绑定当前会话与成员；撤权后的迟到读取不返回旧数据。无参数注入、写入或退款入口，不返回对话、输入、配置、价格或供应商密钥，不公开部署级检索汇总。差异不会自动改余额、暂停预算、改变新运行准入或授予旧执行新的权限。
+新增 `GET /api/companies/:companyId/budget-audits/:kind/:budgetId`，kind 只允许 `ai`。仅当前已验证的公司所有者/管理员可读，要求规范编码的 `X-DingBell-Member-Id`，首次读取、财务语句及返回前都绑定当前会话与成员；撤权后的迟到读取不返回旧数据。无参数注入、写入或退款入口，不返回对话、输入、配置、价格或供应商密钥，不公开部署级检索汇总。差异不会自动改余额、暂停预算、改变新运行准入或授予旧执行新的权限。
 
 本批不增加依赖、迁移、UI 或云资源。待实施范围仍包括核对展示/告警、持久审计结果、供应商逐请求用量证据与不可变结算/释放、无人读取的翻译/测试运行修复，以及生产规模下的查询性能。依据：[D1 绑定/事务文档](https://developers.cloudflare.com/d1/worker-api/d1-database/)、[SQLite 聚合整数与溢出合同](https://www.sqlite.org/lang_aggfunc.html)。当前[官方 BGE-M3 页面](https://developers.cloudflare.com/workers-ai/models/bge-m3/)未给本项目逐请求实际费用的关联证据；不因取得向量或标价就推定原请求实际费用。
 
@@ -1762,7 +1766,7 @@ SQL 在 limit 前应用类别、动作和时间条件，仍受冻结控制 seque
 
 业务阶段和策略版本只从已持久 `ai_execution.payload.run.admission` 读取；没有关联运行的人工事件不会被猜测归类。发送结果只来自持久 `send_intent.state`。负责人、接待方式和会话状态明确筛选当前 `conversation_control` 状态，不声称它们是事件发生时的状态；事件发生后的状态仍由每行已校验 receipt 的 `appliedState` 表达。
 
-消息中心增加“公司日志”对话框，提供授权店铺、类别、阶段、本人/未分配负责人、接待方式、会话状态、发送结果及策略筛选，并可回到对应会话。响应继续只返回内容最小化事件、店铺名和平台会话 ID，不复制正文或供应商数据。R14 尚缺平台原始消息、AI 草稿/译文内容入口和完整外发尝试历史的统一时间线。
+公司级最小化日志现仅由侧栏“会话日志”页面 `/workspace/activity` 提供；消息中心头部的“公司日志”弹窗已移除，避免与独立页面重复。响应继续只返回内容最小化事件、店铺名和平台会话 ID，不复制正文或供应商数据。R14 尚缺平台原始消息、AI 草稿/译文内容入口和完整外发尝试历史的统一时间线。
 
 ### 7.45 R14-4：冻结的完整业务时间线与 AI 运行结果
 
@@ -1938,11 +1942,11 @@ R14 的公司级最小化日志此前只通过消息中心“公司日志”弹�
 
 ### 7.63 商品图片只读同步与安全展示
 
-Ozon `/v3/product/info/list` 的 `primary_image`、`images` 和 `color_image` 进入商品详情白名单。服务端最多保留 20 个去重 URL，只接受无用户信息、密码、端口和 fragment 的 HTTPS `ozone.ru` 子域地址；任意其他主机、HTTP、超长 URL、非数组或超过数量上限均使整批响应失败，不将未知 URL 传给浏览器。`images360` 暂不导入。
+Ozon `/v3/product/info/list` 的 `primary_image`、`images` 和 `color_image` 进入商品详情白名单。服务端最多保留 20 个去重 URL，只接受无用户信息、密码、端口和 fragment 的 HTTPS `ozone.ru`、`ozonstatic.cn`、`ozonstatic.ru` 子域地址；任意其他主机、HTTP、超长 URL、非数组或超过数量上限均使整批响应失败，不将未知 URL 传给浏览器。`images360` 暂不导入。
 
 当前详情事实增加 `primaryImage/images`，无需迁移；旧事实缺字段时返回空图片集。商品列表显示主图缩略图，详情显示有界图库；加载采用 lazy/async 和 `referrerPolicy=no-referrer`，失败时显示本地图标占位，不自动代理、缓存或把图片写入 R2/D1 二进制。图片仍由 Ozon CDN 提供，不能证明永久可用。
 
-授权本地店铺重新执行商品只读同步后，380 项详情全部完成且首屏 50/50 有主图；随机首图 CDN 返回 `200 image/jpeg`。该刷新不调用消息发送、AI 或订单写接口。
+授权本地店铺重新执行商品只读同步后，380 项详情全部完成且首屏 50/50 有主图；随机首图 CDN 返回 `200 image/jpeg`。2026-11-14 发现真实响应主图 CDN 为 `ir-20.ozonstatic.cn`，旧白名单只允许 `ozone.ru`，导致详情同步以 `invalid_response` 停用；白名单已扩展到 `ozonstatic.cn`/`ozonstatic.ru`，同一店铺 809 项详情随后全部完成，商品、订单和会话上下文的图片共用该判断。该刷新不调用消息发送、AI 或订单写接口。
 
 ### 7.64 消息中心右侧商品预览
 
@@ -1974,7 +1978,7 @@ Ozon `/v3/product/info/list` 的 `primary_image`、`images` 和 `color_image` �
 
 默认会话列表不再把平台会话 ID 当标题。单项仅展示首行标识、最近时间、最新消息发送方与两行预览、处理状态，以及必要的“我负责”或“未分配”提示；其他负责人名称保留为非视觉辅助信息，并在打开会话后的控制区管理。首行标识按 11.3B 改为买家标识（Ozon 不返回买家姓名，显示“买家 …末四位”），店铺名随后移到状态行，与处理状态、分配提示同列。状态文案为待商家回复、待用户回复、待内部处理、已解决，对应关系与枚举不变。选中后的标题统一为“买家咨询”，来源行只显示店铺和平台。
 
-消息气泡保留发送方、原文和平台时间；导入时间及历史/增量来源移入时间 tooltip，平台消息 ID 与发送者 ID 不再进入默认气泡。右侧默认只展示商品/订单和店铺来源；平台会话 ID、原始类型、导入时间及同步明细折叠在“技术与同步信息”中。异常、暂停或断连仍在默认层级显式提示，不因降噪隐藏风险。
+消息气泡保留发送方、原文和平台时间；导入时间及历史/增量来源移入时间 tooltip，平台消息 ID 与发送者 ID 不再进入默认气泡。右侧只展示商品与订单摘要；消息中心已移除“会话来源”和“技术与同步信息”折叠区，平台会话 ID、原始类型、导入时间及同步明细不再进入会话侧栏。同步异常、暂停或断连改由店铺/同步设置页面查看。
 
 ### 7.70 订单商品关联诊断
 
@@ -2007,7 +2011,7 @@ Ozon 会话发现和逐会话消息回填是两个持久阶段：发现列表会
 
 ### 7.74 Pi Durable 与三种宿主（2026-10-30）
 
-默认生产入口已切换到 Pi Durable。`packages/agent-runtime` 固定 Pi AI / Pi Durable / Chord 1.4.0，管理模型、原始 submission 与受控工具；业务层的运行定义、权限、预算、接管、回执和单次尝试发送继续复用。业务工具使用已有 Valibot 校验，发送前权限不会由模型选择。Flue 仅供旧路径开发回归，便携产物有依赖图检查，禁止夹带旧引擎或多份 Pi。
+默认生产入口已切换到 Pi Durable。`packages/agent-runtime` 固定 Pi AI / Pi Durable / Chord 1.5.2，管理模型、原始 submission 与受控工具；业务层的运行定义、权限、预算、接管、回执和单次尝试发送继续复用。业务工具使用已有 Valibot 校验，发送前权限不会由模型选择。Flue 仅供旧路径开发回归，便携产物有依赖图检查，禁止夹带旧引擎或多份 Pi。
 
 Cloudflare 使用官方 PiHarness/Lifecycle 和 native DO SQL，业务数据保留 D1。新增迁移 0053 保存不可变运行绑定；DO v6 新增 Pi 类，v1–v5 不删除。旧 Flue 类成为保留数据的归档，残留 alarm 只清除唤醒，不恢复旧执行。升级脚本要求先收尾旧运行，无法读出完整零计数证明则不迁移、不上传。旧检查点不转换为新回执。
 

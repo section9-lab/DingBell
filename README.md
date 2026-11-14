@@ -17,7 +17,7 @@ Deployment buttons remain withheld while the final cloud installation and first-
 
 ## What is shared
 
-Authentication, companies and membership, encrypted store credentials, imported conversations/products/orders, conversation ownership, frozen execution inputs, budget admission and settlement, translation, answer tools and the sender use the same business rules across adapters. The sender preserves the original intent and allows one provider attempt; unknown outcomes are not resent automatically. Historical execution receipts are never replaced with newly created runs.
+Authentication, companies and membership, encrypted store credentials, imported conversations/products/orders, conversation ownership, frozen execution inputs, budget admission and settlement, answer tools and the sender use the same business rules across adapters. The sender preserves the original intent and allows one provider attempt; unknown outcomes are not resent automatically. Historical execution receipts are never replaced with newly created runs.
 
 Knowledge retrieval uses the same SQLite FTS5 trigram index on all three targets, with live publication, company, language and store/product checks. It is keyword/substring retrieval, not semantic search. Two-character terms use a scoped substring fallback; no arbitrary first-500-chunk scan hides later publications. Large asynchronous exports require the separately configured optional object-store adapter. The default synchronous CSV path remains bounded to 5,000 rows and 8 MiB, with a 4 MiB synchronous response cap on Vercel.
 
@@ -47,7 +47,7 @@ Vercel uses the checked-in [vercel.json](vercel.json) and `npm run build:vercel`
 
 First-owner setup runs at `/setup`, requires the installation credential and configured verification email, and resumes the original claim after refresh. Remove `BOOTSTRAP_SECRET` after completing installation. Public registration and raw Agent endpoints stay closed.
 
-Before upgrading an existing Flue installation, pause new execution and reconcile/drain legacy runs. Durable Object migrations v1–v5 and their stored data are preserved; v6 adds Pi storage. Legacy checkpoint formats and in-flight runs are not translated into Pi runs. See [upgrade and rollback](docs/10-upgrade-and-rollback.md).
+Before upgrading an installation that still uses the legacy cloud runtime, pause new execution and reconcile/drain legacy runs. Durable Object migrations v1–v5 and their stored data are preserved; v6 adds Pi storage, and v7 renames the historical v3–v5 archives to neutral `Legacy*Archive` classes without deleting state. Legacy checkpoint formats and in-flight runs are not translated into Pi runs. See [upgrade and rollback](docs/10-upgrade-and-rollback.md).
 
 ## Verify
 
@@ -61,7 +61,7 @@ npm run check:release
 
 `npm run check` runs these checks from installed root dependencies and installs the isolated runtime toolchains. `npm run test:portable` verifies Pi tool termination, native Node business contracts, actual workerd Pi execution, the standalone compiled HTTP artifact and durable object transaction behavior. `npm run test:web:portable` runs current-model configuration, text-publication, same-origin message-image and Push/SSE Chromium regressions; `npm run test:web:cloudflare-smoke` exercises file import against the compiled Pi Worker; install its browser once with `npx playwright install chromium`. `npm run test:web` additionally includes historical UI scenarios that still require migration to current contracts; it is not a portable release-pass claim. The repository has no separate Lint command; source-governance checks run in the test suite.
 
-Cloud probes require explicit `--isolated-cloud`, create uniquely named synthetic-only resources and clean them up. Local logs, state and test credentials are ignored. Instructions and sanitized evidence are in [probes/deployment](probes/deployment/README.md), [Pi portability](probes/pi-portability/RESULTS.md), and [Vercel native storage](probes/vercel-native/README.md).
+Cloud probes require explicit `--isolated-cloud`, create uniquely named synthetic-only resources and clean them up. Local logs, state and test credentials are ignored. Instructions and sanitized evidence are in [probes/deployment](probes/deployment/README.md) and [Vercel native storage](probes/vercel-native/README.md).
 
 See [production hardening and remaining boundaries](docs/16-production-hardening.md) for Node guard semantics, financial safety and historical-data recovery limits. The [repository package and runtime boundaries](docs/18-monorepo.md) explain the independently locked targets and their dependency checks.
 

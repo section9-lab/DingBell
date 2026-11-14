@@ -3,12 +3,12 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@vercel/sandbox": "3.9.1",
+    "@earendil-works/chord": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-durable": "1.5.2",
     "@vercel/functions": "3.10.4",
-    "durable-harness": "0.0.1",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-durable": "1.4.0",
-    "@earendil-works/chord": "1.4.0"
+    "@vercel/sandbox": "3.9.1",
+    "durable-harness": "0.0.2"
   },
   "devDependencies": {
     "@types/node": "24.19.1",

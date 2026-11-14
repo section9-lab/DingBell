@@ -2,7 +2,7 @@
 
 版本：0.2，评审稿。编制日期：2026-10-08。
 
-**2026-10-30 当前实现：** 三端已共用业务核心与 Pi Durable，Cloudflare 使用官方 PiHarness，Vercel 使用官方 durable-harness/World 与自有 Sandbox Drive，Node 使用持久卷 SQLite。身份、公司隔离、预算、业务工具和单次尝试发送器已接入；默认产物不包含 Flue。新 Cloudflare 安装资源与 Vercel 的业务持久化、原生队列唤醒、升级保留会话/设置已有真云证据，见[部署验证](../probes/deployment/README.md)。
+**2026-10-30 当前实现：** 三端已共用业务核心与 Pi Durable，Cloudflare 使用官方 PiHarness，Vercel 使用官方 durable-harness/World 与自有 Sandbox Drive，Node 使用持久卷 SQLite。身份、公司隔离、预算、业务工具和单次尝试发送器已接入；Flue 运行时、`@flue/*` 依赖及其开发探针已于 2026-11-14 移除，默认与生产产物均只包含 Pi。新 Cloudflare 安装资源与 Vercel 的业务持久化、原生队列唤醒、升级保留会话/设置已有真云证据，见[部署验证](../probes/deployment/README.md)。
 
 部署向导和授权收件人的首次 owner 邮件验证尚未完成，README 部署按钮继续暂缓。Node/Vercel 默认配置没有 Cloudflare Workers AI/Vectorize 知识索引，不能据此宣称检索能力完全一致。旧 Flue 运行必须先收尾再升级，检查点不直接转换。原有产品范围、真实店铺与灾备验收仍按各自清单记录。最终回归与实现记录见[实施进度第 129 节](06-implementation-progress.md#129-pi-durable-三端业务适配与部署复验2026-10-30)。以下为历史实施记录，不代表本次部署验证已放行所有产品能力。
 
@@ -60,7 +60,7 @@
 | [架构设计](02-architecture.md) | 模块、数据、接口、状态、任务和部署如何配合 | 数据归属、消息发送、人工接管、知识与策略版本 |
 | [验收清单](03-acceptance.md) | 用什么证据判断功能完成和可以上线 | P0 用例、故障注入、真实平台验收、发布门槛 |
 | [调研与决策](04-research-and-decisions.md) | 为什么选这些基础设施，哪些结论已核实 | Flue 复用边界、Ozon 待验证项、依赖与来源 |
-| [Flue 文档核对](05-flue-documentation-audit.md) | 96 篇文档分别说明什么，当前源码与旧示例哪里不同 | 原生幂等、Cloudflare 配置、执行恢复、逐篇阅读记录 |
+| [历史 Flue 文档核对（归档）](archive/05-flue-documentation-audit.md) | 96 篇文档分别说明什么，当前源码与旧示例哪里不同 | 原生幂等、Cloudflare 配置、执行恢复、逐篇阅读记录 |
 | [实施进度](06-implementation-progress.md) | 已完成什么、通过了哪些检查、还缺哪些证据 | 阶段 1 本地验证、实际版本、云端及真实店铺待办 |
 | [平台能力核对](07-platform-capability-review.md) | Ozon、AI Search 和模型地域的官方证据与缺口 | 分能力矩阵、检索六项门槛、真实实验步骤 |
 | [设计基线与差异](08-design-baseline.md) | 当前导航、页面状态、关键交互及云端抽查差异 | V4 消息中心、日志过滤与导出、旧弹窗背景 |

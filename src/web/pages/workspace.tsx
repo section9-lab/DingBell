@@ -1,28 +1,27 @@
-import type { ComponentProps, CSSProperties, ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
-  ArrowRight,
+  ArrowUp,
+  Bell,
   BookOpen,
   Building2,
   Calculator,
   Check,
-  ChevronsUpDown,
   ChevronDown,
-  CircleHelp,
-  Clock3,
   History,
   Inbox,
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Menu,
+  Monitor,
   PackageSearch,
   Plus,
   Search,
-  ShoppingBag,
   Settings,
+  ShoppingBag,
   SlidersHorizontal,
-  Sparkles,
   Store,
   Users,
 } from 'lucide-react';
@@ -42,40 +41,24 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { Separator } from '../components/ui/separator';
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-  SidebarTrigger,
-  useSidebar,
-} from '../components/ui/sidebar';
 import {
   AuthFrame,
   ErrorNotice,
   roleLabel,
 } from '../components/identity-shared';
-import { DingBellLogo } from '../components/dingbell-logo';
-import { useCompanySettings } from '../components/company-settings-provider';
 import { WorkspaceExitProvider, useWorkspaceExit } from '../components/workspace-exit';
 import type { Company, Identity } from '../lib/api';
 import { WorkspaceHome } from '../components/workspace-home';
+import { UserAvatar } from '../components/user-avatar';
+import { defaultAvatarSeed } from '../lib/avatar';
 import { workspaceRoutes, type WorkspaceSection } from '../lib/routes';
-import { NavigationSelection } from '../components/motion';
-import {useCompanyRealtime} from '../hooks/use-company-realtime';
+import { useCompanyRealtime } from '../hooks/use-company-realtime';
 
 type Props = {
   identity: Identity;
@@ -84,25 +67,11 @@ type Props = {
   notice?: unknown;
 };
 
-function accountInitials(name: string | undefined, email: string | undefined) {
-  const source = name?.trim() || email?.split('@')[0]?.trim() || '?';
-  return Array.from(source).slice(0, 2).join('').toLocaleUpperCase();
-}
-
-function NavigationLink(props: ComponentProps<typeof Link>) {
-  const { setOpenMobile } = useSidebar();
-  return <Link {...props} onClick={event => {
-    props.onClick?.(event);
-    if (!event.defaultPrevented) setOpenMobile(false);
-  }} />;
-}
-
 function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate();
-  const { setOpenMobile } = useSidebar();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} className="top-[18%] max-w-md translate-y-0 gap-2 p-3">
+      <DialogContent showCloseButton={false} className="top-[16%] max-w-lg translate-y-0 gap-0 overflow-hidden rounded-[14px] p-0">
         <DialogTitle className="sr-only">搜索页面</DialogTitle>
         <Autocomplete.Root
           items={paletteItems}
@@ -119,19 +88,19 @@ function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (
             );
           }}
         >
-          <div className="flex items-center gap-2 border-b pb-2">
+          <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
             <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <Autocomplete.Input
               autoFocus
-              placeholder="搜索页面…"
+              placeholder="搜索页面或功能…"
               aria-label="搜索页面"
-              className="h-7 w-full min-w-0 border-none bg-transparent px-0 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
+              className="h-7 w-full min-w-0 border-none bg-transparent px-0 text-sm outline-none placeholder:text-[var(--text-3)] focus-visible:ring-0"
             />
-            <kbd className="rounded border bg-muted px-1.5 py-0.5 font-sans text-[10px] text-muted-foreground">Esc</kbd>
+            <kbd className="rounded border border-border bg-[var(--bg-sunken)] px-1.5 py-0.5 font-sans text-[10px] text-muted-foreground">Esc</kbd>
           </div>
           <Autocomplete.List
             aria-label="搜索结果"
-            className="max-h-72 overflow-y-auto overscroll-contain"
+            className="max-h-80 overflow-y-auto overscroll-contain p-1.5"
           >
             {(item) => (
               <Autocomplete.Item
@@ -139,19 +108,20 @@ function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (
                 value={item}
                 onClick={() => {
                   onOpenChange(false);
-                  setOpenMobile(false);
                   navigate(item.to);
                 }}
-                className="flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-muted data-highlighted:text-foreground"
+                className="flex cursor-default items-center gap-3 rounded-lg px-3 py-2.5 text-[13.5px] outline-none select-none data-highlighted:bg-[var(--bg-hover)] data-highlighted:text-foreground"
               >
-                <item.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-sunken)] text-[var(--text-2)]">
+                  <item.icon className="size-4" aria-hidden="true" />
+                </span>
                 <span className="truncate">{item.name}</span>
-                <span className="ml-auto truncate text-xs text-muted-foreground">{item.to}</span>
+                <span className="ml-auto truncate text-[11px] text-[var(--text-3)]">{item.to}</span>
               </Autocomplete.Item>
             )}
           </Autocomplete.List>
           <Autocomplete.Empty>
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">没有匹配的页面</p>
+            <p className="px-2 py-8 text-center text-xs text-muted-foreground">没有匹配的页面</p>
           </Autocomplete.Empty>
         </Autocomplete.Root>
       </DialogContent>
@@ -173,36 +143,32 @@ export function CompanySelection({
         {companies.length ? (
           <>
             <div className="flex flex-col gap-2">
-              <h1 className="text-2xl font-semibold tracking-tight">
-                选择公司
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                选择本次要进入的工作区。
-              </p>
+              <h1 className="page-title">选择公司</h1>
+              <p className="page-subtitle">选择本次要进入的工作区。</p>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
               {companies.map((company) => (
                 <Button
                   key={company.id}
                   variant="outline"
-                  className="h-auto w-full justify-between gap-3 px-4 py-4"
+                  className="h-auto w-full justify-between gap-3 px-3.5 py-3"
                   onClick={() => activate(company.id)}
                   aria-label={company.name}
                 >
-                  <Building2 aria-hidden="true" />
-                  <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                    <span className="max-w-full truncate">{company.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {roleLabel(company.role)}
-                    </span>
+                  <span className="flex size-8 items-center justify-center rounded-lg bg-[var(--bg-sunken)] text-[var(--text-2)]">
+                    <Building2 className="size-4" aria-hidden="true" />
                   </span>
-                  <ArrowRight aria-hidden="true" />
+                  <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                    <span className="max-w-full truncate text-[13.5px] font-medium">{company.name}</span>
+                    <span className="text-xs text-muted-foreground">{roleLabel(company.role)}</span>
+                  </span>
+                  <ChevronDown className="size-4 -rotate-90 text-muted-foreground" aria-hidden="true" />
                 </Button>
               ))}
             </div>
           </>
         ) : (
-          <Empty className="px-0">
+          <Empty>
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <Building2 />
@@ -241,6 +207,7 @@ const groups: { title: string; items: WorkspaceNavItem[] }[] = [
   {
     title: '工作台',
     items: [
+      { name: '开始使用', icon: LayoutDashboard, section: 'home', to: workspaceRoutes.home },
       { name: '消息中心', icon: Inbox, section: 'messages', to: workspaceRoutes.messages },
       { name: '商品资料', icon: PackageSearch, section: 'products', to: workspaceRoutes.products },
       { name: '订单中心', icon: ShoppingBag, section: 'orders', to: workspaceRoutes.orders },
@@ -251,7 +218,6 @@ const groups: { title: string; items: WorkspaceNavItem[] }[] = [
   {
     title: '客服配置',
     items: [
-      { name: '能力与数据', icon: ListChecks, section: 'capabilities', to: workspaceRoutes.capabilities },
       { name: '知识库', icon: BookOpen, section: 'knowledge', to: workspaceRoutes.knowledge },
       { name: '回复策略', icon: SlidersHorizontal, section: 'policies', to: workspaceRoutes.policies },
     ],
@@ -266,9 +232,14 @@ const groups: { title: string; items: WorkspaceNavItem[] }[] = [
   },
 ];
 
+const allNavItems = groups.flatMap(group => group.items);
+const railGroups = groups
+  .map(group => ({ ...group, items: group.items.filter(item => item.section !== 'home' && item.section !== 'activity') }))
+  .filter(group => group.items.length > 0);
+
 const paletteItems = [
-  { name: '开始使用', icon: LayoutDashboard, to: workspaceRoutes.home },
-  ...groups.flatMap(group => group.items.map(({ name, icon, to }) => ({ name, icon, to }))),
+  ...allNavItems.map(({ name, icon, to }) => ({ name, icon, to })),
+  { name: '能力与数据', icon: ListChecks, to: `${workspaceRoutes.settings}?section=capabilities` },
 ];
 
 const createMenuItems = [
@@ -277,16 +248,223 @@ const createMenuItems = [
   { name: '导入知识库', icon: BookOpen, to: workspaceRoutes.knowledge },
 ];
 
-function FooterIconLink({ to, icon: Icon, label }: { to: string; icon: typeof Inbox; label: string }) {
+function NavigationLink({ onNavigate, ...props }: ComponentProps<typeof Link> & { onNavigate?: () => void }) {
+  return <Link {...props} onClick={event => {
+    props.onClick?.(event);
+    if (!event.defaultPrevented) onNavigate?.();
+  }} />;
+}
+
+function CompanySwitcher({
+  company,
+  identity,
+  activate,
+  confirmExit,
+  onNavigate,
+  compact = false,
+}: {
+  company: Company;
+  identity: Identity;
+  activate: (id: string) => void;
+  confirmExit: (operation: () => void) => void;
+  onNavigate?: () => void;
+  compact?: boolean;
+}) {
+  const mark = Array.from(company.name.trim())[0] ?? '?';
   return (
-    <NavigationLink
-      to={to}
-      aria-label={label}
-      title={label}
-      className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <Icon className="size-4" aria-hidden="true" />
-    </NavigationLink>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            className={compact ? 'rail-mark' : 'side-row'}
+            aria-label="切换公司"
+            title={company.name}
+            aria-haspopup="menu"
+          />
+        }
+      >
+        {compact ? mark : (
+          <>
+            <span className="rail-mark size-6 text-[11px]">{mark}</span>
+            <span className="min-w-0 flex-1 truncate font-medium">{company.name}</span>
+            <ChevronDown className="size-3.5 shrink-0 text-[var(--text-3)]" aria-hidden="true" />
+          </>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side={compact ? 'right' : 'bottom'} align="start" className="w-60">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>切换公司</DropdownMenuLabel>
+          {identity.companies?.companies.map((item) => (
+            <DropdownMenuItem
+              key={item.id}
+              onClick={() => item.id !== company.id && confirmExit(() => activate(item.id))}
+            >
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate">{item.name}</span>
+                <span className="text-[11px] text-muted-foreground">{roleLabel(item.role)}</span>
+              </span>
+              {item.id === company.id && <Check aria-label="当前公司" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>快速创建</DropdownMenuLabel>
+          {createMenuItems.map(({ name, icon: Icon, to }) => (
+            <DropdownMenuItem key={name} render={<NavigationLink to={to} onNavigate={onNavigate} />}>
+              <Icon aria-hidden="true" />
+              {name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function AccountMenu({
+  identity,
+  confirmExit,
+  logout,
+  onNavigate,
+}: {
+  identity: Identity;
+  confirmExit: (operation: () => void) => void;
+  logout: () => void;
+  onNavigate?: () => void;
+}) {
+  const email = identity.session?.user.email ?? '';
+  const name = identity.session?.user.name;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            className="flex size-9 items-center justify-center rounded-full bg-[var(--bg-sunken)] text-[11px] font-semibold text-[var(--text-2)] outline-none ring-1 ring-black/[0.04] transition-colors hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`打开账户菜单：${email}`}
+            title={name ?? '账户菜单'}
+          />
+        }
+      >
+        <UserAvatar name={name ?? email} image={identity.session?.user.image} seed={identity.session?.user.id ? defaultAvatarSeed(identity.session.user.id) : undefined} size={36} className="ring-0" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="right" align="end" className="w-64">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="mb-1 flex flex-col gap-1 border-b px-2 py-2">
+            <span className="truncate text-sm font-medium text-foreground">{name}</span>
+            <span className="truncate font-normal">{email}</span>
+          </DropdownMenuLabel>
+          <DropdownMenuItem render={<NavigationLink to={workspaceRoutes.settings} onNavigate={onNavigate} />}>
+            <Settings aria-hidden="true" />
+            公司设置
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onClick={() => confirmExit(logout)}>
+            <LogOut />
+            退出登录
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function IconRail({
+  company,
+  identity,
+  section,
+  activate,
+  confirmExit,
+  logout,
+}: {
+  company: Company;
+  identity: Identity;
+  section: WorkspaceSection;
+  activate: (id: string) => void;
+  confirmExit: (operation: () => void) => void;
+  logout: () => void;
+}) {
+  return (
+    <nav aria-label="快速导航" className="app-rail">
+      <CompanySwitcher compact company={company} identity={identity} activate={activate} confirmExit={confirmExit} />
+      {railGroups.map((group, index) => (
+        <Fragment key={group.title}>
+          {index > 0 && <span className="rail-sep" aria-hidden="true" />}
+          {group.items.map(item => {
+            const Icon = item.icon;
+            return (
+              <NavigationLink
+                key={item.name}
+                to={item.to}
+                aria-label={item.name}
+                data-tip={item.name}
+                aria-current={section === item.section ? 'page' : undefined}
+                className="rail-btn"
+              >
+                <Icon className="size-[18px]" aria-hidden="true" />
+              </NavigationLink>
+            );
+          })}
+        </Fragment>
+      ))}
+      <div className="mt-auto flex flex-col items-center gap-2 pt-2">
+        <AccountMenu identity={identity} confirmExit={confirmExit} logout={logout} />
+      </div>
+    </nav>
+  );
+}
+
+function MobileNav({
+  company,
+  identity,
+  section,
+  activate,
+  confirmExit,
+  logout,
+  onNavigate,
+}: {
+  company: Company;
+  identity: Identity;
+  section: WorkspaceSection;
+  activate: (id: string) => void;
+  confirmExit: (operation: () => void) => void;
+  logout: () => void;
+  onNavigate: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border p-3">
+        <CompanySwitcher company={company} identity={identity} activate={activate} confirmExit={confirmExit} onNavigate={onNavigate} />
+      </div>
+      <nav aria-label="功能列表" className="min-h-0 flex-1 overflow-y-auto p-2">
+        {groups.map(group => (
+          <div key={group.title} className="flex flex-col gap-0.5 pt-2">
+            <div className="section-label px-2.5 pt-2 pb-1">{group.title}</div>
+            {group.items.map(item => {
+              const Icon = item.icon;
+              return (
+                <NavigationLink
+                  key={item.name}
+                  to={item.to}
+                  onNavigate={onNavigate}
+                  className="nav-item"
+                  aria-current={section === item.section ? 'page' : undefined}
+                >
+                  <Icon className="size-[17px] shrink-0" aria-hidden="true" />
+                  <span className="truncate">{item.name}</span>
+                </NavigationLink>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+      <div className="flex items-center gap-2.5 border-t border-border p-3">
+        <AccountMenu identity={identity} confirmExit={confirmExit} logout={logout} onNavigate={onNavigate} />
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{identity.session?.user.email}</span>
+      </div>
+    </div>
   );
 }
 
@@ -294,6 +472,7 @@ type WorkspaceProps = Props & { company: Company; children?: ReactNode; section?
 export function WorkspacePage(props: WorkspaceProps) {
   return <WorkspaceExitProvider><WorkspaceContent {...props}/></WorkspaceExitProvider>;
 }
+
 function WorkspaceContent({
   identity,
   company,
@@ -303,14 +482,14 @@ function WorkspaceContent({
   children,
   section = 'home',
 }: WorkspaceProps) {
-  const { query, timeZone } = useCompanySettings();
-  const realtime=useCompanyRealtime(company.id,company.role);
+  // 保持 SSE 订阅以驱动缓存失效与消息状态事件，不展示连接状态。
+  useCompanyRealtime(company.id, company.role);
   const { confirmExit } = useWorkspaceExit();
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setPaletteOpen(value => !value);
       }
@@ -318,225 +497,91 @@ function WorkspaceContent({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+  const content = children ?? <WorkspaceHome company={company} />;
+  const common = {
+    company,
+    identity,
+    section,
+    activate,
+    confirmExit,
+    logout,
+  };
   return (
-    <SidebarProvider style={{ '--sidebar-width': 'var(--workspace-sidebar-width)' } as CSSProperties}>
+    <>
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-background focus:p-3"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-card focus:p-3"
       >
         跳到主要内容
       </a>
-      <Sidebar collapsible="icon">
-        <SidebarHeader className="gap-3 px-3 pt-4 pb-2 group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start gap-2.5 px-2 py-1.5 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-2"
-                  aria-label="切换公司"
-                  title="切换公司"
-                />
-              }
-            >
-              <DingBellLogo className="size-8 shrink-0" aria-hidden="true" />
-              <span className="flex min-w-0 flex-1 flex-col items-start group-data-[collapsible=icon]:hidden">
-                <span className="max-w-full truncate text-sm font-semibold tracking-tight">{company.name}</span>
-                <span className="max-w-full truncate text-xs text-muted-foreground">
-                  公司工作区
-                </span>
-              </span>
-              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>切换公司</DropdownMenuLabel>
-                {identity.companies?.companies.map((item) => (
-                  <DropdownMenuItem
-                    key={item.id}
-                    onClick={() => item.id !== company.id && confirmExit(() => activate(item.id))}
-                  >
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate">{item.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {roleLabel(item.role)}
-                      </span>
-                    </span>
-                    {item.id === company.id && <Check aria-label="当前公司" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  className="h-8 w-full justify-start gap-2 bg-brand px-2.5 text-xs font-medium text-brand-foreground hover:bg-brand-hover group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-                  aria-label="创建新"
-                  title="创建新"
-                />
-              }
-            >
-              <Plus className="size-4 shrink-0" aria-hidden="true" />
-              <span className="group-data-[collapsible=icon]:hidden">创建新</span>
-              <ChevronDown className="ml-auto size-3.5 shrink-0 text-brand-foreground/80 group-data-[collapsible=icon]:hidden" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-48">
-              <DropdownMenuGroup>
-                {createMenuItems.map(({ name, icon: Icon, to }) => (
-                  <DropdownMenuItem key={name} render={<NavigationLink to={to} />}>
-                    <Icon aria-hidden="true" />
-                    {name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <button
-            type="button"
-            onClick={() => setPaletteOpen(true)}
-            aria-label="搜索页面（Command K）"
-            aria-keyshortcuts="Meta+K Control+K"
-            className="flex h-8 w-full shrink-0 items-center gap-2 rounded-md bg-muted/70 px-2.5 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-          >
-            <Search className="size-3.5 shrink-0" aria-hidden="true" />
-            <span className="group-data-[collapsible=icon]:hidden">搜索</span>
-            <kbd className="ml-auto rounded border bg-background px-1 py-px font-sans text-[10px] leading-4 text-muted-foreground group-data-[collapsible=icon]:hidden">⌘K</kbd>
-          </button>
-        </SidebarHeader>
-        <SidebarContent className="gap-2 px-1">
-          <SidebarGroup>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton className="relative isolate h-9 data-active:bg-transparent" tooltip="开始使用" isActive={section === 'home'} aria-current={section === 'home' ? 'page' : undefined} render={<NavigationLink to={workspaceRoutes.home} />}>
-                  <NavigationSelection active={section === 'home'} />
-                  <LayoutDashboard />
-                  <span>开始使用</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroup>
-          {groups.map((group) => {
-            const collapsed = collapsedGroups[group.title] ?? false;
-            return (
-              <SidebarGroup key={group.title}>
-                <SidebarGroupLabel
-                  render={
-                    <button
-                      type="button"
-                      onClick={() => setCollapsedGroups(previous => ({ ...previous, [group.title]: !collapsed }))}
-                      aria-expanded={!collapsed}
-                      className="mt-1 h-7 w-full cursor-pointer items-center justify-between border-t border-sidebar-border/70 pt-0 text-[11px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:hidden"
-                      title={group.title}
-                    />
-                  }
-                >
-                  {group.title}
-                  <ChevronDown aria-hidden="true" className={'size-3.5 shrink-0 text-muted-foreground/70 transition-transform' + (collapsed ? ' -rotate-90' : '')} />
-                </SidebarGroupLabel>
-                {!collapsed && (
-                  <SidebarGroupContent>
-                    <SidebarMenu>
-                      {group.items.map(({ name, icon: Icon, section: target, to }) => (
-                        <SidebarMenuItem key={name}>
-                          <SidebarMenuButton className="relative isolate h-9 data-active:bg-transparent" tooltip={name}
-                            isActive={section === target} aria-current={section === target ? 'page' : undefined}
-                            aria-label={name} render={<NavigationLink to={to} />}>
-                            <NavigationSelection active={section === target} />
-                            <Icon />
-                            <span>{name}</span>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                )}
-              </SidebarGroup>
-            );
-          })}
-        </SidebarContent>
-        <SidebarFooter className="gap-3 p-3 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:gap-2 group-data-[collapsible=icon]:p-2">
-          <div className="flex items-start gap-2.5 rounded-lg bg-brand px-3 py-2.5 text-brand-foreground group-data-[collapsible=icon]:hidden">
-            <Sparkles className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <p className="text-xs font-semibold">需要帮助？</p>
-              <p className="text-xs leading-5 text-brand-foreground">联系部署管理员获取帮助</p>
+      <div className="app-shell">
+        <IconRail {...common} />
+
+        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <SheetContent side="left" className="w-[280px] gap-0 border-r border-border bg-[var(--canvas-top)] p-0">
+            <SheetHeader className="sr-only">
+              <SheetTitle>工作区导航</SheetTitle>
+              <SheetDescription>切换公司或查看工作区功能。</SheetDescription>
+            </SheetHeader>
+            <MobileNav {...common} onNavigate={() => setMobileNavOpen(false)} />
+          </SheetContent>
+        </Sheet>
+
+        <main className="workspace">
+          <div className="workspace-panel">
+            <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 lg:hidden">
+              <Button variant="ghost" size="icon-sm" aria-label="打开或收起导航" onClick={() => setMobileNavOpen(true)}>
+                <Menu />
+              </Button>
+              <Bell className="size-4" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold">DingBell</span>
+              <Button variant="ghost" size="icon-sm" aria-label="搜索页面" onClick={() => setPaletteOpen(true)}>
+                <Search />
+              </Button>
             </div>
+
+            {section === 'messages' ? (
+              <div
+                id="main-content"
+                tabIndex={-1}
+                className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 pt-5 pb-3 sm:px-6 sm:pt-6 lg:overflow-hidden"
+              >
+                {notice != null && <ErrorNotice error={notice} />}
+                {content}
+              </div>
+            ) : (
+              <div id="main-content" tabIndex={-1} className="page-scroll">
+                <div className={section === 'home' ? 'page-content pb-28' : 'page-content'}>
+                  {notice != null && <ErrorNotice error={notice} />}
+                  {content}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex items-center justify-between gap-2 group-data-[collapsible=icon]:justify-center">
-            <div className="flex items-center gap-1 group-data-[collapsible=icon]:hidden">
-              <FooterIconLink to={workspaceRoutes.home} icon={LayoutDashboard} label="开始使用" />
-              <FooterIconLink to={workspaceRoutes.messages} icon={Inbox} label="消息中心" />
-              <FooterIconLink to={workspaceRoutes.settings} icon={Settings} label="公司设置" />
-              <span
-                role="img"
-                className="flex size-8 cursor-default items-center justify-center rounded-full text-muted-foreground"
-                aria-label="联系部署管理员获取帮助"
-                title="联系部署管理员获取帮助"
+
+          {section === 'home' && !children && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-4">
+              <button
+                type="button"
+                onClick={() => setPaletteOpen(true)}
+                aria-label="搜索页面或功能（Command K）"
+                className="pointer-events-auto flex h-14 w-full max-w-[860px] items-center gap-3 rounded-full border border-border bg-card px-4 text-left shadow-[0_8px_28px_rgb(0_0_0/0.08)] outline-none transition-shadow hover:shadow-[0_12px_32px_rgb(0_0_0/0.11)] focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <CircleHelp className="size-4" aria-hidden="true" />
-              </span>
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    className="size-8 justify-center rounded-full p-0"
-                    aria-label={`打开账户菜单：${identity.session?.user.email ?? ''}`}
-                    title={identity.session?.user.name ?? '账户菜单'}
-                  />
-                }
-              >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-semibold text-brand-foreground" aria-hidden="true">
-                  {accountInitials(identity.session?.user.name, identity.session?.user.email)}
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--text-2)]">
+                  <Plus className="size-[18px]" aria-hidden="true" />
                 </span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="right" align="end" className="w-64">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel className="mb-1 flex flex-col gap-1 border-b px-2 py-2">
-                    <span className="truncate text-sm font-medium text-foreground">{identity.session?.user.name}</span>
-                    <span className="truncate font-normal">{identity.session?.user.email}</span>
-                  </DropdownMenuLabel>
-                  <DropdownMenuItem variant="destructive" onClick={() => confirmExit(logout)}>
-                    <LogOut />
-                    退出登录
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </SidebarFooter>
-        <SidebarRail aria-label="展开或收起侧边栏" title="展开或收起侧边栏" />
-      </Sidebar>
+                <Monitor className="size-4 shrink-0 text-[var(--text-3)]" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--text-3)]">搜索页面、打开功能…</span>
+                <kbd className="hidden shrink-0 rounded-md border border-border bg-[var(--bg-sunken)] px-1.5 py-0.5 font-sans text-[10px] text-muted-foreground sm:block">⌘K</kbd>
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-sunken)] text-[var(--text-2)]">
+                  <ArrowUp className="size-4" aria-hidden="true" />
+                </span>
+              </button>
+            </div>
+          )}
+        </main>
+      </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
-      <SidebarInset className="min-w-0">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4 md:px-5">
-          {/* 仅移动端保留导航开关：桌面端由侧边栏拖拽边缘收起/展开 */}
-          <SidebarTrigger className="text-muted-foreground md:hidden" aria-label="打开或收起导航" />
-          <Separator orientation="vertical" className="h-4 md:hidden" />
-          <nav aria-label="当前位置" className="flex min-w-0 items-center gap-2 text-sm">
-            <span className="hidden max-w-40 truncate text-muted-foreground sm:block" title={company.name}>{company.name}</span>
-            <span className="hidden text-muted-foreground/50 sm:block" aria-hidden="true">/</span>
-            <span className="truncate font-medium">{section === 'home' ? '开始使用' : groups.flatMap(group => group.items).find(item => item.section === section)?.name}</span>
-          </nav>
-          <span role="status" className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{realtime==='connected'?'实时已连接':realtime==='unavailable'?'实时不可用，请手动刷新':realtime==='reconnecting'?'实时重连中':'正在连接实时更新'}</span>
-          <NavigationLink to={workspaceRoutes.settings} className="ml-auto flex min-w-0 max-w-1/2 shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-            title={query.isError ? `时区读取失败，暂按 ${timeZone} 显示，请进入公司设置重试。` : `公司时区：${timeZone}`}>
-            <Clock3 className="size-3.5 shrink-0" aria-hidden="true" />
-            <span className="truncate">{query.isError ? `时区读取失败 · ${timeZone}` : query.isPending ? '时区读取中 · UTC' : timeZone}</span>
-          </NavigationLink>
-        </header>
-        <div
-          id="main-content"
-          tabIndex={-1}
-          className={section === 'messages' ? 'flex h-[calc(100svh-3.5rem)] min-h-0 min-w-0 flex-col gap-3 overflow-hidden p-3 md:p-5' : 'mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 py-7 sm:px-8 lg:py-10'}
-        >
-          {notice != null && <ErrorNotice error={notice} />}
-          {children ?? <WorkspaceHome company={company} />}
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+    </>
   );
 }

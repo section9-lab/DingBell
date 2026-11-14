@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { test } from 'node:test';
 import { Miniflare } from 'miniflare';
+import { applyMigrations } from './fixtures/migrations.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 async function modules() {
@@ -44,9 +45,7 @@ test('send permits share the durable read budget and reject route, scope and coo
     outboundService:()=>{throw new Error('Permit tests cannot make provider requests');}};
   let mf=new Miniflare(options),db=await mf.getD1Database('DB');
   t.after(async()=>{await mf.dispose();await rm(path,{recursive:true,force:true});});
-  const folder=join(root,'migrations');
-  for(const name of(await readdir(folder)).filter(name=>name.endsWith('.sql')).sort())
-    for(const sql of(await readFile(join(folder,name),'utf8')).split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean))await db.prepare(sql).run();
+  await applyMigrations(db);
   await db.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES ('org','Org','org',1),('other','Other','other',1)").run();
   for(const id of ['budget','cooldown','feedback-failure','paused','disconnected','foreign'])await db.prepare("INSERT INTO store(id,organization_id,name,platform_store_id,status,created_at,updated_at) VALUES (?,'org','Store',?,'verified',1,1)").bind(id,id).run();
   const scope=(storeId='budget')=>({orgId:'org',storeId});

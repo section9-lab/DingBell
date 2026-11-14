@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // These three isolated targets must execute the same Pi protocol. The root
-// legacy Flue SDK intentionally uses a different version and is not included.
+// application only consumes the pinned Pi AI catalog; it has no legacy cloud SDK.
 export const runtimeTargets = ['packages/agent-runtime', 'deploy/cloudflare', 'deploy/vercel'];
 export const sharedDependencies = ['@earendil-works/chord', '@earendil-works/pi-ai', '@earendil-works/pi-durable'];
 

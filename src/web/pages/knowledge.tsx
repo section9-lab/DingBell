@@ -42,7 +42,7 @@ export function KnowledgePage({ company, refresh }: { company: Company; refresh:
   useEffect(() => { const error = list.error ?? stores.error; if (error instanceof ApiError && ['FORBIDDEN', 'UNAUTHENTICATED', 'NOT_FOUND'].includes(error.code)) void refresh(error); }, [list.error, stores.error, refresh]);
   function filter<K extends keyof KnowledgeFilters>(key: K, value: KnowledgeFilters[K]) { setFilters(current => ({ ...current, [key]: value })); setAfter(''); }
   return <>
-    <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex flex-col gap-2"><h1 className="text-2xl font-semibold tracking-tight">知识库</h1><p className="text-sm text-muted-foreground">维护商品事实与店铺政策，发布后供 AI 按关键词直接检索回复。</p></div>
+    <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex flex-col gap-2"><h1 className="page-title">知识库</h1><p className="text-sm text-muted-foreground">维护商品事实与店铺政策，发布后供 AI 按关键词直接检索回复。</p></div>
       {management && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => navigate(() => { setNewId(null); setSearch({ import: 'files' }); })}>从文件导入</Button><Button variant="outline" onClick={() => navigate(() => { setNewId(null); setSearch({ import: 'products' }); })}>从商品导入</Button><Button onClick={() => navigate(() => { setNewId(crypto.randomUUID()); setSearch({}); })}><Plus data-icon="inline-start"/>新建知识</Button></div>}
     </div>
     {!management ? <Alert><AlertTitle>需要管理员权限</AlertTitle><AlertDescription>知识的维护与发布由公司所有者或管理员负责。客服在消息中心查看已授权的回答依据。</AlertDescription></Alert> : <>

@@ -4,12 +4,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { hashPassword } from 'better-auth/crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createNodeApplication as sourceApplication } from '../src/platform/node/application.ts';
 import type { MailMessage } from '../src/modules/mail/types.ts';
 import { ensureControlDirectory } from '../src/modules/conversations/control-storage.ts';
-import { createTranslationBudget, setTranslationBudgetEnabled, reserveTranslation, readTranslationRun } from '../src/modules/translations/storage.ts';
-import { submitReplyPreview, readReplyPreview } from '../src/modules/translations/service.ts';
-import { setTimeout as delay } from 'node:timers/promises';
 
 const createNodeApplication:typeof sourceApplication=process.env.DINGBELL_TEST_COMPILED==='true'
   ? (await import(new URL('../dist/node/server/application.mjs',import.meta.url).href) as {createNodeApplication:typeof sourceApplication}).createNodeApplication : sourceApplication;
@@ -79,51 +77,6 @@ test('Node first-owner installation uses public verification and survives a resu
   assert.equal((await app.database.prepare("SELECT role FROM member").first<{role:string}>())?.role,'owner');
   assert.equal((await request('/api/bootstrap/resume',{claimId:claim.claimId,password},true)).status,410);
   assert.equal((await request('/api/auth/sign-in/email',{email:claim.email,password})).status,200);
-});
-
-test('Node Pi translation preserves original receipt and settles the original budget without repeated provider calls', { timeout:30_000 }, async context => {
-  const directory=await mkdtemp(join(tmpdir(),'dingbell-node-pi-'));
-  let calls=0;
-  const config={provider:'nvidia' as const,model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'nvidia-nemotron-super-v1',promptVersion:'ru-translation-v1',maxInputTokens:262144,maxOutputTokens:512,
-    pricing:{version:'synthetic',currency:'USD' as const,inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}};
-  const options={dataDirectory:directory,migrationsDirectory:resolve('migrations'),variables:{TRANSLATION_ENABLED:'true',NVAPI_KEY:'synthetic-never-real',TRANSLATION_CONFIG_JSON:JSON.stringify(config)},
-    providerFetch:async(input: Parameters<typeof fetch>[0],init?:RequestInit)=>{
-      assert.equal(String(input),'https://integrate.api.nvidia.com/v1/chat/completions');assert.equal(new Headers(init?.headers).get('authorization'),'Bearer synthetic-never-real');calls++;
-      const records=[{id:'synthetic',object:'chat.completion.chunk',created:1,model:config.model,choices:[{index:0,delta:{role:'assistant',content:'Здравствуйте!'},finish_reason:'stop'}]},
-        {choices:[],usage:{prompt_tokens:12,completion_tokens:4,total_tokens:16}}];
-      return new Response(records.map(item=>`data: ${JSON.stringify(item)}\n\n`).join('')+'data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
-    }};
-  let app=await createNodeApplication(options);context.after(async()=>{await app.close();await rm(directory,{recursive:true,force:true});});
-  const db=app.database;
-  db.sqlite.exec(`INSERT INTO organization(id,name,slug,created_at) VALUES('org','Org','org',1);
-    INSERT INTO user(id,name,email,email_verified) VALUES('owner','Owner','owner@example.invalid',1);
-    INSERT INTO member(id,organization_id,user_id,role,created_at) VALUES('owner-member','org','owner','owner',1);
-    INSERT INTO session(id,token,user_id,expires_at,created_at,updated_at) VALUES('owner-session','token','owner',${Date.now()+3600000},1,1);
-    INSERT INTO store(id,organization_id,name,platform_store_id,status,created_at,updated_at) VALUES('store','org','Store','1','verified',1,1);
-    INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at) VALUES('conv','org','store','thread','BUYER_SELLER','Opened',1,1);`);
-  const actor={orgId:'org',actorUserId:'owner',sessionId:'owner-session'};
-  const scope=(await ensureControlDirectory(db,actor,'conv',Date.now()))!.scope;
-  const controller=app.env.CONVERSATION_CONTROLLER!.getByName(scope.controllerId);
-  assert.equal((await controller.execute(scope,actor,{commandId:crypto.randomUUID(),action:'claim',expectedVersion:0})).outcome,'accepted');
-  await createTranslationBudget(db,actor,{id:'budget',startsAt:Date.now()-1000,endsAt:Date.now()+3600000,limitMicros:1000000});
-  await setTranslationBudgetEnabled(db,actor,'budget',0,true);
-  const input={requestId:crypto.randomUUID(),source:'你好',sourceRevision:1},target={conversationId:'conv',expectedMemberId:'owner-member'};
-  const native=app.env.AGENT_RUNTIME!.translation, originalPrepare=native.prepare, originalDispatch=native.dispatch;
-  let executionError:unknown;
-  native.prepare=async(...args)=>{try{return await originalPrepare(...args);}catch(error){executionError=error;throw error;}};
-  native.dispatch=async(...args)=>{try{return await originalDispatch(...args);}catch(error){executionError=error;throw error;}};
-  let result=await submitReplyPreview(app.env,actor,target,input);
-  assert.ifError(executionError);
-  const deadline=Date.now()+10000;
-  while(result.outcome==='found'&&['pending','unconfirmed'].includes(result.preview.status)&&Date.now()<deadline){await delay(30);result=await readReplyPreview(app.env,actor,target,input.requestId);}
-  assert.equal(result.outcome,'found',JSON.stringify(result));
-  if(result.outcome==='found'){assert.equal(result.preview.status,'ready',JSON.stringify(result));assert.equal(result.preview.translation,'Здравствуйте!');assert.equal(result.preview.usageStatus,'settled');}
-  assert.equal(calls,1);
-  const before=await readTranslationRun(db,actor,{...target,requestId:input.requestId,storeId:'store'});assert.ok(before);assert.ok(before.receipt?.uid.startsWith('pi_'));
-  await app.close();app=await createNodeApplication(options);
-  const replay=await submitReplyPreview(app.env,actor,target,input);assert.deepEqual(replay,result);assert.equal(calls,1);
-  const after=await readTranslationRun(app.database,actor,{...target,requestId:input.requestId,storeId:'store'});assert.deepEqual(after?.receipt,before.receipt);
-  const conflict=await submitReplyPreview(app.env,actor,target,{...input,source:'different'});assert.equal(conflict.outcome,'conflict');assert.equal(calls,1);
 });
 
 for(const mode of ['sent','unknown','ordered-control'] as const)test(`Node sender preserves ${mode} across concurrent replay and process restart`,{timeout:30000},async context=>{

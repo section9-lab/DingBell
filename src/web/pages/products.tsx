@@ -58,7 +58,7 @@ export function ProductsPage({company}:{company:Company}){
   };
   const resetFilters=()=>{setPages([]);setFilters({});setDraft(emptyProductDraft);setFilterOpen(false);};
   return <>
-    <div className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight">商品资料</h1><p className="mt-2 text-sm text-muted-foreground">查看从 Ozon 只读同步的商品列表与当前详情快照；货源与采购价由本公司维护，不会写回平台。</p></div><div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="page-title">商品资料</h1><p className="mt-2 text-sm text-muted-foreground">查看从 Ozon 只读同步的商品列表与当前详情快照；货源与采购价由本公司维护，不会写回平台。</p></div><div className="flex flex-wrap gap-2">
       <Popover open={filterOpen} onOpenChange={open=>{setFilterOpen(open);if(open)setDraft(draftFromFilters(filters));}}>
         <PopoverTrigger render={<Button variant="outline" aria-label="商品筛选" title="商品筛选"/>}><SlidersHorizontal data-icon="inline-start"/>筛选{activeFilters>0&&<Badge variant="secondary">{activeFilters}</Badge>}</PopoverTrigger>
         <PopoverContent align="end" className="w-[24rem] gap-3">

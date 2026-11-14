@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { artifactGate } from '../artifact-gate.ts';
+import { resolveRuntime } from '../resolve-runtime.ts';
 
 export default defineConfig(({ isSsrBuild }) => ({
   root: fileURLToPath(new URL('../..', import.meta.url)),
@@ -11,8 +12,7 @@ export default defineConfig(({ isSsrBuild }) => ({
      } },
   plugins: isSsrBuild ? [{ name: 'portable-runtime-only', enforce: 'pre', resolveId(source, importer) {
     if (source === '@earendil-works/pi-ai/providers/nvidia' && !importer?.endsWith('/packages/agent-runtime/nvidia.ts')) return fileURLToPath(new URL('../../packages/agent-runtime/nvidia.ts', import.meta.url));
-    if (source.endsWith('/runtime-flue.ts') || source === './runtime-flue.ts') return fileURLToPath(new URL('../../src/platform/node/legacy-unavailable.ts', import.meta.url));
-  } },artifactGate()] : [react(), tailwindcss()],
+  } },resolveRuntime(),artifactGate()] : [react(), tailwindcss()],
   ssr: { noExternal: true },
   // Preserve content-hashed client assets for tabs opened before a local update.
   // Fresh deployment directories still contain only their newly built release.

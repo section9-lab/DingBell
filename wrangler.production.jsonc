@@ -6,7 +6,6 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "OUTBOUND_ENABLED": "false",
-    "TRANSLATION_ENABLED": "false",
     "AI_OUTBOUND_ENABLED": "false"
   },
   "durable_objects": {
@@ -22,7 +21,12 @@
     { "tag": "v3", "new_sqlite_classes": ["FlueReplyPreviewAgent"] },
     { "tag": "v4", "new_sqlite_classes": ["FlueReplyTestAgent"] },
     { "tag": "v5", "new_sqlite_classes": ["FlueSupportAgent"] },
-    { "tag": "v6", "new_sqlite_classes": ["PiAgentObject"] }
+    { "tag": "v6", "new_sqlite_classes": ["PiAgentObject"] },
+    { "tag": "v7", "renamed_classes": [
+      { "from": "FlueReplyPreviewAgent", "to": "LegacyReplyPreviewArchive" },
+      { "from": "FlueReplyTestAgent", "to": "LegacyReplyTestArchive" },
+      { "from": "FlueSupportAgent", "to": "LegacySupportArchive" }
+    ] }
   ],
   "triggers": { "crons": ["* * * * *"] },
   "assets": {

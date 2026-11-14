@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import * as v from 'valibot';
 import type {AiIntakeRun,AiClassification} from '../src/modules/conversations/ai-intake.ts';
 import {classifyDecision} from '../src/modules/conversations/ai-intake.ts';
-async function api(){const m=await import('../src/modules/conversations/classification-tool.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.createClassificationTool,'function','classification needs a bounded Flue tool');return m!;}
+async function api(){const m=await import('../src/modules/conversations/classification-tool.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.createClassificationTool,'function','classification needs a bounded agent tool');return m!;}
 function fixture(){
  const scope={organizationId:'org',storeId:'store',conversationId:'conv',controllerId:'controller'},run:AiIntakeRun={schemaVersion:2,kind:'intake',scope,request:{runId:crypto.randomUUID(),expectedVersion:0,messageId:'message'},
   admission:{messageId:'message',inputRevision:1,question:'Когда приедет заказ?',event:{scope,eventId:'event',messageId:'message',sequence:1,eventAt:1,liveObservedAt:1},candidates:[{stage:'order',policyId:'policy',policyRevision:1,mode:'automatic',language:'customer'}]},controlEpoch:1,startedAt:1,deadlineAt:60001};

@@ -1,6 +1,6 @@
 # Third-party notices
 
-Generated/reviewed against `package-lock.json` on 2026-11-04. This file records direct packages and design assets; `npm run licenses:check` validates every locked installed package has declared license metadata and emits the machine-readable inventory under `dist/compliance/`. Package license files remain authoritative.
+Generated/reviewed against `package-lock.json` on 2026-11-14. This file records direct packages and design assets; `npm run licenses:check` validates every locked installed package has declared license metadata and emits the machine-readable inventory under `dist/compliance/`. Package license files remain authoritative.
 
 DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29. Dependencies retain their respective licenses. Platform adapter inventories include the independent lockfiles in `packages/agent-runtime`, `deploy/cloudflare` and `deploy/vercel`.
 
@@ -9,9 +9,10 @@ DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29
 | Package | Locked version | Declared license |
 | --- | ---: | --- |
 | @base-ui/react | 1.8.0 | MIT |
+| @dicebear/core | 10.7.0 | MIT |
+| @dicebear/styles | 10.6.0 | SEE LICENSE IN LICENSE.md (Micah style: CC BY 4.0) |
 | @better-auth/drizzle-adapter | 1.7.7 | MIT |
-| @earendil-works/pi-ai (legacy development fixtures) | 0.87.1 | MIT |
-| @flue/runtime (legacy development fixtures) | 2.2.2 | Apache-2.0 |
+| @earendil-works/pi-ai | 1.4.0 | MIT |
 | @fontsource-variable/geist | 5.3.0 | OFL-1.1 |
 | @fontsource/noto-sans-sc | 5.3.0 | OFL-1.1 |
 | @hono/node-server | 2.1.4 | MIT |
@@ -40,7 +41,7 @@ DingBell source code is licensed under [MIT](LICENSE), as approved on 2026-10-29
 
 ## Direct development packages
 
-Cloudflare Vite plugin, Workers types, Miniflare, Wrangler, Vite, React Vite plugin, Tailwind CSS tooling, shadcn CLI, Drizzle Kit, Better Auth CLI packages, TypeScript and type packages declare MIT, Apache-2.0, or `MIT OR Apache-2.0` in their locked package metadata. Flue CLI/Vite and Playwright declare Apache-2.0. Exact names, versions, resolved integrity and transitive packages are produced by `npm run licenses:check`; do not use this summary instead of that inventory for a release review.
+Cloudflare Vite plugin, Workers types, Miniflare, Wrangler, Vite, React Vite plugin, Tailwind CSS tooling, shadcn CLI, Drizzle Kit, Better Auth CLI packages, TypeScript and type packages declare MIT, Apache-2.0, or `MIT OR Apache-2.0` in their locked package metadata. Playwright declares Apache-2.0. Exact names, versions, resolved integrity and transitive packages are produced by `npm run licenses:check`; do not use this summary instead of that inventory for a release review.
 
 ## Design, fonts, and icons
 
@@ -48,6 +49,7 @@ Cloudflare Vite plugin, Workers types, Miniflare, Wrangler, Vite, React Vite plu
 - The design baseline records the Obra shadcn/ui Community Edition Figma source: <https://www.figma.com/community/file/1514746685758799870>. Its applicable community-file attribution is CC BY 4.0; retain creator/source attribution when redistributing derived design materials. The downloaded Figma/community asset is not relicensed as MIT merely because generated UI code uses shadcn.
 - Geist and Noto Sans SC are bundled from Fontsource packages under SIL Open Font License 1.1.
 - Lucide icons are consumed through `lucide-react` under ISC.
+- Account avatars use the DiceBear **Micah** style by Micah Lanier, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The attribution and license link are shown in the profile settings and embedded in every rendered avatar SVG. `@dicebear/core` is MIT; the style definition is not relicensed as MIT.
 - Repository design exports under `design/` may contain derived layout descriptions. Review them separately before including them in a public release archive.
 
 ## External services
@@ -60,4 +62,4 @@ Before distribution, run the locked inventory, inspect `UNKNOWN`/custom/copyleft
 
 ## Portable runtime adapters (2026-10-29)
 
-Pi AI, Pi Durable and Chord 1.4.0 declare MIT. Cloudflare agents 0.30.0 declares MIT. Vercel durable-harness 0.0.1, Sandbox 3.9.1 and Functions 3.10.4 declare Apache-2.0. The generated inventory is authoritative for exact transitive versions and terms. Historical Flue dependencies are retained for migration regression fixtures and are excluded from portable production artifacts.
+Pi AI, Pi Durable and Chord 1.5.2 declare MIT. Cloudflare agents 0.33.0 declares MIT. Vercel durable-harness 0.0.2, Sandbox 3.9.1 and Functions 3.10.4 declare Apache-2.0. The generated inventory is authoritative for exact transitive versions and terms. The legacy cloud runtime and its development probes were removed on 2026-11-14.

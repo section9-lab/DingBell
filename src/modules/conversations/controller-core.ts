@@ -1,7 +1,7 @@
 import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import type { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
-import { checkedReplyTranslation, controlCommandSchema, normalizeControlState } from './control-state.ts';
+import { controlCommandSchema, normalizeControlState } from './control-state.ts';
 import { deferControlRepair, projectControlEvents, readControlAccess, readControlDirectory } from './control-storage.ts';
 import { decryptCredentials } from '../stores/credentials.ts';
 import { reserveReply, recordReplyRateLimit } from '../sync/bindings.ts';
@@ -10,8 +10,7 @@ import { replyWakeDelay } from './reply-wake.ts';
 import { isBuyerChatType } from '../ozon/chat-type.ts';
 import { readReplyDispatchContext, readAiReplyDispatchContext, projectReplyEvents, type ReplyDispatchContext } from './reply-storage.ts';
 import { checkedReply, replyView } from './reply-state.ts';
-import type { ReplyIntent, ReplySnapshot, ReplyReadResult, ReplyRejectCode, ReplyListReadResult, ReplyTranslation } from './reply-types.ts';
-import { readReplyTranslation } from './reply-translation.ts';
+import type { ReplyIntent, ReplySnapshot, ReplyReadResult, ReplyRejectCode, ReplyListReadResult } from './reply-types.ts';
 import type { ControlBindings } from './control-bindings.ts';
 import type { ControlAccess, ControlActor, ControlCommand, ControlCommandResult, ControlDirectory, ControlOutboxEvent as ControlEvent, ControlNote, ControlNotesReadResult, ControlReadResult, ControlReceipt, ControlScope, ControlState, ControlView, StoredControlState } from './control-types.ts';
 import {aiStartSchema,aiResumeSchema,aiHandoffSchema,aiRunSchema,checkedAiReceipt,handoffNotice,type AiRun,type AiReceipt,type AiHandoff} from './ai-state.ts';
@@ -473,7 +472,7 @@ return class ConversationController extends Base {
       for(const item of history.recent) {
         const snapshot=await this.storedReply(transaction,item.id),receipt=await transaction.get<ControlReceipt|AiSendReceipt>(`receipt:${item.id}`);
         if(!snapshot||!receipt||receipt.appliedState.sequence!==item.sequence)throw new Error('INVALID_REPLY_HISTORY');
-        replies.push(replyView(snapshot,receipt.action==='send_reply'?receipt.previewRequestId:undefined));
+        replies.push(replyView(snapshot));
       }
       const code=!history.complete||[state.version,state.sequence].some(value=>value===Number.MAX_SAFE_INTEGER)?'REPLY_UNAVAILABLE' as const:this.replyGate(context,state);
       return {outcome:'found' as const,viewerMemberId:access.memberId,controlVersion:state.version,historyReady:history.complete,readiness:{allowed:code===null,code},replies};
@@ -486,8 +485,7 @@ return class ConversationController extends Base {
     return this.ctx.storage.transaction(async transaction=>{
       await this.state(transaction,directory);
       const snapshot=await this.storedReply(transaction,intentId);
-      const receipt=await transaction.get<Extract<ControlReceipt,{action:'send_reply'}>|AiSendReceipt>(`receipt:${intentId}`);
-      return snapshot?{outcome:'found' as const,reply:replyView(snapshot,receipt?.action==='send_reply'?receipt.previewRequestId:undefined)}:{outcome:'not_found' as const};
+      return snapshot?{outcome:'found' as const,reply:replyView(snapshot)}:{outcome:'not_found' as const};
     });
   }
   async readNotes(scope:ControlScope,actor:ControlActor,beforeSequence:number|null,limit:number):Promise<ControlNotesReadResult> {
@@ -578,15 +576,11 @@ return class ConversationController extends Base {
     const access=await this.access(scope,actor,command.action==='transfer'?command.targetMemberId:undefined);if(!access?.directory)return {outcome:'not_found'};
     if((command.action==='send_reply'||command.action==='cancel_reply')&&actor.expectedMemberId!==undefined&&actor.expectedMemberId!==access.memberId)return {outcome:'not_found'};
     const directory=access.directory;
-    let context:ReplyDispatchContext|null=null,hash='',translation:ReplyTranslation|undefined;
+    let context:ReplyDispatchContext|null=null,hash='';
     if(command.action==='send_reply'&&this.env.OUTBOUND_ENABLED==='true'&&!await this.ctx.storage.get(`receipt:${command.commandId}`)) {
       context=await readReplyDispatchContext(this.env.DB!,scope,actor.actorUserId,access.memberId);
       if(!context)return {outcome:'not_found'};
       hash=await bodyHash(command.body);
-      if(command.previewRequestId){
-        translation=await readReplyTranslation(this.env.DB!,scope,actor,access.memberId,command.previewRequestId,hash)??undefined;
-        if((await this.access(scope,actor))?.memberId!==access.memberId)return {outcome:'not_found'};
-      }
     }
     const result=await this.ctx.storage.transaction(async transaction=>{
       const state=await this.state(transaction,directory);
@@ -602,14 +596,13 @@ return class ConversationController extends Base {
           &&(command.action!=='set_work_status'||(receipt.action==='set_work_status'&&receipt.workStatus===command.workStatus))
           &&(command.action!=='transfer'||(receipt.action==='transfer'&&receipt.targetMemberId===command.targetMemberId&&receipt.reason===command.reason))
           &&(command.action!=='add_note'||(receipt.action==='add_note'&&receipt.body===command.body))
-          &&(command.action!=='send_reply'||(receipt.action==='send_reply'&&receipt.body===command.body&&receipt.previewRequestId===command.previewRequestId))
+          &&(command.action!=='send_reply'||(receipt.action==='send_reply'&&receipt.body===command.body))
           &&(command.action!=='cancel_reply'||(receipt.action==='cancel_reply'&&receipt.targetIntentId===command.targetIntentId))
           ?{outcome:'accepted' as const,receipt}:{outcome:'conflict' as const,reason:'command' as const};
       }
       if(command.commandId.startsWith('ai-reply:')||command.commandId.startsWith('ai-start:')||command.commandId.startsWith('ai-resume:')||command.commandId.startsWith('ai-handoff:')||command.commandId.startsWith('ai-listen:')||command.commandId.startsWith('inbound:')||command.commandId.startsWith('ai-intake:')||command.commandId.startsWith('ai-classification:')||command.commandId.startsWith('ai-dispatch-stop:'))return {outcome:'conflict' as const,reason:'command' as const};
       if(command.action==='send_reply') {
         const code=this.replyGate(context,state);if(code)return {outcome:'rejected' as const,code};
-        if(command.previewRequestId&&!translation)return {outcome:'rejected' as const,code:'PREVIEW_UNAVAILABLE' as const};
       }
       let cancellation:ReplySnapshot|null=null;
       if(command.action==='cancel_reply'){
@@ -630,7 +623,7 @@ return class ConversationController extends Base {
       const appliedState:ControlState=command.action==='add_note'||command.action==='send_reply'||command.action==='cancel_reply'?{...state,version:fields.version,sequence:fields.sequence,updatedAt:fields.updatedAt}:command.action==='resolve'?{...fields,lifecycle:'resolved',workStatus:null}:
         {...fields,lifecycle:'open',workStatus:command.action==='set_work_status'?command.workStatus:command.action==='reopen'?'needs_reply':state.workStatus??'needs_reply'};
       const metadata={actorUserId:actor.actorUserId,actorMemberId:access.memberId,appliedState};
-      const applied:ControlReceipt=command.action==='add_note'?{...command,...metadata,authorName:access.memberName}:command.action==='send_reply'?{...command,...metadata,intentId:command.commandId,...(translation?{translation}:{})}:{...command,...metadata};
+      const applied:ControlReceipt=command.action==='add_note'?{...command,...metadata,authorName:access.memberName}:command.action==='send_reply'?{...command,...metadata,intentId:command.commandId}:{...command,...metadata};
       if(appliedState.controlEpoch!==state.controlEpoch){await transaction.delete('aiDeadline');await transaction.delete('aiListening');await transaction.delete('aiPendingInput');await transaction.delete('aiClassification');}
       if(applied.action==='add_note')noteFromReceipt(applied,applied.commandId,appliedState.sequence);
       if(command.action==='send_reply')await this.putReply(transaction,{intent:{schemaVersion:1,id:command.commandId,commandId:command.commandId,
@@ -725,7 +718,6 @@ return class ConversationController extends Base {
       ||receipt.actorUserId!==snapshot.intent.actorUserId||receipt.actorMemberId!==snapshot.intent.actorMemberId
       ||receipt.appliedState.schemaVersion!==2||receipt.appliedState.lifecycle!=='open'||receipt.appliedState.reception!=='human'
       ||receipt.appliedState.controlEpoch!==snapshot.intent.controlEpoch||receipt.appliedState.version!==receipt.expectedVersion+1)throw new Error('INVALID_REPLY_STATE');
-    checkedReplyTranslation(receipt.translation,receipt.previewRequestId,snapshot.intent.bodyHash);
     return snapshot;
   }
   private async putReply(transaction:DurableObjectTransaction,snapshot:ReplySnapshot,previous?:ReplySnapshot) {

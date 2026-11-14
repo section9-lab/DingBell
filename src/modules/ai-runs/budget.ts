@@ -16,8 +16,18 @@ const access=(db:D1Database,actor:ControlActor)=>db.prepare(managerSQL).bind(...
 export interface AiBudget {id:string;organizationId:string;startsAt:number;endsAt:number;enabled:boolean;revision:number;limitMicros:number;reservedMicros:number;spentMicros:number;maxRuns:number;admittedRuns:number}
 const budgetColumns='id,organization_id AS organizationId,starts_at AS startsAt,ends_at AS endsAt,enabled,revision,limit_micros AS limitMicros,reserved_micros AS reservedMicros,spent_micros AS spentMicros,max_runs AS maxRuns,admitted_runs AS admittedRuns';
 type BudgetRow=Omit<AiBudget,'enabled'>&{enabled:number|boolean};
-/** Historical fallback ledgers remain available to settle their original runs, never for new admission. */
+/** Reserved per-company ledger used when no merchant budget is available. It is hidden from the
+ *  budget list so it never occupies the merchant's single-window slot, and admission always falls
+ *  back to it: AI reception is not gated by usage or cost limits. */
 const unboundedPrefix='ai-unbounded-';
+const unboundedId=(organizationId:string)=>`${unboundedPrefix}${organizationId}`;
+async function ensureUnboundedBudget(db:D1Database,organizationId:string){
+ const id=unboundedId(organizationId);
+ await db.prepare(`INSERT INTO ai_budget(id,organization_id,starts_at,ends_at,enabled,revision,limit_micros,max_runs)
+  VALUES(?,?,0,8640000000000000,1,0,9007199254740991,1000000)
+  ON CONFLICT(id) DO UPDATE SET enabled=1`).bind(id,organizationId).run();
+ return id;
+}
 /** Selection is read-only; reservation repeats the monetary and authority checks atomically. */
 export async function selectAiBudget(db:D1Database,scope:ControlScope,amount:number){
  v.parse(aiScopeSchema,scope);v.parse(v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER)),amount);
@@ -25,7 +35,7 @@ export async function selectAiBudget(db:D1Database,scope:ControlScope,amount:num
   AND id NOT LIKE '${unboundedPrefix}%' AND admitted_runs<max_runs AND limit_micros-spent_micros-reserved_micros>=?
   AND EXISTS (SELECT 1 FROM conversation_control WHERE controller_id=? AND organization_id=? AND store_id=? AND conversation_id=?) LIMIT 2`)
   .bind(scope.organizationId,amount,scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId).all<{id:string}>()).results;
- return rows.length===1?rows[0]!.id:null;
+ return rows.length===1?rows[0]!.id:ensureUnboundedBudget(db,scope.organizationId);
 }
 function view(b:BudgetRow):AiBudgetView{
   const available=BigInt(b.limitMicros)-BigInt(b.reservedMicros)-BigInt(b.spentMicros);

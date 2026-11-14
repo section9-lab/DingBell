@@ -1,21 +1,14 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
-import { URL } from 'node:url';
-import { Miniflare } from 'miniflare';
 import { hashPassword } from 'better-auth/crypto';
 import { createApp } from '../src/application.ts';
+import { createSqliteD1 } from './fixtures/d1-sqlite.ts';
 import { services } from '../src/modules/identity/services.ts';
 
 async function fixture() {
-  const mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("sync-http-fixture")}}',
-    compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
+  const database = createSqliteD1();
   try {
-    const DB = await mf.getD1Database('DB') as unknown as D1Database;
-    const dir = new URL('../migrations/', import.meta.url);
-    for (const name of readdirSync(dir).filter(name => name.endsWith('.sql')).sort()) {
-      for (const statement of readFileSync(new URL(name, dir), 'utf8').split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await DB.prepare(statement).run();
-    }
+    const DB = database.db;
     const password = 'synthetic-sync-user-password';
     const hash = await hashPassword(password);
     await DB.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('company','Company','company',1),('other-company','Other','other',1)").run();
@@ -48,9 +41,9 @@ async function fixture() {
     assert.equal(created.status,200);
     const qualify = (available = ['auth','chats_read']) => DB.prepare("UPDATE store SET status='partial',capabilities=?,checked_at=?,expires_at=? WHERE id=?")
       .bind(JSON.stringify(['auth','products_read','chats_read','orders_fbs_read','orders_fbo_read','reply','proactive_chat'].map(code => ({code,status:available.includes(code)?'available':'unknown',reason:'read_verified'}))),Date.now(),Date.now()+86_400_000,storeId).run();
-    return { DB,env,request,storeId,wakes,qualify,failWake:()=>{failWake=true;},onWake:(task:()=>Promise<unknown>)=>{wakeTask=task;},close:()=>mf.dispose() };
+    return { DB,env,request,storeId,wakes,qualify,failWake:()=>{failWake=true;},onWake:(task:()=>Promise<unknown>)=>{wakeTask=task;},close:database.close };
   } catch (error) {
-    await mf.dispose().catch(() => {});
+    database.close();
     throw error;
   }
 }
@@ -64,20 +57,6 @@ test('FBO sync requires its own capability and manager intent without enabling F
  assert.equal(await f.DB.prepare("SELECT COUNT(*) AS n FROM store_sync_source WHERE source='fbs_postings'").first('n'),0);
  assert.equal((await f.request(path,{enabled:false,expectedEpoch:0})).status,409);assert.equal((await f.request(path,{enabled:false,expectedEpoch:1})).status,200);
  const audit=(await f.DB.prepare("SELECT action FROM store_audit_event WHERE action LIKE '%fbo_postings%' AND outcome='succeeded'").all<any>()).results;assert.deepEqual(audit.map(row=>row.action),['store.sync.fbo_postings.enable','store.sync.fbo_postings.disable']);
-});
-
-test('sync HTTP fixture cleanup preserves the initialization error even when disposal rejects', {timeout:30_000}, async t => {
-  const failure = Object.assign(new Error('synthetic initialization failure'),{code:'EADDRNOTAVAIL'});
-  const originalDispose = Miniflare.prototype.dispose;
-  let instance: Miniflare | undefined, closed = false;
-  t.mock.method(Miniflare.prototype,'getD1Database',async function(this:Miniflare) { instance=this; throw failure; });
-  const disposal = t.mock.method(Miniflare.prototype,'dispose',async function(this:Miniflare) {
-    await originalDispose.call(this); closed=true; throw new Error('synthetic cleanup failure');
-  });
-  try {
-    await assert.rejects(fixture,error=>error===failure);
-    assert.equal(disposal.mock.calls.length,1); assert.equal(closed,true);
-  } finally { if(instance&&!closed) await originalDispose.call(instance); }
 });
 
 test('sync is disabled until an authorized manager explicitly enables a store with fresh readable chat evidence', {timeout:30_000}, async () => {

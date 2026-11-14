@@ -31,7 +31,7 @@ function ToastList() {
       key={toast.id}
       toast={toast}
       className={cn(
-        'pointer-events-auto w-full rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg ring-1 ring-foreground/10',
+        'pointer-events-auto w-full rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-float',
         'transition-[transform,opacity] duration-200 ease-out',
         'data-starting-style:translate-y-2 data-starting-style:opacity-0',
         'data-ending-style:translate-y-1 data-ending-style:opacity-0',

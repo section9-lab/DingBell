@@ -1,4 +1,4 @@
-export type AgentKind = 'translation' | 'support';
+export type AgentKind = 'support';
 export interface AgentTool { name: string; description: string; parameters: Record<string, unknown>; timeoutMs: number }
 export interface AgentDefinition {
   uid: string; kind: AgentKind; requestId: string; acceptedAt: string; input: string; instructions: string;

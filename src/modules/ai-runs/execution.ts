@@ -1,18 +1,17 @@
-import type {Agent} from 'agents';
 import type {ControlScope} from '../conversations/control-types.ts';
 import {getConversationController,type ControlBindings} from '../conversations/control-bindings.ts';
-import type {TranslationReceipt} from '../translations/types.ts';
+import type {AiReceipt} from './finance.ts';
 import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGeneration,freezeAiConfig,type AiExecution,type AiRunReader} from './storage.ts';
 import {selectAiBudget} from './budget.ts';
 import {isOutboundPromptVersion} from '../../shared/ai-versions.ts';
 import type {SupportInspection} from './ledger.ts';
 import type {AiKnowledgeBindings} from './knowledge.ts';
 import type {CompanyModelBindings} from '../company-model/security.ts';
-export interface SupportBindings extends ControlBindings,AiKnowledgeBindings,CompanyModelBindings {NVAPI_KEY?:string;AI_RECEPTION_CONFIG_JSON?:string;FLUE_SUPPORT_AGENT?:DurableObjectNamespace<Agent>;AGENT_RUNTIME?:import('../../platform/agents/bindings.ts').PortableAgents}
+export interface SupportBindings extends ControlBindings,AiKnowledgeBindings,CompanyModelBindings {NVAPI_KEY?:string;AI_RECEPTION_CONFIG_JSON?:string;AGENT_RUNTIME?:import('../../platform/agents/bindings.ts').PortableAgents}
 export interface SupportRuntime {
  lookup(run:AiExecution):Promise<{uid?:string}|null>;prepare(run:AiExecution):Promise<void>;inspect(run:AiExecution):Promise<SupportInspection|null>;
- dispatch(run:AiExecution):Promise<TranslationReceipt>;read(run:AiExecution):Promise<'completed'|'failed'|'aborted'|'pending'>;close(run:AiExecution):Promise<void>;activity?(run:AiExecution):Promise<import('../../../packages/agent-runtime/contracts.ts').AgentLoop|null>;
- recover(run:AiExecution):Promise<TranslationReceipt>;cancel(run:AiExecution):Promise<void>;abort(run:AiExecution):Promise<void>;
+ dispatch(run:AiExecution):Promise<AiReceipt>;read(run:AiExecution):Promise<'completed'|'failed'|'aborted'|'pending'>;close(run:AiExecution):Promise<void>;activity?(run:AiExecution):Promise<import('../../../packages/agent-runtime/contracts.ts').AgentLoop|null>;
+ recover(run:AiExecution):Promise<AiReceipt>;cancel(run:AiExecution):Promise<void>;abort(run:AiExecution):Promise<void>;
 }
 export const aiRunReader=(env:ControlBindings):AiRunReader=>(scope,id)=>getConversationController(env,scope.controllerId).readAiWork(scope,id);
 export function matchingSupport(state:SupportInspection,run:AiExecution){
@@ -23,7 +22,7 @@ export function matchingSupport(state:SupportInspection,run:AiExecution){
 type Dependencies={runtime?:SupportRuntime};
 type Status='unavailable'|'unconfirmed'|'pending'|'completed'|'failed'|'aborted'|'closed';
 const view=(status:Status)=>({status,canSend:false as const});
-async function native(env:SupportBindings,deps:Dependencies){return deps.runtime??(await import('./runtime.ts')).supportRuntime(env);}
+async function native(env:SupportBindings,deps:Dependencies){return deps.runtime??(await import('./runtime.ts')).createSupportRuntime(env);}
 async function observe(env:SupportBindings,run:AiExecution,runtime:SupportRuntime){
  if(!run.receipt)return view(run.closure?'closed':'unconfirmed');
  try{
@@ -40,7 +39,7 @@ async function observe(env:SupportBindings,run:AiExecution,runtime:SupportRuntim
 export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:string,deps:Dependencies={}){
  if(!env.DB)return view('unavailable');let run=await readAiExecution(env.DB,scope,id);
  if(!run){
-  if((!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)||!env.CONVERSATION_CONTROLLER)return view('unavailable');
+  if(!env.AGENT_RUNTIME||!env.CONVERSATION_CONTROLLER)return view('unavailable');
   let cost: Awaited<ReturnType<typeof import('../company-model/runtime.ts')['resolveSupportConfiguration']>>;
   try{
    cost=await (await import('../company-model/runtime.ts')).resolveSupportConfiguration(env,scope.organizationId);
@@ -75,7 +74,7 @@ export async function readExecutedAiRun(env:SupportBindings,scope:ControlScope,i
 }
 /** Reconciles the original execution even after the conversation moves to another run. */
 export async function reconcileAiExecution(env:SupportBindings,scope:ControlScope,id:string,deps:Dependencies={}){
- if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)))return view('unavailable');
+ if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&!env.AGENT_RUNTIME))return view('unavailable');
  try{
   let run=await readAiExecution(env.DB,scope,id);if(!run)return view('unavailable');
   if(run.closure&&run.status==='settled')return view(run.closure.kind==='runtime_closed'?run.closure.outcome:'closed');
@@ -102,6 +101,6 @@ export async function reconcileAiExecution(env:SupportBindings,scope:ControlScop
 }
 /** Prompt wake after a human command. Historical executions have their own repair cursor. */
 export async function reconcileConversationAi(env:SupportBindings,scope:ControlScope,deps:Dependencies={}){
- if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)))return view('unavailable');
+ if(!env.DB||!env.CONVERSATION_CONTROLLER||(!deps.runtime&&!env.AGENT_RUNTIME))return view('unavailable');
  try{const id=await getConversationController(env,scope.controllerId).readAiRunTarget(scope);return id?reconcileAiExecution(env,scope,id,deps):view('unavailable');}catch{return view('unconfirmed');}
 }

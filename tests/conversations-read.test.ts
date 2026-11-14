@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { test } from 'node:test';
-import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { findConversation, InvalidConversationCursor, listConversations as readList, listMessages, listMessageUpdates } from '../src/modules/conversations/read.ts';
+import { applyMigrations } from './fixtures/migrations.ts';
 import type { StoreActor } from '../src/modules/stores/storage.ts';
 
 async function listConversations(...args:Parameters<typeof readList>){const result=await readList(...args);assert.ok(result,'the viewer must remain authorized');return result;}
@@ -12,8 +12,7 @@ test('conversation read models enforce current scope with real D1 and stable his
   const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
   context.after(()=>mf.dispose());
   const db=await mf.getD1Database('DB') as unknown as D1Database;
-  const folder=new URL('../migrations/',import.meta.url);
-  for(const name of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort())for(const sql of readFileSync(new URL(name,folder),'utf8').split('--> statement-breakpoint').map(part=>part.trim()).filter(Boolean))await db.prepare(sql).run();
+  await applyMigrations(db);
   const admin:StoreActor={orgId:'read-a',actorUserId:'admin',sessionId:'session-admin'};
   const member:StoreActor={orgId:'read-a',actorUserId:'agent',sessionId:'session-agent'};
   const other:StoreActor={orgId:'read-b',actorUserId:'owner',sessionId:'session-owner'};

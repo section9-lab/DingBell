@@ -56,12 +56,6 @@ export class PiAgentObject extends DurableObject<CloudflareEnv> {
     this.authority.driver=driver; this.services=agentServices(this.authority,driver);
   }
   private scope(kind: AgentKind,id: string) { if(!this.ctx.id.equals(this.env.PI_AGENT.idFromName(`${kind}:${id}`)))throw new Error('AGENT_SCOPE_MISMATCH'); }
-  async translationLookup(...args: Parameters<Method<'translation','lookup'>>) { this.scope('translation',args[0]); return this.services.translation.lookup(...args); }
-  async translationInspect(...args: Parameters<Method<'translation','inspect'>>) { this.scope('translation',args[0]); return this.services.translation.inspect(...args); }
-  async translationPrepare(...args: Parameters<Method<'translation','prepare'>>) { this.scope('translation',args[1]); return this.services.translation.prepare(...args); }
-  async translationClose(...args: Parameters<Method<'translation','close'>>) { this.scope('translation',args[1]); return this.services.translation.close(...args); }
-  async translationDispatch(...args: Parameters<Method<'translation','dispatch'>>) { this.scope('translation',args[0].id); return this.services.translation.dispatch(...args); }
-  async translationRead(...args: Parameters<Method<'translation','read'>>) { this.scope('translation',args[0]); return this.services.translation.read(...args); }
   async supportLookup(...args: Parameters<Method<'support','lookup'>>) { this.scope('support',args[0].id); return this.services.support.lookup(...args); }
   async supportInspect(...args: Parameters<Method<'support','inspect'>>) { this.scope('support',args[0].id); return this.services.support.inspect(...args); }
   async supportPrepare(...args: Parameters<Method<'support','prepare'>>) { this.scope('support',args[0].id); return this.services.support.prepare(...args); }

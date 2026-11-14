@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "agents": "0.30.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-durable": "1.4.0",
-    "@earendil-works/chord": "1.4.0"
+    "@earendil-works/chord": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-durable": "1.5.2",
+    "agents": "0.33.0"
   },
   "license": "MIT"
 }

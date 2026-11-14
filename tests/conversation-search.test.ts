@@ -17,7 +17,7 @@ test('default search combines exact thread and order matches across list, counts
   }
   const first = await list('?search=order-1&limit=1');
   assert.deepEqual(first.conversations.map((item: any) => item.id), ['conv-a']);
-  assert.deepEqual(first.counts, { all: 2, mine: 0, unassigned: 2 });
+  assert.deepEqual(first.counts, { all: 2, mine: 0, unassigned: 2, ai: 0 });
   assert.ok(first.nextCursor);
   const second = await list(`?search=order-1&limit=1&cursor=${first.nextCursor}`);
   assert.deepEqual(second.conversations.map((item: any) => item.id), ['conv-b']);

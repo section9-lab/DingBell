@@ -7,14 +7,6 @@ export type CloudflareEnv = ApplicationEnv['Bindings'] & { PI_AGENT: DurableObje
 export function withRuntime(env: CloudflareEnv): CloudflareEnv {
   if (env.AGENT_RUNTIME) return env;
   const object = (kind: AgentKind, id: string) => env.PI_AGENT.getByName(`${kind}:${id}`);
-  const translation: PortableAgents['translation'] = {
-    lookup: id => object('translation',id).translationLookup(id),
-    inspect: id => object('translation',id).translationInspect(id),
-    prepare: (scope,id) => object('translation',id).translationPrepare(scope,id),
-    close: (scope,id) => object('translation',id).translationClose(scope,id),
-    dispatch: run => object('translation',run.id).translationDispatch(run),
-    read: (id,receipt) => object('translation',id).translationRead(id,receipt),
-  };
   const support: PortableAgents['support'] = {
     lookup: run => object('support',run.id).supportLookup(run), inspect: run => object('support',run.id).supportInspect(run),
     prepare: run => object('support',run.id).supportPrepare(run), dispatch: run => object('support',run.id).supportDispatch(run),
@@ -22,5 +14,5 @@ export function withRuntime(env: CloudflareEnv): CloudflareEnv {
     read: run => object('support',run.id).supportRead(run), abort: run => object('support',run.id).supportAbort(run), close: run => object('support',run.id).supportClose(run),
     activity: run => object('support',run.id).supportActivity(run),
   };
-  return { ...env, AGENT_RUNTIME: { translation, support } };
+  return { ...env, AGENT_RUNTIME: { support } };
 }

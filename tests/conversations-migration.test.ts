@@ -62,5 +62,5 @@ test('conversation read indexes upgrade populated D1 without changing imported f
   const page=await listConversations(db,actor,{limit:50});assert.ok(page);
   assert.equal(page.items[0]?.id,'conv');assert.equal(page.items[0]?.latestMessage?.platformMessageId,'18446744073709551615');
   assert.deepEqual(page.items[0]?.workflow,{version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null});
-  assert.deepEqual(page.counts,{all:1,mine:0,unassigned:1});assert.equal(page.viewerMemberId,'owner-member');
+  assert.deepEqual(page.counts,{all:1,mine:0,unassigned:1,ai:0});assert.equal(page.viewerMemberId,'owner-member');
 });

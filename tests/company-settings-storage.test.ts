@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
-import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { readCompanySettings, saveCompanyTimeZone } from '../src/modules/company-settings/storage.ts';
+import { applyMigrations } from './fixtures/migrations.ts';
 
 test('real D1 settings use a single CAS winner, retain audit history and never create rows on read', { timeout: 60_000 }, async t => {
   const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
   t.after(()=>mf.dispose()); const db=await mf.getD1Database('DB') as unknown as D1Database;
-  const folder=new URL('../migrations/',import.meta.url);
-  for(const name of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort()) for(const statement of readFileSync(new URL(name,folder),'utf8').split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean)) await db.prepare(statement).run();
+  await applyMigrations(db);
   await db.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES('company','Company','company',1)").run();
   await db.prepare("INSERT INTO user(id,name,email,email_verified) VALUES('user','User','user@example.invalid',1)").run();
   await db.prepare("INSERT INTO member(id,organization_id,user_id,role,created_at) VALUES('member','company','user','admin',1)").run();

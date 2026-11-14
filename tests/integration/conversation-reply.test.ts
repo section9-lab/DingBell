@@ -5,7 +5,6 @@ import * as v from 'valibot';
 import { controlCommandSchema } from '../../src/modules/conversations/control-state.ts';
 import { encryptCredentials } from '../../src/modules/stores/credentials.ts';
 import { conversationControlFixture } from '../fixtures/conversation-control.ts';
-import { bindTranslationReceipt,createTranslationBudget,freezeTranslationOutput,reserveTranslation,setTranslationBudgetEnabled } from '../../src/modules/translations/storage.ts';
 
 const send=(expectedVersion=1,body='Здравствуйте!')=>({commandId:crypto.randomUUID(),action:'send_reply' as const,expectedVersion,body});
 test('manual reply command keeps exact plaintext, limits it to 1000 characters, and rejects extra fields',()=>{
@@ -85,44 +84,6 @@ test('cancellation survives delayed projections and restart even after the conve
   await f.restart();assert.equal((await reply(f,first.commandId)).status,'canceled');await f.call('faults',{value:{}});await f.call('repair');
   assert.equal((await f.db.prepare('SELECT state FROM send_intent WHERE id=?').bind(first.commandId).first())?.state,'canceled');
   assert.deepEqual((await f.call('execute',{command})).body.receipt,accepted.body.receipt);assert.equal(f.providerRequests.length,0);
-});
-
-async function frozenPreview(f:Fixture,conversationId='conv',completed=true){
-  if(!await f.db.prepare("SELECT id FROM translation_budget_bucket WHERE id='preview-budget'").first()){
-    await createTranslationBudget(f.db,f.actor(),{id:'preview-budget',startsAt:Date.now()-1000,endsAt:Date.now()+3600_000,limitMicros:1_000_000});
-    await setTranslationBudgetEnabled(f.db,f.actor(),'preview-budget',0,true);
-  }
-  const input={requestId:crypto.randomUUID(),storeId:'store',conversationId,expectedMemberId:'owner-member',source:'请核对三件商品的规格。',sourceRevision:7,budgetId:'preview-budget'};
-  const reserved=await reserveTranslation(f.db,f.actor(),input,{provider:'nvidia',model:'synthetic-model',modelConfigVersion:'synthetic-v1',promptVersion:'synthetic-v1',maxInputTokens:10,maxOutputTokens:10,
-    pricing:{version:'synthetic-price',currency:'USD',inputMicrosPerMillion:1,outputMicrosPerMillion:1,cacheReadMicrosPerMillion:1,cacheWriteMicrosPerMillion:1}});
-  assert.ok('run'in reserved);const scope={organizationId:'org',storeId:'store',conversationId},receipt={submissionId:reserved.run.id,uid:crypto.randomUUID(),acceptedAt:new Date().toISOString()};
-  await bindTranslationReceipt(f.db,scope,reserved.run.id,receipt);
-  const output=completed?await freezeTranslationOutput(f.db,scope,reserved.run.id,receipt,'Проверьте три товара.'):null;
-  return {run:reserved.run,output};
-}
-test('translated manual replies retain verified provenance and their exact edited final body across replay',{timeout:30_000},async t=>{
-  const f=await conversationControlFixture(undefined,{outboundEnabled:'true'});t.after(()=>f.close());await ready(f);
-  const preview=await frozenPreview(f),body='  Проверьте, пожалуйста, три товара.\nСпасибо!  ';
-  const command={...send(1,body),previewRequestId:preview.run.requestId};
-  const accepted=await f.call('execute',{command});assert.equal(accepted.body.outcome,'accepted',JSON.stringify(accepted.body));
-  const evidence=accepted.body.receipt.translation;assert.equal(accepted.body.receipt.previewRequestId,preview.run.requestId);
-  assert.equal(evidence.runId,preview.run.id);assert.equal(evidence.requestId,preview.run.requestId);assert.equal(evidence.sourceHash,preview.run.sourceHash);assert.equal(evidence.sourceRevision,7);assert.equal(evidence.outputHash,preview.output!.bodyHash);
-  const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(body)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');assert.equal(evidence.confirmedBodyHash,hash);assert.notEqual(hash,evidence.outputHash);
-  await until(async()=>(await reply(f,command.commandId)).status==='sent');assert.equal((await reply(f,command.commandId)).previewRequestId,preview.run.requestId);
-  assert.deepEqual(f.providerRequests,[{path:'/v1/chat/send/message',body:{chat_id:'thread',text:body}}]);
-  const audit=await f.db.prepare('SELECT receipt FROM conversation_control_event WHERE command_id=?').bind(command.commandId).first<string>('receipt');assert.ok(audit);assert.deepEqual(JSON.parse(audit).translation,evidence);
-  await f.restart();assert.deepEqual((await f.call('execute',{command})).body.receipt,accepted.body.receipt);
-  const {previewRequestId,...plain}=command;
-  for(const changed of [plain,{...command,previewRequestId:crypto.randomUUID()},{...command,body:body.trim()}])assert.equal((await f.call('execute',{command:changed})).body.reason,'command');
-  assert.equal(f.providerRequests.length,1);
-});
-test('translated replies require an original-member completed preview in the exact conversation',{timeout:30_000},async t=>{
-  const f=await conversationControlFixture(undefined,{outboundEnabled:'true'});t.after(()=>f.close());await ready(f);
-  const pending=await frozenPreview(f,'conv',false),foreign=await frozenPreview(f,'second'),owned=await frozenPreview(f);
-  for(const [requestId,actor] of [[crypto.randomUUID(),f.actor()],[pending.run.requestId,f.actor()],[foreign.run.requestId,f.actor()],[owned.run.requestId,f.actor('staff')]] as const){
-    const result=await f.call('execute',{actor,command:{...send(),previewRequestId:requestId}});assert.equal(result.body.outcome,'rejected',JSON.stringify(result.body));assert.equal(result.body.code,'PREVIEW_UNAVAILABLE');
-  }
-  const state=(await f.call('inspect')).body;assert.equal(state.state.version,1);assert.equal(state.replies.length,0);assert.equal(f.providerRequests.length,0);
 });
 
 test('manual reply gates reject without persisting intent and preserve original control behavior',{timeout:30_000},async t=>{

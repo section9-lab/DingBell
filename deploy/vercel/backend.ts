@@ -7,7 +7,7 @@ import { configuration, productionRequest } from './config.ts';
 const sandboxPrefix='dingbell-business-',driveName='dingbell-business-data';
 let opening:Promise<Sandbox>|undefined;
 const environmentKeys=['BETTER_AUTH_SECRET','BOOTSTRAP_SECRET','RESEND_API_KEY','MAIL_FROM','STORE_CREDENTIAL_KEYS','STORE_CREDENTIAL_ACTIVE_KEY',
-  'TRANSLATION_ENABLED','TRANSLATION_CONFIG_JSON','REPLY_TEST_ENABLED','AI_RECEPTION_ENABLED','AI_RECEPTION_CONFIG_JSON','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED','AI_KNOWLEDGE_QUERY_CONFIG_JSON'];
+  'REPLY_TEST_ENABLED','AI_RECEPTION_ENABLED','AI_RECEPTION_CONFIG_JSON','AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED','AI_KNOWLEDGE_QUERY_CONFIG_JSON'];
 async function files(directory:string,prefix:string):Promise<{path:string;content:Buffer}[]> {
  const result:{path:string;content:Buffer}[]=[];
  for(const entry of await readdir(directory,{withFileTypes:true})){

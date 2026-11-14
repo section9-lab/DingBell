@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {URL} from 'node:url';
-import {readFileSync,readdirSync} from 'node:fs';
 import {Miniflare} from 'miniflare';
+import {applyMigrations} from './fixtures/migrations.ts';
 import * as v from 'valibot';
 import {hashPassword} from 'better-auth/crypto';
 import {SqliteDatabase,migrateSqlite} from '../src/platform/node/database.ts';
@@ -62,7 +61,7 @@ test('history commands validate real UTC dates and protect source scope, manager
 
 test('historical pages stay frozen, deduplicate facts and scan backwards through empty windows on real D1',{timeout:60000},async t=>{
  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("history")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});t.after(()=>mf.dispose());const db=await mf.getD1Database('DB') as unknown as D1Database;
- const folder=new URL('../migrations/',import.meta.url);for(const file of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort())for(const sql of readFileSync(new URL(file,folder),'utf8').split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean))await db.prepare(sql).run();await seed(db);
+ await applyMigrations(db);await seed(db);
  for(const source of ['fbs_postings','fbo_postings','fbp_postings'] as const){
   await changePostingHistory(db,actor,'store',source,start());const mode=source==='fbs_postings'?'fbs':source==='fbo_postings'?'fbo':'fbp',recent=await db.prepare(`SELECT since,"to",cursor,history_start,last_completed_to,generation,revision FROM ${mode}_sync_window`).first();
   const first=await historical(db,source);assert.ok(Date.parse(first.work.to)-Date.parse(first.work.since)<=31*day);

@@ -12,7 +12,7 @@ const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(value
 const scopeSchema=v.strictObject({userId:identifier,memberId:identifier,companyId:identifier,conversationId:identifier});
 const selectorSchema=v.strictObject({userId:identifier,memberId:v.optional(identifier),companyId:v.optional(identifier),conversationId:v.optional(identifier)});
 const commandSchema=v.strictObject({action:v.literal('send_reply'),commandId:v.pipe(v.string(),v.uuid()),
-  expectedVersion:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1)),body:v.pipe(v.string(),v.check(isValidConversationReplyBody)),previewRequestId:v.optional(v.pipe(v.string(),v.uuid()))});
+  expectedVersion:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1)),body:v.pipe(v.string(),v.check(isValidConversationReplyBody))});
 const recordSchema=v.strictObject({v:v.literal(1),scope:scopeSchema,command:commandSchema});
 function keyFor(scope:PendingReplyScope){return prefix+encodeURIComponent(JSON.stringify([scope.userId,scope.memberId,scope.companyId,scope.conversationId]));}
 function keyScope(key:string):PendingReplyScope|null{
@@ -23,7 +23,7 @@ function keyScope(key:string):PendingReplyScope|null{
     return keyFor(scope)===key?scope:null;
   }catch{return null;}
 }
-function sameCommand(a:PendingReplyCommand,b:PendingReplyCommand){return a.commandId===b.commandId&&a.expectedVersion===b.expectedVersion&&a.action===b.action&&a.body===b.body&&a.previewRequestId===b.previewRequestId;}
+function sameCommand(a:PendingReplyCommand,b:PendingReplyCommand){return a.commandId===b.commandId&&a.expectedVersion===b.expectedVersion&&a.action===b.action&&a.body===b.body;}
 export function readPendingReply(storage:StorageInput,scope:PendingReplyScope):PendingReplyRead{
   try{
     if(!storage||!v.is(scopeSchema,scope))return {state:'blocked'};

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync, readdirSync } from 'node:fs';
 import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { encryptCredentials } from '../src/modules/stores/credentials.ts';
+import { applyMigrations } from './fixtures/migrations.ts';
 import { checkCursorProgress, historyCheckpoint, historyDueIn, retrySyncFailure, runSyncPage } from '../src/modules/sync/runner.ts';
 
 test('history cadence keeps unread chats warm and idle chats cheap', () => {
@@ -103,10 +103,7 @@ test('one bounded sync page discovers then imports history without creating an A
   context.after(() => mf.dispose());
   const database = await mf.getD1Database('DB');
   const db = database as unknown as D1Database;
-  const folder = new URL('../migrations/', import.meta.url);
-  for (const file of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) {
-    for (const sql of readFileSync(new URL(file, folder), 'utf8').split('--> statement-breakpoint').map(value => value.trim()).filter(Boolean)) await database.prepare(sql).run();
-  }
+  await applyMigrations(db);
   const env = { DB: db, STORE_CREDENTIAL_KEYS: JSON.stringify({ v1: btoa('a'.repeat(32)) }), STORE_CREDENTIAL_ACTIVE_KEY: 'v1' };
   const envelope = await encryptCredentials(env, { orgId: 'org', storeId: 'store', platformStoreId: '123456', credentialVersion: 1 }, { apiKey: 'synthetic-secret' });
   const now = Date.now();

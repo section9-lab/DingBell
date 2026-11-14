@@ -29,7 +29,6 @@
   ],
   "exclude": [
     "src/web",
-    "probes/pi-portability",
     "probes/vercel-native",
     "packages/agent-runtime"
   ]

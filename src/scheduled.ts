@@ -6,13 +6,11 @@ import type { SupportBindings } from './modules/ai-runs/execution.ts';
 import { repairAiExecutions } from './modules/ai-runs/repair.ts';
 import { deliverInboundEvents } from './modules/conversations/inbound-delivery.ts';
 import { dispatchAiReceptions } from './modules/ai-runs/dispatch.ts';
-import type {TranslationBindings} from './modules/translations/bindings.ts';
-import {repairFinancialUsage} from './modules/usage-repair.ts';
 import {reconcileBudgetLedgers} from './modules/budget-audit/reconciliation.ts';
 import {runStartupBootstrap} from './modules/sync/bootstrap.ts';
 
 
-type Bindings=SyncBindings&ControlBindings&SupportBindings&TranslationBindings;
+type Bindings=SyncBindings&ControlBindings&SupportBindings;
 async function repairOne(env:Bindings,scope:ControlScope) {
   // Move each selected directory behind other due work before potentially failing RPC.
   await deferControlRepair(env.DB!,scope,Date.now()+60_000);
@@ -33,5 +31,5 @@ export async function runScheduled(env:Bindings) {
     const reception=async()=>{try{await deliverInboundEvents(env);}finally{await dispatchAiReceptions(env);}};
     // One-time startup bootstrap starts the initial full read; after that, Ozon data is webhook-only.
     const bootstrap=async()=>{try{await runStartupBootstrap(env);}catch{/* The durable marker retries on the next tick. */}};
-    await Promise.allSettled([bootstrap(),reception(),repairControls(env),repairAiExecutions(env),repairFinancialUsage(env),reconcileBudgetLedgers(env)]);
+    await Promise.allSettled([bootstrap(),reception(),repairControls(env),repairAiExecutions(env),reconcileBudgetLedgers(env)]);
 }

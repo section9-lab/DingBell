@@ -27,7 +27,7 @@ export function AccountEmailPage({ kind }: { kind: 'verification' | 'password' }
     <AuthFrame>
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{kind === 'password' ? '找回密码' : '重新发送验证邮件'}</h1>
+          <h1 className="page-title">{kind === 'password' ? '找回密码' : '重新发送验证邮件'}</h1>
           <p className="text-sm leading-6 text-muted-foreground">输入你的账号邮箱，继续完成{kind === 'password' ? '密码重设' : '邮箱验证'}。</p>
         </div>
         {error != null && <ErrorNotice error={error} />}
@@ -90,7 +90,7 @@ export function ConfirmAccountPage({ kind }: { kind: 'verification' | 'password'
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
           {done && <CheckCircle2 className="size-8" aria-hidden="true" />}
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="page-title">
             {done ? (kind === 'verification' ? '邮箱已验证' : '密码已更新') : (kind === 'verification' ? '确认你的邮箱' : '设置新密码')}
           </h1>
           <p className="text-sm leading-6 text-muted-foreground">

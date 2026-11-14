@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { InvalidConversationCursor, listConversations } from '../src/modules/conversations/read.ts';
+import { applyMigrations } from './fixtures/migrations.ts';
 import type { ConversationListOptions, ConversationListResult, ConversationStateFilter } from '../src/modules/conversations/read-types.ts';
 import type { StoreActor } from '../src/modules/stores/storage.ts';
 
@@ -16,8 +16,8 @@ const ids=(page:ConversationListResult)=>page.items.map(item=>item.id);
 test('workflow queues, counters and identity share a freshly authorized D1 snapshot',{timeout:90_000},async t=>{
   const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("queue fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
   t.after(()=>mf.dispose());
-  const db=await mf.getD1Database('DB') as unknown as D1Database,folder=new URL('../migrations/',import.meta.url);
-  for(const file of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort())for(const sql of readFileSync(new URL(file,folder),'utf8').split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean))await db.prepare(sql).run();
+  const db=await mf.getD1Database('DB') as unknown as D1Database;
+  await applyMigrations(db);
   await db.batch([
     db.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES ('org','Org','org',1),('foreign','Foreign','foreign',1)"),
     db.prepare("INSERT INTO user(id,name,email,email_verified) VALUES ('owner-user','Owner','owner@example.invalid',1),('staff-user','Staff','staff@example.invalid',1),('target-user','Target','target@example.invalid',1),('foreign-user','Private name','foreign@example.invalid',1)"),
@@ -45,7 +45,7 @@ test('workflow queues, counters and identity share a freshly authorized D1 snaps
 
   await t.test('defaults normalize missing and v1 projections without creating directories or exposing foreign names',async()=>{
     const before=(await db.prepare('SELECT * FROM conversation_control ORDER BY conversation_id').all()).results;
-    const page=await read();assert.equal(page.viewerMemberId,'staff-member');assert.deepEqual(page.counts,{all:9,mine:3,unassigned:2});
+    const page=await read();assert.equal(page.viewerMemberId,'staff-member');assert.deepEqual(page.counts,{all:9,mine:3,unassigned:2,ai:0});
     assert.deepEqual(ids(page),entries.slice(0,9).map(row=>row[0]));
     const workflow=(id:string)=>page.items.find(item=>item.id===id)!.workflow;
     assert.deepEqual(workflow('empty'),{version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null});
@@ -57,22 +57,22 @@ test('workflow queues, counters and identity share a freshly authorized D1 snaps
   });
   await t.test('all queue and workflow combinations filter items while counts ignore the selected queue',async()=>{
     const groups:Record<ConversationStateFilter,string[]>={all:entries.slice(0,9).map(row=>row[0]),needs_reply:['empty','legacy-open','needs','removed','foreign-assignee'],waiting_customer:['customer'],waiting_internal:['internal'],resolved:['resolved','legacy-resolved']};
-    const mine=['legacy-open','customer','resolved'],unassigned=['empty','internal'];
-    for(const [state,expected]of Object.entries(groups))for(const queue of ['all','mine','unassigned'] as const){
+    const mine=['legacy-open','customer','resolved'],unassigned=['empty','internal'],ai:string[]=[];
+    for(const [state,expected]of Object.entries(groups))for(const queue of ['all','mine','unassigned','ai'] as const){
       const page=await read({queue,state:state as ConversationStateFilter});
-      assert.deepEqual(ids(page),queue==='all'?expected:expected.filter(id=>(queue==='mine'?mine:unassigned).includes(id)),`${queue}/${state}`);
-      assert.deepEqual(page.counts,{all:expected.length,mine:expected.filter(id=>mine.includes(id)).length,unassigned:expected.filter(id=>unassigned.includes(id)).length});
+      assert.deepEqual(ids(page),queue==='all'?expected:expected.filter(id=>(queue==='mine'?mine:queue==='ai'?ai:unassigned).includes(id)),`${queue}/${state}`);
+      assert.deepEqual(page.counts,{all:expected.length,mine:expected.filter(id=>mine.includes(id)).length,unassigned:expected.filter(id=>unassigned.includes(id)).length,ai:expected.filter(id=>ai.includes(id)).length});
     }
   });
   await t.test('counts respect store and exact searches but survive page boundaries and an empty later page',async()=>{
     const first=await read({limit:2});assert.ok(first.nextCursor);
     const second=await read({limit:2,cursor:first.nextCursor});assert.deepEqual(second.counts,first.counts);assert.notDeepEqual(ids(second),ids(first));
     const empty=await read({cursor:encode({...decode(first.nextCursor),at:0,id:'!'})});assert.deepEqual(empty.items,[]);assert.deepEqual(empty.counts,first.counts);
-    assert.deepEqual((await read({search:{field:'order',value:'order-shared'}})).counts,{all:2,mine:1,unassigned:1});
-    assert.deepEqual((await read({search:{field:'thread',value:'thread-needs'}})).counts,{all:1,mine:0,unassigned:0});
-    const none=await read({search:{field:'thread',value:'not-present'}});assert.deepEqual(none.counts,{all:0,mine:0,unassigned:0});assert.equal(none.viewerMemberId,'staff-member');
-    assert.deepEqual((await read({storeId:'hidden'},owner)).counts,{all:1,mine:0,unassigned:0});
-    assert.deepEqual((await read({storeId:'hidden'})).counts,{all:0,mine:0,unassigned:0});
+    assert.deepEqual((await read({search:{field:'order',value:'order-shared'}})).counts,{all:2,mine:1,unassigned:1,ai:0});
+    assert.deepEqual((await read({search:{field:'thread',value:'thread-needs'}})).counts,{all:1,mine:0,unassigned:0,ai:0});
+    const none=await read({search:{field:'thread',value:'not-present'}});assert.deepEqual(none.counts,{all:0,mine:0,unassigned:0,ai:0});assert.equal(none.viewerMemberId,'staff-member');
+    assert.deepEqual((await read({storeId:'hidden'},owner)).counts,{all:1,mine:0,unassigned:0,ai:0});
+    assert.deepEqual((await read({storeId:'hidden'})).counts,{all:0,mine:0,unassigned:0,ai:0});
   });
   await t.test('v2 cursors bind queue, state, viewer, store and search while v1 cursors fail explicitly',async()=>{
     const page=await read({limit:1});assert.ok(page.nextCursor);const cursor=decode(page.nextCursor);
@@ -109,7 +109,7 @@ test('workflow queues, counters and identity share a freshly authorized D1 snaps
   });
   await t.test('fresh grants, verified identity and session restrict both counters and rows, including empty pages',async()=>{
     await db.prepare("UPDATE member SET role='member' WHERE id='staff-rejoined'").run();
-    assert.deepEqual((await read()).counts,{all:0,mine:0,unassigned:0});
+    assert.deepEqual((await read()).counts,{all:0,mine:0,unassigned:0,ai:0});
     await db.prepare("INSERT INTO store_grant(organization_id,store_id,member_id,created_at) VALUES ('org','store','staff-rejoined',3)").run();
     assert.equal((await read()).counts.all,9);
     assert.equal(await listConversations(db,{...staff,orgId:'foreign'},{limit:1}),null);
@@ -117,5 +117,13 @@ test('workflow queues, counters and identity share a freshly authorized D1 snaps
     await db.prepare("UPDATE user SET email_verified=0 WHERE id='staff-user'").run();assert.equal(await listConversations(db,staff,{limit:1}),null);
     await db.prepare("UPDATE user SET email_verified=1 WHERE id='staff-user'").run();
     await db.prepare("UPDATE session SET expires_at=1 WHERE id='staff-session'").run();assert.equal(await listConversations(db,staff,{limit:1}),null);
+  });
+  await t.test('AI queue selects reception=ai and reports an independent count',async()=>{
+    await db.prepare('UPDATE session SET expires_at=? WHERE id=?').bind(Date.now()+3_600_000,staff.sessionId).run();
+    await db.prepare("UPDATE conversation_control SET reception='ai',assigned_member_id=NULL,work_status='needs_reply' WHERE conversation_id='needs'").run();
+    const page=await read({queue:'ai'});
+    assert.deepEqual(ids(page),['needs']);
+    assert.equal(page.counts.ai,1);
+    assert.equal(page.counts.unassigned,3);
   });
 });

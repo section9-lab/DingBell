@@ -19,7 +19,7 @@ test('the v2 reply agent validates read/bash/fact/send tools without touching th
  assert.throws(()=>p.validateSupportModel(parsed.config.model,262144,'intake-v1'));
 });
 test('automatic reply configuration readiness requires all three switches',async()=>{
- const m=await api(),env={AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true',NVAPI_KEY:'synthetic-private-value',CONVERSATION_CONTROLLER:{} as any,FLUE_SUPPORT_AGENT:{} as any,
+ const m=await api(),env={AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true',NVAPI_KEY:'synthetic-private-value',CONVERSATION_CONTROLLER:{} as any,AGENT_RUNTIME:{} as any,
   AI_RECEPTION_CONFIG_JSON:JSON.stringify({...config,model:{...config.model,promptVersion:'support-reply-v2'}})};
  assert.equal(m.supportConfigurationView(env).enabled,true);
  for(const flag of ['AI_OUTBOUND_ENABLED','OUTBOUND_ENABLED'])for(const value of [undefined,'false','TRUE'])assert.equal(m.supportConfigurationView({...env,[flag]:value}).enabled,false,flag);
@@ -36,10 +36,10 @@ test('missing prices, unsupported models or versions, context under-reservation 
 });
 test('public readiness reveals bounded configuration metadata, never the key or raw price configuration',async t=>{
  const m=await api(),fetch=t.mock.method(globalThis,'fetch',async()=>{throw new Error('configuration inspection must not call the network');});
- const env={NVAPI_KEY:'synthetic-private-value',AI_RECEPTION_CONFIG_JSON:JSON.stringify(config),CONVERSATION_CONTROLLER:{} as any,FLUE_SUPPORT_AGENT:{} as any};
+ const env={NVAPI_KEY:'synthetic-private-value',AI_RECEPTION_CONFIG_JSON:JSON.stringify(config),CONVERSATION_CONTROLLER:{} as any,AGENT_RUNTIME:{} as any};
  const result=m.supportConfigurationView(env);assert.equal(result.enabled,true);assert.equal(result.modelConfigured,true);assert.equal(result.pricesConfigured,true);assert.equal(result.runReservationMicros,792576);assert.equal(result.maxGenerations,3);
  assert.equal(JSON.stringify(result).includes(env.NVAPI_KEY),false);assert.equal(JSON.stringify(result).includes('inputMicrosPerMillion'),false);assert.equal(fetch.mock.callCount(),0);
- assert.equal(m.supportConfigurationView({...env,AI_RECEPTION_CONFIG_JSON:undefined}).enabled,false);assert.equal(m.supportConfigurationView({...env,NVAPI_KEY:' '}).modelConfigured,false);assert.equal(m.supportConfigurationView({...env,FLUE_SUPPORT_AGENT:undefined}).modelConfigured,false);
+ assert.equal(m.supportConfigurationView({...env,AI_RECEPTION_CONFIG_JSON:undefined}).enabled,false);assert.equal(m.supportConfigurationView({...env,NVAPI_KEY:' '}).modelConfigured,false);assert.equal(m.supportConfigurationView({...env,AGENT_RUNTIME:undefined}).modelConfigured,false);
 });
 test('absent, malformed, oversized and incomplete configuration remains visibly unconfigured without a free fallback',async()=>{
  const m=await api();for(const raw of [undefined,'','{bad',JSON.stringify({model:config.model}),' '.repeat(32769)]){

@@ -12,7 +12,7 @@ const replyId=v.pipe(v.string(),v.check(value=>v.is(uuid,value.startsWith('ai-re
 const replyReason=v.nullable(v.pipe(v.string(),v.minLength(1),v.maxLength(128),v.regex(/^[A-Za-z][A-Za-z0-9_]*$/)));
 const replyAttemptSchema=v.object({id,status:v.picklist(['sending','sent','failed','unknown']),startedAt:timestamp,finishedAt:v.nullable(timestamp),
   httpStatus:v.nullable(v.pipe(v.number(),v.integer(),v.minValue(100),v.maxValue(599))),providerResult:v.nullable(v.literal('success')),errorCode:replyReason});
-const replySchema=v.pipe(v.object({intentId:replyId,commandId:replyId,body:replyBody,previewRequestId:v.optional(uuid),status:v.picklist(['queued','sending','sent','failed','unknown','skipped','canceled']),
+const replySchema=v.pipe(v.object({intentId:replyId,commandId:replyId,body:replyBody,status:v.picklist(['queued','sending','sent','failed','unknown','skipped','canceled']),
   revision:v.pipe(count,v.minValue(1)),createdAt:timestamp,updatedAt:timestamp,reason:replyReason,attempt:v.nullable(replyAttemptSchema)}),v.check(reply=>{
   if(reply.intentId!==reply.commandId||Date.parse(reply.updatedAt)<Date.parse(reply.createdAt))return false;
   const attempt=reply.attempt;
@@ -50,11 +50,9 @@ const commandSchema=v.union([
   v.strictObject({...commandFields,action:v.literal('set_work_status'),workStatus:workStatusSchema}),
   v.strictObject({...commandFields,action:v.literal('transfer'),targetMemberId:id,reason:v.pipe(v.string(),v.trim(),reason)}),
   v.strictObject({...commandFields,action:v.literal('add_note'),body:noteBody}),
-  v.strictObject({...commandFields,action:v.literal('send_reply'),body:replyBody,previewRequestId:v.optional(uuid)}),
+  v.strictObject({...commandFields,action:v.literal('send_reply'),body:replyBody}),
   v.strictObject({...commandFields,action:v.literal('cancel_reply'),targetIntentId:uuid}),
 ]);
-const digest=v.pipe(v.string(),v.regex(/^[a-f0-9]{64}$/));
-const translationSchema=v.object({requestId:uuid,runId:uuid,sourceRevision:count,sourceHash:digest,outputHash:digest,confirmedBodyHash:digest});
 const receiptFields={...commandFields,actorUserId:id,actorMemberId:id};
 const receiptSchema=v.union([
   v.object({...receiptFields,action:actionSchema,appliedState:v.union([legacyStateSchema,stateSchema])}),
@@ -63,7 +61,7 @@ const receiptSchema=v.union([
   v.object({...receiptFields,action:v.literal('transfer'),targetMemberId:id,reason,
     appliedState:v.pipe(stateSchema,v.check(state=>state.lifecycle==='open'&&state.reception==='human'))}),
   v.object({...receiptFields,action:v.literal('add_note'),body:noteBody,authorName:v.string(),appliedState:stateSchema}),
-  v.object({...receiptFields,action:v.literal('send_reply'),body:replyBody,intentId:v.pipe(v.string(),v.uuid()),previewRequestId:v.optional(uuid),translation:v.optional(translationSchema),
+  v.object({...receiptFields,action:v.literal('send_reply'),body:replyBody,intentId:v.pipe(v.string(),v.uuid()),
     appliedState:v.pipe(stateSchema,v.check(state=>state.lifecycle==='open'&&state.reception==='human'))}),
   v.object({...receiptFields,action:v.literal('cancel_reply'),targetIntentId:uuid,appliedState:stateSchema}),
 ]);
@@ -134,8 +132,6 @@ export async function sendConversationCommand(companyId:string,conversationId:st
   const input=parsed.output;
   const boundMember=input.action==='send_reply'||input.action==='cancel_reply';
   if(boundMember&&(typeof expectedMemberId!=='string'||!v.is(id,expectedMemberId)||expectedMemberId!==expectedMemberId.trim()||!expectedMemberId.isWellFormed()||/[\u0000-\u001f\u007f]/.test(expectedMemberId)))throw new ApiError('INVALID_REQUEST');
-  const confirmedHash=input.action==='send_reply'&&input.previewRequestId
-    ?[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(input.body)))].map(byte=>byte.toString(16).padStart(2,'0')).join(''):null;
   return request(`${base}/commands`,v.pipe(v.object({
     companyId:v.literal(companyId),conversationId:v.literal(conversationId),
     receipt:receiptSchema,control:controlSchema,
@@ -147,15 +143,14 @@ export async function sendConversationCommand(companyId:string,conversationId:st
     if(input.action==='transfer'&&(receipt.action!=='transfer'||receipt.targetMemberId!==input.targetMemberId||receipt.reason!==input.reason||applied.assignedMemberId!==input.targetMemberId))return false;
     if(input.action==='add_note'&&(receipt.action!=='add_note'||receipt.body!==input.body))return false;
     if(input.action==='send_reply'){
-      if(receipt.action!=='send_reply'||receipt.body!==input.body||receipt.intentId!==input.commandId||receipt.actorMemberId!==expectedMemberId||receipt.previewRequestId!==input.previewRequestId)return false;
-      if(input.previewRequestId?(receipt.translation?.requestId!==input.previewRequestId||receipt.translation?.confirmedBodyHash!==confirmedHash):receipt.translation!==undefined)return false;
+      if(receipt.action!=='send_reply'||receipt.body!==input.body||receipt.intentId!==input.commandId||receipt.actorMemberId!==expectedMemberId )return false;
     }
     if(input.action==='cancel_reply'&&(receipt.action!=='cancel_reply'||receipt.targetIntentId!==input.targetIntentId||receipt.actorMemberId!==expectedMemberId))return false;
     // A replay can return an older receipt alongside the current state. Never replace the latter with the receipt.
     return current.version>applied.version||Object.entries(applied).every(([key,field])=>current[key as keyof ConversationControlState]===field);
   })),{method:'POST',body:JSON.stringify(input),...(boundMember?{headers:{'X-DingBell-Member-Id':encodeURIComponent(expectedMemberId!)}}:{})}).catch(error=>{
     // Unknown write errors do not prove the controller rejected the original intent.
-    const known=['INVALID_REQUEST','CONVERSATION_CHANGED','OUTBOUND_DISABLED','CAPABILITY_UNVERIFIED','REPLY_UNAVAILABLE','PREVIEW_UNAVAILABLE','REPLY_NOT_CANCELABLE','CONTROL_NOT_CONFIGURED',
+    const known=['INVALID_REQUEST','CONVERSATION_CHANGED','OUTBOUND_DISABLED','CAPABILITY_UNVERIFIED','REPLY_UNAVAILABLE','REPLY_NOT_CANCELABLE','CONTROL_NOT_CONFIGURED',
       'COMMAND_CONFLICT','UNAUTHENTICATED','FORBIDDEN','NOT_FOUND','ORIGIN_REJECTED','RATE_LIMITED'];
     if(boundMember&&error instanceof ApiError&&!known.includes(error.code))throw new ApiError('OPERATION_UNCONFIRMED',error.requestId);
     throw error;

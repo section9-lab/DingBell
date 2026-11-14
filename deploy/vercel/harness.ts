@@ -1,10 +1,33 @@
 import { waitUntil } from '@vercel/functions';
 import { openWorldReader, openWorldStorage, resumeWith } from 'durable-harness/pi-durable';
+import type { Seq, Storage, StorageWrite } from '@earendil-works/pi-durable';
 import { context, openAgent, providerId, readAgentLoop, readResult } from '../../packages/agent-runtime/harness.ts';
 import { authority } from './authority.ts';
 import { internal } from './config.ts';
 
-export const open=resumeWith(async storage=>openAgent(storage,await authority.describe(storage.sessionId),authority),{traceAudience:'private',maxDriveMs:240000});
+type LegacyWorldStorage = Awaited<ReturnType<typeof openWorldStorage>>;
+/**
+ * durable-harness 0.0.2 commits one write set per call, while Pi Durable 1.5
+ * commits a sequence of atomic batches and reports each durable seq. Persist the
+ * batches in order and deliver the receipts after all of them are durable.
+ */
+function adaptWorldStorage(storage: LegacyWorldStorage): Storage {
+  const commit = storage.commit as unknown as (writes: readonly StorageWrite[], context: Parameters<Storage['commit']>[2]) => Promise<Seq>;
+  return new Proxy(storage as unknown as Storage, {
+    get(_target, property) {
+      if (property === 'commit') return async (batches: readonly (readonly StorageWrite[])[], receive: (index: number, seq: Seq) => void, context: Parameters<Storage['commit']>[2]) => {
+        const seqs: Seq[] = [];
+        for (const batch of batches) seqs.push(await commit.call(storage, batch, context));
+        for (const [index, seq] of seqs.entries()) receive(index, seq);
+        return { stored: seqs.length };
+      };
+      const value = Reflect.get(storage, property, storage);
+      return typeof value === 'function' ? value.bind(storage) : value;
+    },
+  });
+}
+
+export const open=resumeWith(async storage=>openAgent(adaptWorldStorage(storage),await authority.describe(storage.sessionId),authority),{traceAudience:'private',maxDriveMs:240000});
 export async function POST(request:Request) {
   if(!internal(request))return new Response(null,{status:401});
   const value:unknown=await request.json();

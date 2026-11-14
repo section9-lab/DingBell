@@ -2,7 +2,6 @@ import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { nvidiaProvider } from '@earendil-works/pi-ai/providers/nvidia';
 import { createModels } from '@earendil-works/pi-ai/models';
 import { AssistantEntry, createRegistry, defineTool, Harness, type EntryRecord, type HarnessOptions, type Storage, type SubmissionId } from '@earendil-works/pi-durable';
-import type { TSchema } from '@earendil-works/pi-ai';
 import type { AgentAuthority, AgentDefinition, AgentLoop, AgentLoopStep, AgentResult } from './contracts.ts';
 import { legacyNemotron } from './model.ts';
 
@@ -37,7 +36,7 @@ export async function openAgent(storage: Storage, definition: AgentDefinition, a
   });
   const registry = createRegistry();
   registry.install({ name: 'dingbell-business', tools: definition.tools.map(tool => defineTool({
-    name: tool.name, description: tool.description, parameters: tool.parameters as TSchema, replay: 'safe', executionMode: 'sequential',
+    name: tool.name, description: tool.description, parameters: tool.parameters, replay: 'safe', executionMode: 'sequential',
     async execute(value, api, invocation) {
       const signal = invocation.abortSignal ? AbortSignal.any([invocation.abortSignal, AbortSignal.timeout(tool.timeoutMs)]) : AbortSignal.timeout(tool.timeoutMs);
       const result = await authority.tool(definition.uid, tool.name, value, String(api.taskId), signal);

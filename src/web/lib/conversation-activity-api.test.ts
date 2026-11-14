@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readConversationActivity} from './conversation-activity-api.ts';
-const entry={id:'control:2',sequence:2,category:'human_action' as const,action:'takeover' as const,occurredAt:new Date(2).toISOString(),actor:{memberId:'member',name:'Staff',status:'present' as const},state:{lifecycle:'open' as const,reception:'human' as const,workStatus:'needs_reply' as const},artifacts:{platformMessage:false,internalNote:false,translationEvidence:false,replyIntent:false},aiRun:null,delivery:null};
+const entry={id:'control:2',sequence:2,category:'human_action' as const,action:'takeover' as const,occurredAt:new Date(2).toISOString(),actor:{memberId:'member',name:'Staff',status:'present' as const},state:{lifecycle:'open' as const,reception:'human' as const,workStatus:'needs_reply' as const},artifacts:{platformMessage:false,internalNote:false,replyIntent:false},aiRun:null,delivery:null};
 test('conversation activity reads bounded content-free control history',async t=>{
  let call:{url:string;init:RequestInit}|undefined;t.mock.method(globalThis,'fetch',async(url:string,init:RequestInit)=>{call={url,init};return Response.json({companyId:'company',conversationId:'conversation',viewerMemberId:'member',entries:[entry],nextCursor:'next'});});
  const result=await readConversationActivity('company','conversation',{limit:20,cursor:'cursor',category:'human_action',action:'takeover',from:1,to:3});assert.deepEqual(result.entries,[entry]);assert.equal(call!.url,'/api/companies/company/conversations/conversation/activity?limit=20&cursor=cursor&category=human_action&action=takeover&from=1&to=3');assert.equal(call!.init.method,undefined);assert.equal(call!.init.cache,'no-store');

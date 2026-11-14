@@ -14,16 +14,6 @@ class MemoryStorage implements PendingReplyStorage{
 }
 function saved(){const storage=new MemoryStorage();assert.equal(savePendingReply(storage,scope,command),true);return storage;}
 
-test('pending translated replies preserve their preview reference and cannot be downgraded to plain replies',()=>{
-  const storage=new MemoryStorage(),translated={...command,previewRequestId:crypto.randomUUID()};
-  assert.equal(savePendingReply(storage,scope,translated),true);assert.deepEqual(readPendingReply(storage,scope),{state:'pending',command:translated});
-  for(const changed of [command,{...translated,previewRequestId:crypto.randomUUID()}]){
-    assert.equal(savePendingReply(storage,scope,changed),false);assert.equal(clearPendingReply(storage,scope,changed),false);
-  }
-  assert.equal(savePendingReply(storage,scope,{...translated}),true);assert.equal(clearPendingReply(storage,scope,translated),true);
-  assert.deepEqual(readPendingReply(storage,scope),{state:'none'});
-});
-
 test('pending reply persists exact frozen command before dispatch and can be read again after recreating its UI',()=>{
   const storage=new MemoryStorage();assert.deepEqual(readPendingReply(storage,scope),{state:'none'});
   assert.equal(savePendingReply(storage,scope,command),true);assert.equal(storage.writes,1);

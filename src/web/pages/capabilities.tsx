@@ -50,7 +50,6 @@ function syncState(sync: ReadinessSync, configured: boolean) {
 
 const variables = `# 本地写入 .dev.vars；线上配置为 Worker 变量或密钥，改完重启生效
 OUTBOUND_ENABLED=true          # 人工回复发送（还需要店铺聊天回复能力）
-TRANSLATION_ENABLED=true       # 译文预览；还需独立模型、完整价格与翻译预算
 AI_OUTBOUND_ENABLED=true       # AI 自动发送；同时需要 OUTBOUND_ENABLED`;
 
 type Step = { name: string; detail: string; ready: boolean; blocked?: 'unconfigured' | 'disabled'; env?: string[]; to?: string; action?: string };
@@ -83,8 +82,7 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
   const steps: Step[] = [
     { name: '回复策略', detail: data.policies.enabled ? `${data.policies.enabled} 条已启用，共 ${data.policies.total} 条草稿。` : data.policies.total ? `${data.policies.total} 条草稿尚未启用，AI 托管没有可执行策略。` : '还没有回复策略，AI 托管即使打开也不会自动回复。', ready: data.policies.enabled > 0, blocked: 'unconfigured', to: '/workspace/reply-policies', action: '配置策略' },
     { name: '知识库发布', detail: data.knowledge.published ? `${data.knowledge.published} 篇已发布，共 ${data.knowledge.total} 篇。` : data.knowledge.total ? `${data.knowledge.total} 篇存在草稿，但没有已发布版本，AI 无法引用。` : '还没有知识资料，AI 只能按策略通用回复。', ready: data.knowledge.published > 0, blocked: 'unconfigured', to: '/workspace/knowledge', action: '管理知识' },
-    { name: '人工回复发送', detail: deployment.outbound ? '可以在消息中心直接发送回复。' : '消息中心可以撰写与翻译，但发送开关未开。', ready: deployment.outbound, blocked: 'disabled', env: ['OUTBOUND_ENABLED'] },
-    { name: '翻译成俄语', detail: !deployment.translation.enabled ? '译文预览未启用。' : !deployment.translation.configured || !deployment.translation.model ? '已启用，但独立翻译配置或模型密钥不完整；不能仅靠保存客服连接启用，请联系部署管理员核查。' : '可在回复编辑器里把中文译成俄语。', ready: deployment.translation.enabled && deployment.translation.configured && deployment.translation.model, blocked: deployment.translation.enabled ? 'unconfigured' : 'disabled', env: ['TRANSLATION_ENABLED', 'TRANSLATION_CONFIG_JSON'] },
+    { name: '人工回复发送', detail: deployment.outbound ? '可以在消息中心直接发送回复。' : '消息中心可以撰写草稿，但发送开关未开。', ready: deployment.outbound, blocked: 'disabled', env: ['OUTBOUND_ENABLED'] },
     { name: 'AI 托管接待', detail: !deployment.ai.modelConfigured ? '还没有在「公司设置 > AI 模型」保存可用连接，或缺少运行绑定。' : !deployment.ai.pricesConfigured ? '模型连接已保存，但价格或执行限制不完整。' : '执行配置已保存；每次接待仍需可用预算、已发布策略及当前店铺权限。', ready: deployment.ai.enabled && deployment.ai.pricesConfigured, blocked: 'unconfigured', to: '/workspace/settings', action: '配置模型' },
     { name: 'AI 自动发送', detail: deployment.aiOutbound && deployment.outbound ? '部署发送开关已开；仍需公司显式授权、预算、策略与店铺发送许可。' : '部署不允许 AI 自动外发；AI 不会直接回复买家。', ready: deployment.aiOutbound && deployment.outbound, blocked: 'disabled', env: ['AI_OUTBOUND_ENABLED', 'OUTBOUND_ENABLED'] },
   ];
@@ -95,7 +93,7 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
   return <>
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">能力与数据</h1>
+        <h1 className="page-title">能力与数据</h1>
         <p className="text-sm leading-6 text-muted-foreground">所有能力与数据的实时状态。数据同步可以在这里开关；对外发送与 AI 相关的开关由部署配置决定，这里说明它们的状态与开启方式。</p>
       </div>
       <Button variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}><RefreshCw data-icon="inline-start" />刷新状态</Button>
@@ -149,8 +147,8 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
         <h2 id="reception-steps" className="text-base font-semibold">接待能力</h2>
         <p className="text-xs text-muted-foreground">自上而下依次就绪，AI 才能接手</p>
       </div>
-      <div className="divide-y overflow-hidden rounded-xl border">
-        {steps.map(step => <div key={step.name} className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-background p-4">
+      <div className="surface-card divide-y overflow-hidden p-0">
+        {steps.map(step => <div key={step.name} className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-card p-4">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">{step.name}</span>
               <Badge variant={step.ready ? 'secondary' : step.blocked === 'disabled' ? 'outline' : 'destructive'}>{step.ready ? '已就绪' : step.blocked === 'unconfigured' ? '缺少配置' : '未启用'}</Badge>
@@ -166,11 +164,11 @@ export function CapabilitiesPage({ company, refresh }: { company: Company; refre
     <section aria-labelledby="deployment" className="flex flex-col gap-3">
       <h2 id="deployment" className="text-base font-semibold">部署配置</h2>
       <p className="text-sm leading-6 text-muted-foreground">下面这些能力不会在界面里出现开关：它们决定消息能否真正发到 Ozon、模型能否被调用。本地写在 <code className="rounded bg-muted px-1 py-0.5 text-xs">.dev.vars</code>，线上配置为 Worker 变量或密钥，修改后需要重启或重新部署。</p>
-      <div className="relative overflow-x-auto rounded-xl border bg-muted/40 p-4">
+      <div className="relative overflow-x-auto rounded-[1.25rem] border border-border/70 bg-muted/40 p-4">
         <pre className="text-xs leading-6"><code>{variables}</code></pre>
         <Button size="sm" variant="outline" className="absolute right-3 top-3" onClick={() => { const clipboard = navigator.clipboard; if (!clipboard) { toast.error('无法复制', '当前浏览器不允许访问剪贴板，请手动选择文本复制。'); return; } void clipboard.writeText(variables).then(() => toast.success('已复制', '部署配置片段已复制到剪贴板。'), () => toast.error('无法复制', '浏览器拒绝了剪贴板访问，请手动选择文本复制。')); }}><Copy data-icon="inline-start" />复制</Button>
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">开启后仍需逐项核对：翻译需要已审核的翻译配置与预算，AI 接待需要已审核的模型价格与回复策略，自动发送还需要店铺的聊天回复能力。任何一项缺失时，界面会显示「缺少配置」而不是「已就绪」。</p>
+      <p className="text-xs leading-5 text-muted-foreground">开启后仍需逐项核对：AI 接待需要已审核的模型价格与回复策略，自动发送还需要店铺的聊天回复能力。任何一项缺失时，界面会显示「缺少配置」而不是「已就绪」。</p>
     </section>
   </>;
 }

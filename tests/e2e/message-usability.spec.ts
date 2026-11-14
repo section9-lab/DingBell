@@ -64,7 +64,7 @@ test('long names and a full draft keep history, reply actions and keyboard dialo
     const details = page.getByRole('button', { name: '会话详情', exact: true });
     await details.focus(); await page.keyboard.press('Enter');
     const drawer = page.getByRole('dialog', { name: '会话详情', exact: true });
-    await expect(drawer).toBeVisible(); await expect(drawer).toHaveAccessibleDescription('查看商品、订单包裹、消息来源与同步范围。');
+    await expect(drawer).toBeVisible(); await expect(drawer).toHaveAccessibleDescription('查看商品与订单摘要。');
     await containedFocus(page, drawer);
     await page.keyboard.press('Escape'); await expect(drawer).toBeHidden(); await expect(details).toBeFocused();
     // 发送是单步动作，这里只校验按钮可用与可聚焦，不触发真实发送。
@@ -129,7 +129,11 @@ test('keyboard resizing and mobile navigation preserve the same reply draft', as
   await expect(separator).toBeVisible();
   await expect(draft).toHaveValue('请确认规格，再回复消费者。');
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.getByRole('link', { name: '开始使用', exact: true }).click();
+  // The home entry moved out of the icon rail; use the command palette for the same client-side navigation.
+  await page.keyboard.press('Meta+k');
+  const palette = page.getByRole('dialog');
+  await palette.getByRole('combobox', { name: '搜索页面', exact: true }).fill('开始使用');
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: '公司工作区', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: '进入消息中心', exact: true })).toBeVisible();
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);

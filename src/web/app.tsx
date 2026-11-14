@@ -14,7 +14,7 @@ import {
   useQuery,
 } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
-import { ApiError, activateCompany, readIdentity, signOut, type Company } from './lib/api';
+import { ApiError, activateCompany, readIdentity, signOut, type Company, type Identity } from './lib/api';
 import { isWorkspacePath, workspaceRoutes, workspaceSection, type WorkspaceSection } from './lib/routes';
 import {
   AuthFrame,
@@ -28,7 +28,6 @@ import { Button } from './components/ui/button';
 import { LoginPage } from './pages/login';
 import { invitationReturnTo } from './lib/account-links';
 import { clearPendingReplies } from './lib/conversation-reply-pending';
-import { clearPendingPreviews } from './lib/conversation-preview-pending';
 import { clearAiResumptions } from './lib/ai-reception-pending';
 import { clearReplyDrafts } from './lib/conversation-draft';
 
@@ -38,7 +37,6 @@ const loadTeam = () => import('./pages/team');
 const loadStores = () => import('./pages/stores');
 const loadCompanySettings = () => import('./pages/company-settings');
 const loadKnowledge = () => import('./pages/knowledge');
-const loadCapabilities = () => import('./pages/capabilities');
 const loadReplyPolicies = () => import('./pages/reply-policies');
 const loadMessages = () => import('./pages/messages');
 const loadProducts = () => import('./pages/products');
@@ -54,7 +52,6 @@ const TeamPage = lazy(async () => ({ default: (await loadTeam()).TeamPage }));
 const StoresPage = lazy(async () => ({ default: (await loadStores()).StoresPage }));
 const CompanySettingsPage = lazy(async () => ({ default: (await loadCompanySettings()).CompanySettingsPage }));
 const KnowledgePage = lazy(async () => ({ default: (await loadKnowledge()).KnowledgePage }));
-const CapabilitiesPage = lazy(async () => ({ default: (await loadCapabilities()).CapabilitiesPage }));
 const ReplyPoliciesPage = lazy(async () => ({ default: (await loadReplyPolicies()).ReplyPoliciesPage }));
 const MessagesPage = lazy(async () => ({ default: (await loadMessages()).MessagesPage }));
 const ProductsPage = lazy(async () => ({ default: (await loadProducts()).ProductsPage }));
@@ -69,7 +66,6 @@ const workspaceLoaders: Record<string, () => Promise<unknown>> = {
   [workspaceRoutes.stores]: loadStores,
   [workspaceRoutes.settings]: loadCompanySettings,
   [workspaceRoutes.knowledge]: loadKnowledge,
-  [workspaceRoutes.capabilities]: loadCapabilities,
   [workspaceRoutes.policies]: loadReplyPolicies,
   [workspaceRoutes.messages]: loadMessages,
   [workspaceRoutes.products]: loadProducts,
@@ -176,7 +172,7 @@ function IdentityPages({
     const userId = identity.data?.session?.user.id;
     void change(async () => {
       await signOut();
-      if (userId) { try { clearPendingReplies(window.sessionStorage, { userId }); clearPendingPreviews(window.sessionStorage, { userId }); clearAiResumptions(window.sessionStorage, { userId }); clearReplyDrafts(window.sessionStorage, { userId }); } catch { /* Storage may be unavailable. */ } }
+      if (userId) { try { clearPendingReplies(window.sessionStorage, { userId }); clearAiResumptions(window.sessionStorage, { userId }); clearReplyDrafts(window.sessionStorage, { userId }); } catch { /* Storage may be unavailable. */ } }
     });
   }
   if (!online || identity.isPaused)
@@ -231,7 +227,7 @@ function IdentityPages({
       section={section}
     >
       {section === 'home' ? undefined : (
-        <WorkspaceRouteView section={section} company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} reset={reset} />
+        <WorkspaceRouteView section={section} identity={data} company={active} emailConfigured={data.setup.email.configured} userId={data.session.user.id} reset={reset} />
       )}
     </WorkspacePage>
     </CompanySettingsProvider>
@@ -262,6 +258,7 @@ function IdentityPages({
           ) : (
             <LoginPage
               configured={data.setup.identity.configured}
+              emailConfigured={data.setup.email.configured}
               reset={reset}
               notice={notice}
               retry={() => {
@@ -277,7 +274,7 @@ function IdentityPages({
       <Route path={workspaceRoutes.settings} element={workspaceView} />
       <Route path={workspaceRoutes.policies} element={workspaceView} />
       <Route path={workspaceRoutes.knowledge} element={workspaceView} />
-      <Route path={workspaceRoutes.capabilities} element={workspaceView} />
+      <Route path={workspaceRoutes.capabilities} element={<Navigate to={`${workspaceRoutes.settings}?section=capabilities`} replace />} />
       <Route path={workspaceRoutes.messages} element={workspaceView} />
       <Route path={workspaceRoutes.products} element={workspaceView} />
       <Route path={workspaceRoutes.orders} element={workspaceView} />
@@ -318,12 +315,14 @@ function IdentityPages({
  */
 function WorkspaceRouteView({
   section,
+  identity,
   company,
   emailConfigured,
   userId,
   reset,
 }: {
   section: WorkspaceSection;
+  identity: Identity;
   company: Company;
   emailConfigured: boolean;
   userId: string;
@@ -332,14 +331,12 @@ function WorkspaceRouteView({
   switch (section) {
     case 'accounting':
       return <AccountingPage key={company.id} company={company} />;
-    case 'capabilities':
-      return <CapabilitiesPage company={company} refresh={reset} />;
     case 'knowledge':
       return <KnowledgePage company={company} refresh={reset} />;
     case 'policies':
       return <ReplyPoliciesPage company={company} refresh={reset} />;
     case 'settings':
-      return <CompanySettingsPage />;
+      return <CompanySettingsPage identity={identity} company={company} refresh={reset} />;
     case 'team':
       return (
         <TeamPage

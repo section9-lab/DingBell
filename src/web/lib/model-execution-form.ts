@@ -38,6 +38,6 @@ export function parseModelExecutionDraft(draft: ModelExecutionDraft): Parsed {
   const parsed = v.safeParse(modelExecutionSchema, values);
   return parsed.success ? { success: true, execution: parsed.output } : {
     success: false,
-    message: '启用 AI 前请填写完整的 token 上限、生成轮数和四项供应商价格。未知价格请留空；只有已确认免费的项目才能填 0。',
+    message: '执行限制与价格可全部留空；如需填写，请完整填写 token 上限、生成轮数和四项供应商价格，并确保在有效范围内。',
   };
 }

@@ -92,7 +92,7 @@ export function ConversationControlPanel({ userId, companyId, conversationId, st
   const hosting = hostingText(state);
 
   return <>
-    <div role="region" aria-label="AI 托管" className="shrink-0 border-b bg-background px-4 py-2.5">
+    <div role="region" aria-label="AI 托管" className="shrink-0 border-b px-4 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full',

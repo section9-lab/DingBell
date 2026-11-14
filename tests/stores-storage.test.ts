@@ -6,6 +6,7 @@ import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { beginStoreCheck, changeStoreGrant, changeStoreState, findStore, finishStoreCheck, insertStore, rotateStoreCredentials } from '../src/modules/stores/storage.ts';
 import { unknownCapabilities } from '../src/modules/stores/ozon.ts';
+import { applyMigrations } from './fixtures/migrations.ts';
 
 function fixture() {
   const db = new DatabaseSync(':memory:');
@@ -75,10 +76,7 @@ test('real D1 applies store constraints and preserves a single winner for concur
     compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
   context.after(() => mf.dispose());
   const db = await mf.getD1Database('DB');
-  const folder = new URL('../migrations/', import.meta.url);
-  for (const name of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) {
-    for (const statement of readFileSync(new URL(name, folder), 'utf8').split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await db.prepare(statement).run();
-  }
+  await applyMigrations(db);
   await db.batch([
     db.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('a','A','a',1),('b','B','b',1)"),
     db.prepare("INSERT INTO user (id,name,email,email_verified) VALUES ('alice','Alice','a@example.invalid',1),('bob','Bob','b@example.invalid',1)"),

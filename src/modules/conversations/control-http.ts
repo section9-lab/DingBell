@@ -44,7 +44,7 @@ const stateDTO = (state: StoredControlState) => ({ ...state, updatedAt: new Date
 const viewDTO = (view: ControlView, assignee: ControlAssignee | null) => ({ ...view, state: stateDTO(view.state), assignee });
 function replyDTO(reply:ReplyView) {
   const attempt=reply.attempt;
-  return {intentId:reply.intentId,commandId:reply.commandId,body:reply.body,...(reply.previewRequestId?{previewRequestId:reply.previewRequestId}:{}),status:reply.status,revision:reply.revision,
+  return {intentId:reply.intentId,commandId:reply.commandId,body:reply.body,status:reply.status,revision:reply.revision,
     createdAt:new Date(reply.createdAt).toISOString(),updatedAt:new Date(reply.updatedAt).toISOString(),reason:reply.reason,
     attempt:attempt===null?null:{id:attempt.id,status:attempt.status,startedAt:new Date(attempt.startedAt).toISOString(),
       finishedAt:attempt.finishedAt===null?null:new Date(attempt.finishedAt).toISOString(),httpStatus:attempt.httpStatus,providerResult:attempt.providerResult,errorCode:attempt.errorCode}};
@@ -218,12 +218,11 @@ export function registerConversationControlRoutes(app: Hono<ApplicationEnv>) {
       }
       if (result.outcome === 'rejected') {
         if (result.code === 'REPLY_NOT_CANCELABLE') return apiError(c, result.code, 'This reply is no longer queued and cannot be canceled. Refresh its result.', 409);
-        if (result.code === 'PREVIEW_UNAVAILABLE') return apiError(c, result.code, 'The original translation preview is unavailable for this member or conversation.', 412);
         if (result.code === 'OUTBOUND_DISABLED') return apiError(c, result.code, 'Outbound replies are disabled for this deployment or store.', 403);
         if (result.code === 'REPLY_UNAVAILABLE') return apiError(c, result.code, 'The conversation or store is not currently eligible for replies.', 412);
         return apiError(c, result.code, 'The store reply capability has not been verified.', 412);
       }
-      if((c.env.FLUE_SUPPORT_AGENT||c.env.AGENT_RUNTIME))c.executionCtx.waitUntil(reconcileConversationAi(c.env,directory.scope));
+      if(c.env.AGENT_RUNTIME)c.executionCtx.waitUntil(reconcileConversationAi(c.env,directory.scope));
       const metadata = await readControlAssignee(c.env.DB!, actor, conversationId, result.view.state.assignedMemberId, result.view.viewerMemberId);
       if (!metadata) return notFound(c);
       return jsonResponse(c, { companyId: actor.orgId, conversationId,

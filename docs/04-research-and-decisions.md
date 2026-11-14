@@ -2,11 +2,11 @@
 
 版本：0.2，评审稿。核对日期：2026-10-08。
 
-2026-10-29 决策更新：用户确认同时保留 Cloudflare、Vercel、自建服务器三个完整部署目标，采用共用业务核心与平台适配层；Pi Durable 作为替换 Flue 的执行内核方向。范围、适配方案及实施顺序以 [ADR-11](#adr-11-共用核心与三个完整部署目标2026-10-29) 为准。下文 Flue 调研保留为历史兼容依据。2026-10-30 三端适配已实现，技术验证、实际版本及保留边界见 ADR-11 的实施状态和[部署证据](../probes/deployment/README.md)。
+2026-10-29 决策更新：用户确认同时保留 Cloudflare、Vercel、自建服务器三个完整部署目标，采用共用业务核心与平台适配层；Pi Durable 作为替换 Flue 的执行内核方向。范围、适配方案及实施顺序以 [ADR-11](#adr-11-共用核心与三个完整部署目标2026-10-29) 为准。下文 Flue 调研保留为历史兼容依据。2026-11-14 Flue 运行时与依赖已移除，相关探针和夹具不再存在；历史迁移/升级边界仍见 `docs/10-upgrade-and-rollback.md`。2026-10-30 三端适配已实现，技术验证、实际版本及保留边界见 ADR-11 的实施状态和[部署证据](../probes/deployment/README.md)。
 
 本文件记录选型依据、适用边界和仍需工程验证的事项。官方文档说明某组件具有某项能力，不代表 DingBell 已经完成集成；完整部署、平台权限和故障恢复须按验收清单验证。
 
-本版补充了 Flue 全站 96 篇可访问文档的逐篇阅读，并将关键差异与固定源码核对。完整范围、失效页面及每篇结论见[Flue 文档核对](05-flue-documentation-audit.md)。
+本版补充了 Flue 全站 96 篇可访问文档的逐篇阅读，并将关键差异与固定源码核对。完整范围、失效页面及每篇结论见[Flue 文档核对](archive/05-flue-documentation-audit.md)。
 
 ## 1. 证据等级
 
@@ -152,7 +152,7 @@ AI Search 的[检索 API](https://developers.cloudflare.com/ai-search/api/search
 
 状态：用户已确认 Cloudflare、Vercel、自建服务器三个部署目标，并同意共用核心与平台适配方向。以下为实施基线；具体版本、依赖组合和部署配置须经过兼容验证，当前仓库仍是 Flue/Cloudflare 实现。本记录不表示三端已经支持。
 
-2026-10-29 最小执行探针已实测：Pi 1.4.0、Agents 0.30.0、durable-harness 0.0.1 组合通过 Node SQLite、本地 World 自动队列恢复、本地 workerd、Cloudflare 真云恢复/重新部署，以及 Vercel 真云 Function 超时/队列恢复/重新部署原回执检查。Vercel 执行层直接使用官方 `durable-harness/pi-durable` 适配器；共用 Pi 模型与工具，不需要 Sandbox 或外部数据库保存 Agent 检查点。完整应用未迁移。原生同键不同载荷返回原提交，须保留业务载荷冲突校验。可复跑源码、观察器修正及非阻断构建诊断见[探针结果](../probes/pi-portability/RESULTS.md)。
+2026-10-29 最小执行探针已实测：Pi 1.4.0、Agents 0.30.0、durable-harness 0.0.1 组合通过 Node SQLite、本地 World 自动队列恢复、本地 workerd、Cloudflare 真云恢复/重新部署，以及 Vercel 真云 Function 超时/队列恢复/重新部署原回执检查。Vercel 执行层直接使用官方 `durable-harness/pi-durable` 适配器；共用 Pi 模型与工具，不需要 Sandbox 或外部数据库保存 Agent 检查点。完整应用未迁移。原生同键不同载荷返回原提交，须保留业务载荷冲突校验。以上为本段保留的历史记录；独立探针目录已于 2026-11-14 清理删除。
 
 追加约束：用户要求 Vercel 只使用内置能力，拒绝另配远程 libSQL 业务库。Vercel Agent 执行优先采用下表的 **Pi Durable + durable-harness + World/原生队列**，其恢复与重新部署已通过独立真云验证。World 的 Agent 检查点不替代公司、权限、预算等业务关系数据。
 

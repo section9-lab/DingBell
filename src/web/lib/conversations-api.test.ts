@@ -7,7 +7,7 @@ const instant='2026-10-09T00:00:00.000Z';
 const message={id:'msg',sequence:1,platformMessageId:'18446744073709551615',content:['Здравствуйте','<script>literal</script>'],senderId:'9007199254740993',senderType:'Customer',direction:'inbound',isImage:false,isRead:false,eventAt:instant,receivedAt:instant,ingestMode:'backfill',orderNumber:'order-1',sku:'9007199254740993'};
 const conversation={id:'conversation',store:{id:'store',name:'Synthetic',status:'paused'},platformThreadId:'18446744073709551615',platformType:'BUYER_SELLER',platformStatus:'Opened',platformCreatedAt:instant,importedAt:instant,lastMessageAt:instant,latestMessage:{...message,content:[message.content[0]],previewTruncated:true},buyerSenderId:'9007199254740993',buyerOrderNumber:null};
 const workflow={version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null};
-const listMetadata={viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2}};
+const listMetadata={viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2,ai:0}};
 const pageMetadata={viewerMemberId:'member-viewer',pageCursor:'history-page',updatesCursor:'updates-start',newerCursor:null};
 const detail={...conversation,sync:{enabled:false,lastSuccessAt:null,lastError:null,backfillComplete:true}};
 function method(name:string){const value=Reflect.get(api,name);assert.equal(typeof value,'function',`${name} must be implemented`);return value as (...args:any[])=>Promise<any>;}
@@ -70,7 +70,7 @@ test('invalid read options make no request and transport failures are never retr
 
 test('message queues expose viewer-scoped counts and workflow metadata while leaving detail replies unchanged',async t=>{
   const read=method('readConversations'),readDetail=method('readConversation');
-  const list={companyId:'company',viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2},conversations:[{...conversation,workflow}],nextCursor:null};
+  const list={companyId:'company',viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2,ai:0},conversations:[{...conversation,workflow}],nextCursor:null};
   let payload:any=list;
   t.mock.method(globalThis,'fetch',async()=>Response.json(payload));
   const result=await read('company');assert.deepEqual(result.counts,list.counts);
@@ -81,11 +81,11 @@ test('message queues expose viewer-scoped counts and workflow metadata while lea
 test('queue and state filters are encoded independently from store, exact search and pagination',async t=>{
   const read=method('readConversations'),calls:string[]=[];
   const current={...workflow,version:7,workStatus:'waiting_internal',assignedMemberId:'member-viewer',assigneeName:'当前客服'};
-  t.mock.method(globalThis,'fetch',async(url:string)=>{calls.push(url);return Response.json({companyId:'c/1',viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2},conversations:[{...conversation,workflow:current}],nextCursor:null});});
+  t.mock.method(globalThis,'fetch',async(url:string)=>{calls.push(url);return Response.json({companyId:'c/1',viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2,ai:0},conversations:[{...conversation,workflow:current}],nextCursor:null});});
   const result=await read('c/1',{queue:'mine',state:'waiting_internal',storeId:'store',searchField:'order',search:'A/B + 1',cursor:'opaque_cursor',limit:1});
   const url=new URL(calls[0],'https://example.invalid');
   for(const [key,value]of Object.entries({queue:'mine',state:'waiting_internal',storeId:'store',searchField:'order',search:'A/B + 1',cursor:'opaque_cursor',limit:'1'}))assert.equal(url.searchParams.get(key),value);
-  assert.deepEqual(result.counts,{all:4,mine:1,unassigned:2});assert.deepEqual(result.conversations[0].workflow,current);
+  assert.deepEqual(result.counts,{all:4,mine:1,unassigned:2,ai:0});assert.deepEqual(result.conversations[0].workflow,current);
 });
 
 test('queue replies reject missing metadata, inconsistent counts and malformed workflow states',async t=>{
@@ -96,9 +96,9 @@ test('queue replies reject missing metadata, inconsistent counts and malformed w
     {...workflow,assignedMemberId:1},{...workflow,assignedMemberId:''},{...workflow,assigneeName:'失配姓名'},
     {...workflow,assignedMemberId:'member-other',assigneeName:1}];
   const payloads=[{...valid,viewerMemberId:undefined},{...valid,viewerMemberId:''},{...valid,viewerMemberId:3},{...valid,counts:undefined},
-    ...[{all:-1,mine:0,unassigned:0},{all:1.5,mine:0,unassigned:0},{all:Number.MAX_SAFE_INTEGER+1,mine:0,unassigned:0},{all:1,mine:2,unassigned:0},
-      {all:1,mine:0,unassigned:2},{all:2,mine:2,unassigned:1},{all:0,mine:0,unassigned:0},{all:1,mine:-1,unassigned:0},
-      {all:1,mine:0,unassigned:0.5},{all:1,mine:0,unassigned:undefined}].map(counts=>({...valid,counts})),
+    ...[{all:-1,mine:0,unassigned:0,ai:0},{all:1.5,mine:0,unassigned:0,ai:0},{all:Number.MAX_SAFE_INTEGER+1,mine:0,unassigned:0,ai:0},{all:1,mine:2,unassigned:0,ai:0},
+      {all:1,mine:0,unassigned:2,ai:0},{all:2,mine:2,unassigned:1,ai:0},{all:0,mine:0,unassigned:0,ai:0},{all:1,mine:-1,unassigned:0,ai:0},
+      {all:1,mine:0,unassigned:0.5,ai:0},{all:1,mine:0,unassigned:undefined,ai:0},{all:1,mine:0,unassigned:0,ai:-1},{all:1,mine:0,unassigned:0,ai:1}].map(counts=>({...valid,counts})),
     ...invalidWorkflows.map(value=>({...valid,conversations:[{...conversation,workflow:value}]}))];
   for(const payload of payloads){const mock=t.mock.method(globalThis,'fetch',async()=>Response.json(payload));await assert.rejects(read('company'),{code:'INVALID_RESPONSE'});assert.equal(mock.mock.callCount(),1);mock.mock.restore();}
 });
@@ -120,9 +120,9 @@ test('queue and state predicates validate returned rows without treating removed
   current={...workflow,assignedMemberId:'member-other',assigneeName:null};
   await assert.rejects(read('company',{queue:'mine'}),{code:'INVALID_RESPONSE'});
   assert.equal((await read('company',{queue:'all'})).conversations[0].workflow.assignedMemberId,'member-other');
-  current={...workflow,assignedMemberId:'member-viewer',assigneeName:'客服'};counts={all:4,mine:0,unassigned:2};
+  current={...workflow,assignedMemberId:'member-viewer',assigneeName:'客服'};counts={all:4,mine:0,unassigned:2,ai:0};
   await assert.rejects(read('company',{queue:'mine'}),{code:'INVALID_RESPONSE'});
-  current=workflow;counts={all:4,mine:1,unassigned:0};await assert.rejects(read('company',{queue:'unassigned'}),{code:'INVALID_RESPONSE'});mock.mock.restore();
+  current=workflow;counts={all:4,mine:1,unassigned:0,ai:0};await assert.rejects(read('company',{queue:'unassigned'}),{code:'INVALID_RESPONSE'});mock.mock.restore();
 });
 
 test('unknown queue and state values fail before network access',async t=>{

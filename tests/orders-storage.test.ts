@@ -3,13 +3,14 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { URL } from 'node:url';
-import { Miniflare } from 'miniflare';
 import { getDueFbsWork,commitFbsList,commitFbsDetails,commitFbsDetailFailure,getFbsCounts } from '../src/modules/orders/storage.ts';
 import { prepareFbsSyncSeed } from '../src/modules/orders/sync-seed.ts';
 import type { FbsDetailsWork,FbsListWork } from '../src/modules/orders/types.ts';
 import type { OzonFbsPosting } from '../src/modules/orders/ozon.ts';
 import { claimSyncLease,setSyncSourceEnabled,releaseSyncLease } from '../src/modules/sync/storage.ts';
 import type { SyncLease } from '../src/modules/sync/types.ts';
+import { Miniflare } from 'miniflare';
+import { applyMigrations } from './fixtures/migrations.ts';
 
 test('FBS persistence separates frozen windows, postings and source observations', () => {
   const db = new DatabaseSync(':memory:');
@@ -26,8 +27,7 @@ test('FBS windows and observations commit under real D1 source fences', {timeout
   const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
   context.after(()=>mf.dispose());
   const db=await mf.getD1Database('DB') as unknown as D1Database;
-  const folder=new URL('../migrations/',import.meta.url);
-  for(const name of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort())for(const sql of readFileSync(new URL(name,folder),'utf8').split('--> statement-breakpoint').map(part=>part.trim()).filter(Boolean))await db.prepare(sql).run();
+  await applyMigrations(db);
   const actor={orgId:'fbs-org',actorUserId:'fbs-admin',sessionId:'fbs-session'};
   await db.batch([
     db.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES ('fbs-org','FBS','fbs',1),('other-fbs-org','Other','other-fbs',1)"),

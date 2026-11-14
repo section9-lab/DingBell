@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
-import { URL } from 'node:url';
-import { Miniflare } from 'miniflare';
+import { createSqliteD1 } from './fixtures/d1-sqlite.ts';
 import { deferControlRepair, ensureControlDirectory, listControlTransferTargets, listDueControlDirectories, projectControlEvents, readControlAccess, readControlAssignee, readControlDirectory } from '../src/modules/conversations/control-storage.ts';
 import { normalizeControlState } from '../src/modules/conversations/control-state.ts';
 import type { ControlActor, ControlEvent, ControlScope } from '../src/modules/conversations/control-types.ts';
@@ -10,11 +8,9 @@ import type { ControlActor, ControlEvent, ControlScope } from '../src/modules/co
 const owner:ControlActor={orgId:'org',actorUserId:'owner-user',sessionId:'owner-session'};
 const staff:ControlActor={orgId:'org',actorUserId:'staff-user',sessionId:'staff-session'};
 async function fixture(){
-  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("control fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
+  const database=createSqliteD1();
   try{
-    const db=await mf.getD1Database('DB') as unknown as D1Database;
-    const folder=new URL('../migrations/',import.meta.url);
-    for(const file of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort())for(const sql of readFileSync(new URL(file,folder),'utf8').split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean))await db.prepare(sql).run();
+    const db=database.db;
     await db.batch([
       db.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES ('org','Org','org',1),('other','Other','other',1)"),
       db.prepare("INSERT INTO user(id,name,email,email_verified) VALUES ('owner-user','Owner','owner@example.invalid',1),('staff-user','Staff','staff@example.invalid',1)"),
@@ -24,9 +20,9 @@ async function fixture(){
       db.prepare("INSERT INTO store_grant(organization_id,store_id,member_id,created_at) VALUES ('org','store','staff-member',1)"),
       db.prepare("INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at) VALUES ('conv','org','store','chat','BUYER_SELLER','Opened',1,1),('conv-2','org','store','chat-2','BUYER_SELLER','Opened',1,1),('hidden-conv','org','hidden','hidden','BUYER_SELLER','Opened',1,1),('foreign-conv','other','foreign','foreign','BUYER_SELLER','Opened',1,1)"),
     ]);
-    return {db,close:()=>mf.dispose()};
+    return {db,close:database.close};
   }catch(error){
-    await mf.dispose().catch(()=>{});
+    database.close();
     throw error;
   }
 }
@@ -108,19 +104,6 @@ test('note projection conflict rolls back preceding note audit and state updates
     assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM conversation_control_event').first('n'),1);
     assert.deepEqual((await readControlDirectory(f.db,dir.scope))?.state,first.receipt.appliedState);
   }finally{await f.close();}
-});
-
-test('control storage fixture cleanup preserves the initialization error even when disposal rejects',{timeout:30_000},async t=>{
-  const failure=Object.assign(new Error('synthetic initialization failure'),{code:'EADDRNOTAVAIL'});
-  const originalDispose=Miniflare.prototype.dispose;let instance:Miniflare|undefined,closed=false;
-  t.mock.method(Miniflare.prototype,'getD1Database',async function(this:Miniflare){instance=this;throw failure;});
-  const disposal=t.mock.method(Miniflare.prototype,'dispose',async function(this:Miniflare){
-    await originalDispose.call(this);closed=true;throw new Error('synthetic cleanup failure');
-  });
-  try{
-    await assert.rejects(fixture,error=>error===failure);
-    assert.equal(disposal.mock.calls.length,1);assert.equal(closed,true);
-  }finally{if(instance&&!closed)await originalDispose.call(instance);}
 });
 
 test('assignee metadata uses the exact authoritative ID without needing a directory or modifying its projection',{timeout:30_000},async()=>{

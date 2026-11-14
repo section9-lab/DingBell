@@ -49,7 +49,7 @@ export function InvitationPage({ identity, reset, logout }: {
     <AuthFrame>
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">加入公司</h1>
+          <h1 className="page-title">加入公司</h1>
           <p className="text-sm leading-6 text-muted-foreground">请使用收到邀请的邮箱。验证邮箱与接受邀请是两个独立步骤。</p>
         </div>
         {error != null && <ErrorNotice error={error} />}

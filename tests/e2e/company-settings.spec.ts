@@ -82,12 +82,12 @@ test('a settings outage labels the UTC fallback and allows an explicit recovery 
   await login(page,application);
   await page.route('**/api/companies/company-a/settings',route=>route.fulfill({status:503,json:{error:{code:'IDENTITY_UNAVAILABLE'}}}));
   await page.goto(`${application.baseURL}/workspace/settings`);
-  await expect(page.getByRole('link',{name:'时区读取失败 · UTC',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'读取最新设置',exact:true})).toBeVisible();
+  await expect(page.getByLabel('公司时区',{exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'保存设置',exact:true})).toHaveCount(0);
   await page.unrouteAll({behavior:'wait'});
   await page.getByRole('button',{name:'读取最新设置',exact:true}).click();
   await expect(page.getByLabel('公司时区',{exact:true})).toHaveValue('UTC');
-  await expect(page.getByRole('link',{name:'UTC',exact:true})).toBeVisible();
   expect(application.replyRequests).toHaveLength(0);
 });
 

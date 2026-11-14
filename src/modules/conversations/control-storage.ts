@@ -7,7 +7,7 @@ import {checkedInboundReceipt} from './inbound.ts';
 import {checkedAiIntakeReceipt,checkedAiDispatchStopReceipt} from './ai-intake.ts';
 import {checkedAiSendReceipt} from './ai-reply-receipt.ts';
 import { storeAccess } from '../stores/storage.ts';
-import { checkedReplyTranslation, controlCommandSchema, normalizeControlState, storedControlStateSchema } from './control-state.ts';
+import { controlCommandSchema, normalizeControlState, storedControlStateSchema } from './control-state.ts';
 import type { ControlAccess, ControlActor, ControlAssignee, ControlDirectory, ControlOutboxEvent as ControlEvent, ControlScope, ControlState, StoredControlState, TransferTarget, TransferTargetsPage } from './control-types.ts';
 
 const identifier=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
@@ -43,7 +43,7 @@ function canonicalReceipt(value:ControlEvent['receipt']):ControlEvent['receipt']
   if(value.action==='ai_start'||value.action==='ai_resume'||value.action==='request_handoff')return checkedAiReceipt(value);
   const {actorUserId,actorMemberId,appliedState,...fields}=value;
   const {authorName,...noteCommand}=fields as typeof fields & {authorName?:unknown};
-  const {intentId,translation,...replyCommand}=fields as typeof fields & {intentId?:unknown;translation?:unknown};
+  const {intentId,...replyCommand}=fields as typeof fields & {intentId?:unknown};
   const command=value.action==='add_note'?noteCommand:value.action==='send_reply'?replyCommand:fields;
   if(value.action==='add_note'&&typeof authorName!=='string')throw new RangeError('INVALID_CONTROL_EVENT');
   const parsed=v.safeParse(controlCommandSchema,command),metadata=v.safeParse(receiptMetadataSchema,{actorUserId,actorMemberId,appliedState});
@@ -57,10 +57,7 @@ function canonicalReceipt(value:ControlEvent['receipt']):ControlEvent['receipt']
   // Keep the original v1 field order: its canonical JSON is already immutable audit data.
   const state={schemaVersion:raw.schemaVersion,version:raw.version,controlEpoch:raw.controlEpoch,sequence:raw.sequence,lifecycle:raw.lifecycle,reception:raw.reception,assignedMemberId:raw.assignedMemberId,updatedAt:raw.updatedAt,...(raw.schemaVersion===2?{workStatus:raw.workStatus}:{})};
   const canonicalMetadata={actorUserId:metadata.output.actorUserId,actorMemberId:metadata.output.actorMemberId,appliedState:state as StoredControlState};
-  if(parsed.output.action==='send_reply'){
-    const evidence=checkedReplyTranslation(translation,parsed.output.previewRequestId);
-    return {...parsed.output,...canonicalMetadata,intentId:intentId as string,...(evidence?{translation:evidence}:{})};
-  }
+  if(parsed.output.action==='send_reply')return {...parsed.output,...canonicalMetadata,intentId:intentId as string};
   return parsed.output.action==='add_note'?{...parsed.output,...canonicalMetadata,authorName:authorName as string}:{...parsed.output,...canonicalMetadata};
 }
 export function checkedControlReceipt(value:unknown):ControlEvent['receipt']{return canonicalReceipt(value as ControlEvent['receipt']);}

@@ -3,7 +3,7 @@ import * as v from 'valibot';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256),v.check(s=>s===s.trim()&&s.isWellFormed()&&!/[\u0000-\u001f\u007f]/.test(s)));
 const amount=v.pipe(v.string(),v.regex(/^(0|[1-9][0-9]*)$/),v.maxLength(30));
 const difference=v.pipe(v.string(),v.regex(/^(0|-?[1-9][0-9]*)$/),v.maxLength(31));
-export const budgetAuditKindSchema=v.picklist(['ai','translation']);
+export const budgetAuditKindSchema=v.picklist(['ai']);
 export const budgetAuditIdSchema=id;
 const totals=v.strictObject({reservedMicros:amount,spentMicros:amount,admittedRuns:v.nullable(amount)});
 const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8640000000000000));

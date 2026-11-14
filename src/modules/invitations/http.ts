@@ -90,7 +90,7 @@ export function registerInvitationRoutes(app: Hono<ApplicationEnv>, dependencies
   app.get('/api/companies/:companyId/members', configured, injected, signedIn, management, async c => {
     const offset = offsetFor(c);
     if (offset === null) return apiError(c, 'INVALID_REQUEST', 'Offset must be an integer between 0 and 10000.', 400);
-    const members = await c.get('identity').db.select({ id: schema.member.id, userId: schema.user.id, name: schema.user.name, email: schema.user.email, role: schema.member.role }).from(schema.member)
+    const members = await c.get('identity').db.select({ id: schema.member.id, userId: schema.user.id, name: schema.user.name, email: schema.user.email, image: schema.user.image, role: schema.member.role }).from(schema.member)
       .innerJoin(schema.user, eq(schema.member.userId, schema.user.id)).where(eq(schema.member.organizationId, c.req.param('companyId'))).orderBy(asc(schema.user.name), asc(schema.member.id)).limit(101).offset(offset);
     return jsonResponse(c, { members: members.slice(0, 100), hasMore: members.length > 100, nextOffset: members.length > 100 ? offset + 100 : null });
   });

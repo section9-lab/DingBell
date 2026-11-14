@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { URL } from 'node:url';
 import { Miniflare } from 'miniflare';
 import { changeMember, type MemberChange } from '../src/modules/membership/storage.ts';
+import { applyMigrations } from './fixtures/migrations.ts';
 
 function database(secondOwner = false) {
   const db = new DatabaseSync(':memory:');
@@ -128,10 +129,7 @@ test('real D1 enforces owner and authorization guards at the final member write'
     compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
   context.after(() => mf.dispose());
   const db = await mf.getD1Database('DB');
-  const folder = new URL('../migrations/', import.meta.url);
-  for (const file of readdirSync(folder).filter(file => file.endsWith('.sql')).sort()) {
-    for (const statement of readFileSync(new URL(file, folder), 'utf8').split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await db.prepare(statement).run();
-  }
+  await applyMigrations(db);
   for (const action of ['delete', 'demote']) {
     await context.test(action, async () => {
       await db.prepare('INSERT INTO organization (id,name,slug,created_at) VALUES (?,?,?,1)').bind(action, action, action).run();

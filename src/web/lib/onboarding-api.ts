@@ -55,7 +55,7 @@ const invitationSent = v.object({
 const invitationRevoked = v.object({ invitation: v.object({ ...invitationFields, status: v.literal('canceled') }) });
 const pageFields = { hasMore: v.boolean(), nextOffset: v.nullable(v.number()) };
 const teamSchema = v.object({ ...pageFields, members: v.array(v.object({
-  id: v.string(), userId: v.string(), name: v.string(), email: v.string(), role: v.string(),
+  id: v.string(), userId: v.string(), name: v.string(), email: v.string(), image: v.nullable(v.string()), role: v.string(),
 })) });
 export async function readTeam(companyId: string, signal?: AbortSignal, offsets = { members: 0, invitations: 0 }) {
   const prefix = `/api/companies/${encodeURIComponent(companyId)}`;

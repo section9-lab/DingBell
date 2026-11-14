@@ -1,17 +1,14 @@
 import assert from 'node:assert/strict';
-import {readFileSync,readdirSync} from 'node:fs';
 import {test} from 'node:test';
-import {URL} from 'node:url';
 import {hashPassword} from 'better-auth/crypto';
-import {Miniflare} from 'miniflare';
 import {createApp} from '../src/application.ts';
 import {services} from '../src/modules/identity/services.ts';
+import {createSqliteD1} from './fixtures/d1-sqlite.ts';
 
 async function fixture(){
-  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("commerce")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
+  const database=createSqliteD1();
   try{
-    const DB=await mf.getD1Database('DB') as unknown as D1Database,dir=new URL('../migrations/',import.meta.url);
-    for(const name of readdirSync(dir).filter(name=>name.endsWith('.sql')).sort())for(const statement of readFileSync(new URL(name,dir),'utf8').split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean))await DB.prepare(statement).run();
+    const DB=database.db;
     const password='synthetic-commerce-password',hash=await hashPassword(password);
     await DB.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES ('company','Company','company',1),('other-company','Other','other',1)").run();
     for(const [id,organization,role] of [['owner','company','owner'],['staff','company','member'],['other','other-company','owner']])await DB.batch([
@@ -32,8 +29,8 @@ async function fixture(){
     await DB.prepare("INSERT INTO fbs_posting(posting_number,organization_id,store_id,order_id,order_number,list_facts,list_observed_at,detail_facts,detail_observed_at,detail_epoch,detail_generation,detail_state,detail_due_at) VALUES ('posting-1','company','store','9001','order-1',?,4000,?,5000,1,1,'complete',9999999999999)").bind(JSON.stringify(posting),JSON.stringify(posting)).run();
     const app=createApp(),request=(path:string,who='owner')=>app.request(`${env.APP_BASE_URL}/api/companies/company/commerce${path}`,{headers:{cookie:cookies[who]??''}},env as never);
     const post=(path:string,body:unknown,who='owner')=>app.request(`${env.APP_BASE_URL}/api/companies/company/commerce${path}`,{method:'POST',headers:{cookie:cookies[who]??'','content-type':'application/json',origin:env.APP_BASE_URL},body:JSON.stringify(body)},env as never);
-    return {DB,request,post,close:()=>mf.dispose()};
-  }catch(error){await mf.dispose().catch(()=>{});throw error;}
+    return {DB,request,post,close:database.close};
+  }catch(error){database.close();throw error;}
 }
 
 test('commerce read API exposes bounded product and FBS views without raw persistence envelopes',{timeout:60_000},async()=>{const f=await fixture();try{

@@ -1,8 +1,5 @@
 export type ReplyStatus = 'queued' | 'sending' | 'sent' | 'failed' | 'unknown' | 'skipped' | 'canceled';
 export type ReplyRejectCode = 'OUTBOUND_DISABLED' | 'CAPABILITY_UNVERIFIED' | 'REPLY_UNAVAILABLE';
-export interface ReplyTranslation {
-  requestId:string;runId:string;sourceRevision:number;sourceHash:string;outputHash:string;confirmedBodyHash:string;
-}
 interface ReplyIntentFields {
   id: string;
   commandId: string;
@@ -37,7 +34,6 @@ export interface ReplyView {
   intentId: string;
   commandId: string;
   body: string;
-  previewRequestId?: string;
   status: ReplyStatus;
   revision: number;
   createdAt: number;

@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { companyModelViewSchema,companyModelCatalogSchema,companyModelProvidersSchema,type CompanyModelCommand,type CompanyModelCatalogCommand } from '../../shared/company-model.ts';
+import { companyModelViewSchema,companyModelCatalogSchema,companyModelProvidersSchema,companyModelOAuthSessionSchema,type CompanyModelCommand,type CompanyModelCatalogCommand,type CompanyModelOAuthStart } from '../../shared/company-model.ts';
 import { request,ApiError } from './api.ts';
 const path=(companyId:string)=>`/api/companies/${encodeURIComponent(companyId)}/settings/ai-model`;
 const schema=(companyId:string)=>v.pipe(companyModelViewSchema,v.check(data=>data.companyId===companyId));
@@ -15,3 +15,5 @@ export async function listCompanyModels(companyId:string,body:CompanyModelCatalo
   }
 }
 export function testCompanyModel(companyId:string,expectedVersion:number){return request(path(companyId)+'/test',schema(companyId),{method:'POST',body:JSON.stringify({expectedVersion})});}
+export function startCompanyModelOAuth(companyId:string,body:CompanyModelOAuthStart){return request(path(companyId)+'/oauth/start',v.pipe(companyModelOAuthSessionSchema,v.check(data=>data.provider===body.provider)),{method:'POST',body:JSON.stringify(body)});}
+export function readCompanyModelOAuth(companyId:string,sessionId:string,signal?:AbortSignal){return request(path(companyId)+'/oauth/'+encodeURIComponent(sessionId),companyModelOAuthSessionSchema,{signal});}

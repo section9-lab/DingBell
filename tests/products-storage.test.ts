@@ -3,13 +3,14 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { URL } from 'node:url';
-import { Miniflare } from 'miniflare';
 import { commitProductDetails, commitProductList, getDueProductWork, getProductCounts } from '../src/modules/products/storage.ts';
 import type { ProductDetailsWork, ProductListWork } from '../src/modules/products/types.ts';
 import type { OzonProductDetails, OzonProductListItem } from '../src/modules/products/ozon.ts';
 import * as synchronization from '../src/modules/sync/storage.ts';
 import type { SyncLease } from '../src/modules/sync/types.ts';
 import { prepareProductSyncSeed } from '../src/modules/products/sync-seed.ts';
+import { Miniflare } from 'miniflare';
+import { applyMigrations } from './fixtures/migrations.ts';
 
 test('product persistence separates catalog checkpoints, current facts and source history', () => {
   const db = new DatabaseSync(':memory:');
@@ -26,10 +27,7 @@ test('product persistence uses real D1 transactions and current source authoriza
   const mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("fixture")}}', compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
   context.after(() => mf.dispose());
   const db = await mf.getD1Database('DB') as unknown as D1Database;
-  const folder = new URL('../migrations/', import.meta.url);
-  for (const name of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) {
-    for (const statement of readFileSync(new URL(name, folder), 'utf8').split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await db.prepare(statement).run();
-  }
+  await applyMigrations(db);
   const actor = { orgId: 'products-org', actorUserId: 'products-admin', sessionId: 'products-session' };
   await db.batch([
     db.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('products-org','Products','products',1),('other-products-org','Other','other-products',1)"),

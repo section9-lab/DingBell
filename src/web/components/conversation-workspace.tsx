@@ -3,7 +3,7 @@ import { useGroupRef, type Layout } from 'react-resizable-panels';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './ui/resizable';
 
 const desktopQuery = '(min-width: 1024px)';
-const defaultLayout: Layout = { 'conversation-list-panel': 28, 'conversation-thread-panel': 72 };
+const defaultLayout: Layout = { 'conversation-list-panel': 32, 'conversation-thread-panel': 68 };
 function subscribe(onChange: () => void) {
   const query = window.matchMedia(desktopQuery);
   query.addEventListener('change', onChange);
@@ -25,10 +25,11 @@ export function ConversationWorkspace({ list, selected, children }: { list: Reac
       : { 'conversation-list-panel': selected ? 0 : 100, 'conversation-thread-panel': selected ? 100 : 0 }));
     return () => cancelAnimationFrame(frame);
   }, [desktop, selected, group]);
-  return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-background">
+  // The surface stays transparent so the page's canvas gradient shows through every pane.
+  return <div className="flex min-h-[420px] min-w-0 flex-1 overflow-hidden rounded-xl border border-border shadow-[0_1px_2px_rgb(41_39_31/0.04)]">
     <ResizablePanelGroup groupRef={group} defaultLayout={defaultLayout} disabled={!desktop}
       onLayoutChanged={(layout, meta) => { if (desktop && meta.isUserInteraction) saved.current = layout; }}>
-      <ResizablePanel id="conversation-list-panel" defaultSize="28%" minSize={desktop ? '15rem' : '0%'} maxSize={desktop ? '42%' : '100%'} collapsible={!desktop}>
+      <ResizablePanel id="conversation-list-panel" defaultSize="32%" minSize={desktop ? '20rem' : '0%'} maxSize={desktop ? '42%' : '100%'} collapsible={!desktop}>
         {list}
       </ResizablePanel>
       <ResizableHandle disabled={!desktop} className="hidden lg:block" aria-label="调整会话列表宽度" />

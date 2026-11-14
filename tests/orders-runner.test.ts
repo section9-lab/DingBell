@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
 import { test, type TestContext } from 'node:test';
 import { URL } from 'node:url';
-import { Miniflare } from 'miniflare';
 import { encryptCredentials } from '../src/modules/stores/credentials.ts';
+import { createSqliteD1 } from './fixtures/d1-sqlite.ts';
 import { runSyncPage, retrySyncFailure } from '../src/modules/sync/runner.ts';
 import { setSyncSourceEnabled } from '../src/modules/sync/storage.ts';
 import { OzonReadError } from '../src/modules/orders/ozon.ts';
@@ -15,11 +14,9 @@ const another = {...posting,posting_number:'order-1-2'};
 const list = (postings: unknown[], cursor: string|null = null) => Response.json({postings,has_next:cursor!==null,...(cursor===null?{}:{cursor})});
 
 async function fixture(context:TestContext,all=false) {
-  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
-  context.after(()=>mf.dispose());
-  const db=await mf.getD1Database('DB') as unknown as D1Database;
-  const folder=new URL('../migrations/',import.meta.url);
-  for(const file of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort()) for(const sql of readFileSync(new URL(file,folder),'utf8').split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean)) await db.prepare(sql).run();
+  const database=createSqliteD1();
+  context.after(database.close);
+  const db=database.db;
   const env={DB:db,STORE_CREDENTIAL_KEYS:JSON.stringify({v1:btoa('a'.repeat(32))}),STORE_CREDENTIAL_ACTIVE_KEY:'v1'};
   const envelope=await encryptCredentials(env,{...scope,platformStoreId:'123456',credentialVersion:1},{apiKey:'synthetic-fbs-secret'});
   await db.batch([

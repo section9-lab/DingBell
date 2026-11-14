@@ -21,8 +21,9 @@ export const modelExecutionSchema=v.strictObject({
 });
 export const companyModelCommandSchema=v.strictObject({expectedVersion:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1)),
   provider:v.optional(providerId),
-  baseUrl:v.pipe(v.string(),v.minLength(1),v.maxLength(2048)),model:label,
+  baseUrl:v.optional(v.pipe(v.string(),v.minLength(1),v.maxLength(2048))),model:label,
   apiKey:v.optional(apiKey),
+  authType:v.optional(v.picklist(['api_key','oauth'])),
   execution:v.nullable(modelExecutionSchema),
 });
 const providerModelSchema=v.strictObject({id:label,name:label,api:label,baseUrl:v.string(),contextWindow:v.pipe(v.number(),v.integer(),v.minValue(1)),input:v.array(label)});
@@ -30,11 +31,20 @@ export const companyModelProviderSchema=v.strictObject({id:providerId,name:label
 export const companyModelProvidersSchema=v.strictObject({companyId:label,providers:v.array(companyModelProviderSchema)});
 export const companyModelTestFailureSchema=v.picklist(['credentials_unavailable','url_rejected','unauthorized','forbidden','not_found','request_rejected','rate_limited','provider_unavailable','redirect_refused','timed_out','network_error','invalid_response','output_limit','tool_call_missing','tool_call_invalid','test_failed']);
 export type CompanyModelTestFailure=v.InferOutput<typeof companyModelTestFailureSchema>;
+export const companyModelOAuthStartSchema=v.strictObject({provider:v.picklist(['kimi-coding'])});
+export type CompanyModelOAuthStart=v.InferOutput<typeof companyModelOAuthStartSchema>;
+export const companyModelOAuthSessionSchema=v.strictObject({sessionId:label,provider:v.picklist(['kimi-coding']),
+  status:v.picklist(['pending','complete','failed','expired']),userCode:label,verificationUri:v.pipe(v.string(),v.url()),
+  intervalSeconds:v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(60)),expiresAt:v.pipe(v.string(),v.isoTimestamp()),
+  failureCode:v.optional(v.nullable(v.picklist(['oauth_denied','oauth_expired','oauth_unavailable','oauth_invalid_response','oauth_refresh_failed'])),null)});
+export type CompanyModelOAuthSession=v.InferOutput<typeof companyModelOAuthSessionSchema>;
 export const companyModelViewSchema=v.strictObject({companyId:label,version:v.pipe(v.number(),v.integer(),v.minValue(0)),
   provider:v.string(),baseUrl:v.nullable(v.string()),model:v.nullable(label),hasKey:v.boolean(),encryptionConfigured:v.boolean(),runtimeEnabled:v.boolean(),
+  authType:v.optional(v.picklist(['api_key','oauth']),'api_key'),credentialExpiresAt:v.optional(v.nullable(v.pipe(v.string(),v.isoTimestamp())),null),
   execution:v.nullable(modelExecutionSchema),test:v.nullable(v.strictObject({status:v.picklist(['passed','failed','pending']),testedAt:v.string(),failureCode:v.optional(v.nullable(companyModelTestFailureSchema),null),providerStatus:v.optional(v.nullable(v.pipe(v.number(),v.integer(),v.minValue(100),v.maxValue(599))),null)}))});
 export type ModelExecution=v.InferOutput<typeof modelExecutionSchema>;
 export type CompanyModelCommand=v.InferOutput<typeof companyModelCommandSchema>;
+export type CompanyModelAuthType=v.InferOutput<typeof companyModelCommandSchema>['authType'];
 export type CompanyModelView=v.InferOutput<typeof companyModelViewSchema>;
 export type CompanyModelProvider=v.InferOutput<typeof companyModelProviderSchema>;
 export type CompanyModelProviders=v.InferOutput<typeof companyModelProvidersSchema>;

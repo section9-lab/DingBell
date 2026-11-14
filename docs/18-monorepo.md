@@ -4,7 +4,7 @@ This repository currently uses independently locked npm installation roots, not 
 
 ## Why the runtimes are isolated
 
-The legacy root development environment uses a different generation of the Agents/Pi packages from the production adapters. The three Pi runtime targets must agree on `@earendil-works/chord`, `pi-ai`, and `pi-durable`; `npm run check:runtime-dependencies` verifies exact manifest and lockfile versions across those targets. The legacy root graph is intentionally excluded, not assumed compatible.
+The root application uses the pinned Pi AI model catalog, while the three production adapters pin `@earendil-works/chord`, `pi-ai`, and `pi-durable`; `npm run check:runtime-dependencies` verifies exact manifest and lockfile versions across those three targets. The legacy cloud SDK, its root dependency graph and its probes were removed on 2026-11-14; there is no separate legacy graph to reconcile.
 
 `deploy/cloudflare/agent-dependencies.ts` and `deploy/vercel/sandbox-dependencies.ts` use their local deployment's public package exports. Application and probe code must not import files through another target's `node_modules`. `npm run check:source-boundaries` checks source imports for that specific pattern; it is not a complete architectural dependency-graph checker.
 

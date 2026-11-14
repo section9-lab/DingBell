@@ -20,7 +20,6 @@ test('budget audit client rejects forged scope, unsafe totals and authority flag
 });
 test('reconciliation summary validates manager scope, totals and alert-only rows',async t=>{
  const summary={companyId:'company',viewerMemberId:'member',at:2,totals:{tracked:2,pending:1,balanced:0,mismatch:1,unavailable:0,alerting:1},items:[
-  {kind:'translation',budgetId:'translation-budget',status:'mismatch',observedAt:1,nextDueAt:2,mismatchSince:1,consecutiveMismatches:2,lastErrorAt:null,lastErrorCode:null,consecutiveFailures:0},
   {kind:'ai',budgetId:'budget',status:null,observedAt:null,nextDueAt:0,mismatchSince:null,consecutiveMismatches:0,lastErrorAt:null,lastErrorCode:null,consecutiveFailures:0}],truncated:false};
  let payload:unknown=summary;const calls:{url:string;init:RequestInit}[]=[];t.mock.method(globalThis,'fetch',async(url:string,init:RequestInit)=>{calls.push({url,init});return Response.json(payload);});
  assert.deepEqual(await readBudgetReconciliationSummary('company','member'),summary);assert.equal(calls[0].url,'/api/companies/company/budget-audits');assert.equal(new Headers(calls[0].init.headers).get('X-DingBell-Member-Id'),'member');

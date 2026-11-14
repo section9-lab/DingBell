@@ -20,7 +20,7 @@ test('能力与数据总览列出部署开关、四类同步与接待准备，�
     await expect(page.getByRole('heading',{name:'能力与数据',exact:true})).toBeVisible();
     const main=page.locator('#main-content');
     for (const name of ['会话同步','商品同步','FBS 包裹同步','FBO 包裹同步']) await expect(main.getByText(name,{exact:true})).toBeVisible();
-    for (const name of ['回复策略','知识库发布','人工回复发送','翻译成俄语','AI 托管接待','AI 自动发送']) await expect(main.getByText(name,{exact:true})).toBeVisible();
+    for (const name of ['回复策略','知识库发布','人工回复发送','AI 托管接待','AI 自动发送']) await expect(main.getByText(name,{exact:true})).toBeVisible();
     // Deployment switches state their variable names instead of offering an in-app toggle.
     await expect(page.getByText('OUTBOUND_ENABLED',{exact:false}).first()).toBeVisible();
     await expect(page.getByRole('button',{name:'复制',exact:true})).toBeVisible();

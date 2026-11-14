@@ -1,5 +1,5 @@
 import type { BetterAuthOptions } from 'better-auth';
-import { organization } from 'better-auth/plugins';
+import { emailOTP, organization } from 'better-auth/plugins';
 import { createAuthMiddleware } from 'better-auth/api';
 import type { IdentityBindings } from './bindings.ts';
 import type { Mailer, MailMessage, MailScheduler } from '../mail/types.ts';
@@ -87,6 +87,19 @@ export function authOptions(config: IdentityConfig, options: {
         await send({ to: data.email, subject: '你收到了一份 DingBell 公司邀请',
           text: `你受邀加入 ${data.organization.name}。请打开以下页面确认邀请；验证邮箱并接受前，不会获得公司访问权限。\n${config.baseURL}/invite/${encodeURIComponent(data.id)}` });
       } } : {}),
-    })],
+    }),
+    // Sign-in OTP is an additional door to the same user row; it never creates an account.
+    ...(options.mailer ? [emailOTP({
+      disableSignUp: true,
+      otpLength: 6,
+      expiresIn: 600,
+      allowedAttempts: 5,
+      storeOTP: 'hashed',
+      rateLimit: { window: 60, max: 3 },
+      async sendVerificationOTP({ email, otp }: { email: string; otp: string }) {
+        await send({ to: email, subject: 'DingBell 登录验证码',
+          text: `你的登录验证码是 ${otp}，10 分钟内有效。如果不是你发起的请求，请忽略这封邮件。` });
+      },
+    })] : [])],
   } satisfies BetterAuthOptions;
 }

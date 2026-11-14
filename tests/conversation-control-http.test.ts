@@ -54,7 +54,7 @@ test('reply gate rejections have specific statuses and an unconfirmed acceptance
   try {
     const input = { ...command(), action: 'send_reply' as const, body: 'Здравствуйте' };
     const view = { state: initial, viewerMemberId: 'staff-member', projectionPending: false };
-    for (const [code, status] of [['OUTBOUND_DISABLED', 403], ['CAPABILITY_UNVERIFIED', 412], ['REPLY_UNAVAILABLE', 412], ['PREVIEW_UNAVAILABLE', 412]] as const) {
+    for (const [code, status] of [['OUTBOUND_DISABLED', 403], ['CAPABILITY_UNVERIFIED', 412], ['REPLY_UNAVAILABLE', 412]] as const) {
       f.setExecuting(() => ({ outcome: 'rejected', code, view }));
       const response = await f.request('/commands', input);
       assert.equal(response.status, status);
@@ -65,7 +65,7 @@ test('reply gate rejections have specific statuses and an unconfirmed acceptance
     const response = await f.request('/commands', input);
     assert.equal(response.status, 503);
     assert.equal((await response.json() as any).error.code, 'OPERATION_UNCONFIRMED');
-    assert.equal(f.calls.length, 5);
+    assert.equal(f.calls.length, 4);
   } finally { await f.close(); }
 });
 
@@ -166,7 +166,7 @@ async function fixture() {
     `${f.env.APP_BASE_URL}/api/companies/company/conversations/${conversation}${suffix}`, {
       method: input === undefined ? 'GET' : 'POST', headers: { cookie: f.cookies[actor] ?? '', origin, 'content-type': 'application/json', ...(expectedMemberId===null?{}:{'X-DingBell-Member-Id':expectedMemberId}) },
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
-    }, { ...f.env, DB: database, ...(configured ? { CONVERSATION_CONTROLLER: namespace } : {}),...(aiRepair?{FLUE_SUPPORT_AGENT:{}}:{}) } as never,{waitUntil(promise:Promise<unknown>){background.push(promise);}} as never);
+    }, { ...f.env, DB: database, ...(configured ? { CONVERSATION_CONTROLLER: namespace } : {}),...(aiRepair?{AGENT_RUNTIME:{}}:{}) } as never,{waitUntil(promise:Promise<unknown>){background.push(promise);}} as never);
   return { ...f, background,repairCalls,enableAiRepair(){aiRepair=true;},calls, noteCalls, replyCalls, replyListCalls, setReplyListing:(value:typeof replyListing)=>{replyListing=value;}, request, setReplyReading: (value: typeof replyReading) => { replyReading = value; }, setListing: (value: typeof listing) => { listing = value; }, setReading: (value: typeof reading) => { reading = value; }, setExecuting: (value: typeof executing) => { executing = value; }, setDatabase: (value: D1Database) => { database = value; } };
 }
 
@@ -548,7 +548,7 @@ test('recent replies fresh GET returns a disabled empty view without creating a 
 test('recent replies GET returns current authority readiness with only public bounded reply fields',{timeout:30_000},async()=>{
   const f=await fixture();try{
     await f.request('/commands',command());const id=crypto.randomUUID();
-    const reply={intentId:id,commandId:id,body:'Text',previewRequestId:crypto.randomUUID(),status:'queued' as const,revision:1,createdAt:1000,updatedAt:1000,reason:null,attempt:null};
+    const reply={intentId:id,commandId:id,body:'Text',status:'queued' as const,revision:1,createdAt:1000,updatedAt:1000,reason:null,attempt:null};
     f.setReplyListing(()=>({outcome:'found',viewerMemberId:'staff-member',controlVersion:2,historyReady:true,readiness:{allowed:true,code:null},replies:[{...reply,credentialVersion:1,actorUserId:'private'}] as any}));
     const response=await f.request('/replies');assert.equal(response.status,200);
     assert.deepEqual(await response.json(),{companyId:'company',conversationId:'conv-a',viewerMemberId:'staff-member',controlVersion:2,historyReady:true,readiness:{allowed:true,code:null},replies:[{...reply,createdAt:new Date(1000).toISOString(),updatedAt:new Date(1000).toISOString()}]});

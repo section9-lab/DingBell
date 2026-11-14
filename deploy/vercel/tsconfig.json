@@ -10,6 +10,11 @@
     "types": [
       "node"
     ],
+    "paths": {
+      "@earendil-works/*": [
+        "../../packages/agent-runtime/node_modules/@earendil-works/*"
+      ]
+    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "strict": true,

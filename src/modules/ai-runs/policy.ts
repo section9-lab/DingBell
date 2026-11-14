@@ -1,5 +1,5 @@
 import type {AiExecution} from './storage.ts';
-import type {TranslationConfig} from '../translations/types.ts';
+import type {AiModelConfig} from './finance.ts';
 import {SUPPORT_REPLY_V2,isSupportKnowledgePromptVersion} from '../../shared/ai-versions.ts';
 export const SUPPORT_MODEL='nvidia/nemotron-3.5-super-vl-120b-a12b';
 export const SUPPORT_PROVIDER='dingbell-support';
@@ -11,7 +11,7 @@ export const SUPPORT_BASE_URL='https://integrate.api.nvidia.com/v1';
  * and display name, so contextWindow / compat / cost stay accurate.
  */
 export const SUPPORT_MODEL_TEMPLATE_ID='nvidia/nemotron-3-super-120b-a12b';
-export function validateSupportModel(c:TranslationConfig,contextWindow:number,promptVersion='support-v1'){
+export function validateSupportModel(c:AiModelConfig,contextWindow:number,promptVersion='support-v1'){
  if(c.provider==='openai-compatible'){
   if(!c.connection||c.modelConfigVersion!=='company-model-v1'||c.maxInputTokens<16384||c.maxOutputTokens<1||c.maxOutputTokens>2048
     ||(c.promptVersion!==promptVersion&&!(promptVersion==='support-v1'&&isSupportKnowledgePromptVersion(c.promptVersion)))) throw new Error('SUPPORT_CONFIG_UNSUPPORTED');

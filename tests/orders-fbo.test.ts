@@ -6,6 +6,7 @@ import {URL} from 'node:url';
 import {Miniflare} from 'miniflare';
 import {listOzonFboPostings,readOzonFboPosting,OzonReadError} from '../src/modules/orders/ozon.ts';
 import {encryptCredentials} from '../src/modules/stores/credentials.ts';
+import {applyMigrations} from './fixtures/migrations.ts';
 import {runSyncPage,retrySyncFailure} from '../src/modules/sync/runner.ts';
 import {setSyncSourceEnabled,claimSyncLease} from '../src/modules/sync/storage.ts';
 import {getDueFboWork,commitFboList} from '../src/modules/orders/storage.ts';
@@ -66,7 +67,7 @@ test('order-center migration preserves populated sync authority, cursors and FBS
 test('FBO durable sync uses independent windows, retries, permissions and source fencing on real D1',{timeout:60_000},async t=>{
  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("fbo")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});t.after(()=>mf.dispose());
  const db=await mf.getD1Database('DB') as unknown as D1Database;
- for(const file of files)for(const sql of readFileSync(new URL(file,folder),'utf8').split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean))await db.prepare(sql).run();
+ await applyMigrations(db,{files});
  const env={DB:db,STORE_CREDENTIAL_KEYS:JSON.stringify({v1:btoa('a'.repeat(32))}),STORE_CREDENTIAL_ACTIVE_KEY:'v1'};
  const secret=await encryptCredentials(env,{...scope,platformStoreId:credentials.clientId,credentialVersion:1},{apiKey:credentials.apiKey});
  await db.batch([

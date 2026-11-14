@@ -1,6 +1,6 @@
 import { createWorker, StoreCoordinator as ProductionStoreCoordinator, ConversationController as ProductionConversationController, PiAgentObject as ProductionPiAgentObject } from '../../../src/platform/cloudflare/worker.ts';
 import app from './mail-app.ts';
-export { FlueReplyPreviewAgent, FlueReplyTestAgent, FlueSupportAgent } from '../../../src/platform/cloudflare/worker.ts';
+export { LegacyReplyPreviewArchive, LegacyReplyTestArchive, LegacySupportArchive } from '../../../src/platform/cloudflare/worker.ts';
 import { runSyncPage } from '../../../src/modules/sync/runner.ts';
 import type { SyncScope } from '../../../src/modules/sync/types.ts';
 import { syntheticStoreFetch } from './store-fetch.ts';

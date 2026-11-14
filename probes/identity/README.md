@@ -1,7 +1,7 @@
 # Identity compatibility probe
 
 This isolated Worker validates Better Auth 1.7.7, the official Drizzle adapter 1.7.7,
-Drizzle ORM 0.45.4, and D1. It contains no product UI, Flue Agent, real mail sender,
+Drizzle ORM 0.45.4, and D1. It contains no product UI, AI agent, real mail sender,
 shop integration, model call, or production installation flow. The formal DingBell
 Worker does not import this directory.
 

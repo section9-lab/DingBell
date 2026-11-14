@@ -14,8 +14,9 @@ export function registerDegradationRoutes(app: Hono<ApplicationEnv>) {
     if (new URL(c.req.url).search) return apiError(c, 'INVALID_REQUEST', 'The request is invalid.', 400);
     const identity = c.get('identitySession'), companyId = c.req.param('companyId')!;
     if (!await companyFor(c, companyId, identity.user.id)) return notFound(c);
-    // Configuration and budget describe current admission, not historical fallback
-    // ledgers. An ambiguous budget set is unavailable rather than chosen arbitrarily.
+    // Configuration describes current admission. Budgets are informational only: admission
+    // falls back to the reserved unbounded ledger, so a missing or exhausted budget never
+    // disables new AI receptions.
     const row = await c.env.DB!.prepare(`WITH viewer AS (
       SELECT actor.organization_id AS organizationId,${NOW_MS} AS snapshotAt
       FROM member actor JOIN user caller ON caller.id=actor.user_id JOIN session login ON login.user_id=actor.user_id
@@ -34,9 +35,7 @@ export function registerDegradationRoutes(app: Hono<ApplicationEnv>) {
     if (!row) return notFound(c);
     const config = await companySupportConfigurationView(c.env, companyId);
     const status: DegradationView['automation']['status'] = !config.pricesConfigured || config.runReservationMicros === null
-      ? 'configuration_unavailable' : !config.enabled ? 'disabled'
-      : row.remainingMicros === null || row.remainingRuns === null || row.remainingRuns < 1 || row.remainingMicros < config.runReservationMicros
-        ? 'budget_unavailable' : 'available';
+      ? 'configuration_unavailable' : !config.enabled ? 'disabled' : 'available';
     const result: DegradationView = {
       companyId, snapshotAt: new Date(row.snapshotAt).toISOString(),
       automation: { status, newAiExecutions: status === 'available', onUnavailable: 'human_queue',

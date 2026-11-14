@@ -19,7 +19,6 @@ const readinessSchema = v.object({
   deployment: v.object({
     sync: v.boolean(),
     outbound: v.boolean(),
-    translation: v.object({ enabled: v.boolean(), configured: v.boolean(), model: v.boolean() }),
     ai: v.object({ enabled: v.boolean(), modelConfigured: v.boolean(), pricesConfigured: v.boolean() }),
     aiOutbound: v.boolean(),
     knowledge: v.object({ text: v.boolean() }),

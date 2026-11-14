@@ -1,6 +1,6 @@
 # Platform capability probe
 
-This isolated stage-one probe checks Cloudflare R2, Queues and Cron Triggers. It contains only synthetic fixtures and never connects a shop, sends a customer message or invokes an AI model. It uses the existing Flue 2.2.2 Vite customizer: HTTP routes live in `src/app.ts`; a SQLite-backed Durable Object plus native `queue` and `scheduled` handlers live in `src/cloudflare.ts`. It introduces no dependency, D1 database or application scheduler.
+This isolated stage-one probe checks Cloudflare R2, Queues and Cron Triggers. It contains only synthetic fixtures and never connects a shop, sends a customer message or invokes an AI model. It uses the native Cloudflare Vite plugin: HTTP routes live in `src/app.ts`; a SQLite-backed Durable Object plus native `queue` and `scheduled` handlers live in `src/cloudflare.ts`, and `src/worker.ts` composes them. It introduces no dependency, D1 database or application scheduler.
 
 ## What the checks prove
 
@@ -25,7 +25,7 @@ node --test --test-concurrency=1 tests/integration/platform.test.ts
 node node_modules/typescript/bin/tsc --noEmit -p probes/platform/tsconfig.json
 ```
 
-The integration suite builds the Flue-generated Worker, runs the installed Wrangler 4.116.0 locally with remote bindings disabled, uses disposable local storage, and removes the process tree and storage afterward. It checks both the complete binding set and a deployment without R2. Its random test token is not a cloud secret.
+The integration suite builds the native Cloudflare Worker, runs the installed Wrangler 4.116.0 locally with remote bindings disabled, uses disposable local storage, and removes the process tree and storage afterward. It checks both the complete binding set and a deployment without R2. Its random test token is not a cloud secret.
 
 For an interactive local run:
 
@@ -85,7 +85,6 @@ The probe does not establish production throughput, regional behavior, external 
 
 Official references, checked 2026-10-08:
 
-- [Flue Cloudflare composition](https://flueframework.com/docs/guide/cloudflare-target/)
 - [Cloudflare Queue configuration](https://developers.cloudflare.com/queues/configuration/configure-queues/)
 - [Cloudflare Queue local development](https://developers.cloudflare.com/queues/configuration/local-development/)
 - [Cloudflare Queue retries and dead letters](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)

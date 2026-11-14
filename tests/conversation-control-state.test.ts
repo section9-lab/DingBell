@@ -8,16 +8,8 @@ const legacy = { schemaVersion: 1, version: 3, controlEpoch: 3, sequence: 3, lif
 test('reply cancellation names one target without accepting body, outcome or actor overrides',()=>{
   const command={commandId:'cancel-command',expectedVersion:2,action:'cancel_reply',targetIntentId:crypto.randomUUID()};
   assert.deepEqual(v.parse(controlCommandSchema,command),command);
-  for(const changed of [{targetIntentId:''},{targetIntentId:'not-a-uuid'},{body:'replacement'},{state:'canceled'},{actorMemberId:'forged'},{previewRequestId:crypto.randomUUID()}])
+  for(const changed of [{targetIntentId:''},{targetIntentId:'not-a-uuid'},{body:'replacement'},{state:'canceled'},{actorMemberId:'forged'}])
     assert.equal(v.safeParse(controlCommandSchema,{...command,...changed}).success,false);
-});
-
-test('only reply commands can reference a preview and callers cannot inject provenance evidence',()=>{
-  const command={commandId:'send',expectedVersion:1,action:'send_reply',body:'Ответ.',previewRequestId:crypto.randomUUID()};
-  assert.deepEqual(v.parse(controlCommandSchema,command),command);
-  for(const value of [{...command,previewRequestId:''},{...command,previewRequestId:null},{...command,previewRequestId:'not-a-uuid'},
-    {...command,translation:{runId:'forged'}},{...command,bodyHash:'a'.repeat(64)},
-    {commandId:'claim',expectedVersion:1,action:'claim',previewRequestId:command.previewRequestId}])assert.equal(v.safeParse(controlCommandSchema,value).success,false);
 });
 
 test('note bodies preserve plaintext and exact Unicode within the 4000 UTF-16 unit boundary', () => {

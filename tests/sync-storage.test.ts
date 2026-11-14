@@ -21,6 +21,7 @@ test('message synchronization persists its company-scoped entities and checkpoin
 });
 
 import { Miniflare } from 'miniflare';
+import { applyMigrations } from './fixtures/migrations.ts';
 import { getSyncSource, setSyncSourceEnabled, getStoreCoordinatorRuntime, releaseSyncLease, prepareSyncPageGate, syncPageCondition, prepareSyncPageFinish, claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getStoreSync, getSyncRuntime, setStoreSyncEnabled } from '../src/modules/sync/storage.ts';
 import type { NormalizedMessage, SyncLease } from '../src/modules/sync/types.ts';
 
@@ -28,10 +29,7 @@ test('real D1 synchronization commits an immutable page and its checkpoint under
   const mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("fixture")}}', compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
   context.after(() => mf.dispose());
   const db = await mf.getD1Database('DB') as unknown as D1Database;
-  const folder = new URL('../migrations/', import.meta.url);
-  for (const name of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) {
-    for (const statement of readFileSync(new URL(name, folder), 'utf8').split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await db.prepare(statement).run();
-  }
+  await applyMigrations(db);
   const orgId = 'sync-org';
   const actor = { orgId, actorUserId: 'sync-admin', sessionId: 'sync-session' };
   await db.batch([
@@ -265,8 +263,7 @@ test('source permissions and outcomes remain isolated behind one store lease', {
   const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
   context.after(()=>mf.dispose());
   const db=await mf.getD1Database('DB') as unknown as D1Database;
-  const folder=new URL('../migrations/',import.meta.url);
-  for(const name of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort()) for(const sql of readFileSync(new URL(name,folder),'utf8').split('--> statement-breakpoint').map(part=>part.trim()).filter(Boolean)) await db.prepare(sql).run();
+  await applyMigrations(db);
   const actor={orgId:'org',actorUserId:'admin',sessionId:'login'};
   await db.batch([
     db.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('org','Org','org',1)"),
@@ -327,10 +324,7 @@ test('outbound echoes merge with the platform copy instead of duplicating messag
   const mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("fixture")}}', compatibilityDate: '2026-06-01', d1Databases: { DB: crypto.randomUUID() } });
   context.after(() => mf.dispose());
   const db = await mf.getD1Database('DB') as unknown as D1Database;
-  const folder = new URL('../migrations/', import.meta.url);
-  for (const name of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) {
-    for (const statement of readFileSync(new URL(name, folder), 'utf8').split('--> statement-breakpoint').map(part => part.trim()).filter(Boolean)) await db.prepare(statement).run();
-  }
+  await applyMigrations(db);
   const orgId = 'echo-org', actor = { orgId, actorUserId: 'echo-admin', sessionId: 'echo-session' };
   await db.batch([
     db.prepare("INSERT INTO organization (id,name,slug,created_at) VALUES ('echo-org','Echo','echo',1)"),

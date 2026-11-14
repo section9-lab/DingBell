@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { apiError, type ApplicationEnv } from './http.ts';
 import { identityConfig } from './modules/identity/config.ts';
 import { registerIdentityRoutes } from './modules/identity/http.ts';
+import { registerProfileRoutes } from './modules/profile/http.ts';
 import { registerBootstrapRoutes } from './modules/bootstrap/http.ts';
 import { registerVerificationRoutes } from './modules/identity/verification-http.ts';
 import { registerInvitationRoutes } from './modules/invitations/http.ts';
@@ -16,12 +17,10 @@ import {registerRealtimeRoutes} from './modules/realtime/http.ts';
 import { registerReadinessRoutes } from './modules/readiness/http.ts';
 import { registerConversationRoutes } from './modules/conversations/http.ts';
 import { registerConversationControlRoutes } from './modules/conversations/control-http.ts';
-import { registerTranslationRoutes } from './modules/translations/http.ts';
 import { AuditUnavailable, OperationUnconfirmed } from './modules/audit/operation.ts';
 import { mailConfigured } from './modules/mail/config.ts';
 import type { IdentityDependencies } from './modules/mail/types.ts';
 import type { StoreDependencies } from './modules/stores/bindings.ts';
-import type { TranslationServiceDeps } from './modules/translations/api-types.ts';
 import { registerAiBudgetRoutes } from './modules/ai-runs/budget-http.ts';
 import { registerAiReceptionRoutes } from './modules/conversations/ai-http.ts';
 import { registerBudgetAuditRoutes } from './modules/budget-audit/http.ts';
@@ -33,7 +32,7 @@ import {registerCommerceRoutes} from './modules/commerce/http.ts';
 import {registerAccountingRoutes} from './modules/accounting/http.ts';
 import {registerCompanyModelRoutes,type CompanyModelDependencies} from './modules/company-model/http.ts';
 
-export function createApp(deps: IdentityDependencies & StoreDependencies & TranslationServiceDeps & CompanyModelDependencies = {}) {
+export function createApp(deps: IdentityDependencies & StoreDependencies & CompanyModelDependencies = {}) {
   const app = new Hono<ApplicationEnv>();
   app.use('*', async (c, next) => {
     c.set('requestId', crypto.randomUUID());
@@ -47,11 +46,12 @@ export function createApp(deps: IdentityDependencies & StoreDependencies & Trans
     registration: { enabled: false },
     email: { configured: mailConfigured(c.env ?? {}, deps) },
   }));
+  registerProfileRoutes(app);
   registerIdentityRoutes(app, c => ({
     identity: { configured: !!identityConfig(c.env ?? {}) },
     registration: { enabled: false },
     email: { configured: mailConfigured(c.env ?? {}, deps) },
-  }));
+  }), deps);
   registerBootstrapRoutes(app, deps);
   registerVerificationRoutes(app, deps);
   registerInvitationRoutes(app, deps);
@@ -68,7 +68,6 @@ export function createApp(deps: IdentityDependencies & StoreDependencies & Trans
   registerCommerceRoutes(app);
   registerConversationRoutes(app, deps);
   registerConversationControlRoutes(app);
-  registerTranslationRoutes(app, deps);
   registerAiBudgetRoutes(app);
   registerBudgetAuditRoutes(app);
   registerExportRoutes(app);

@@ -34,9 +34,9 @@ export function checkedReply(value:unknown):ReplySnapshot {
   if(!parsed.success)throw new Error('INVALID_REPLY_STATE');
   return parsed.output;
 }
-export function replyView(snapshot:ReplySnapshot,previewRequestId?:string):ReplyView {
+export function replyView(snapshot:ReplySnapshot):ReplyView {
   const {intent,attempt}=checkedReply(snapshot);
-  return {intentId:intent.id,commandId:intent.commandId,body:intent.body,...(previewRequestId?{previewRequestId}:{}),status:intent.state,revision:intent.revision,
+  return {intentId:intent.id,commandId:intent.commandId,body:intent.body,status:intent.state,revision:intent.revision,
     createdAt:intent.createdAt,updatedAt:intent.updatedAt,reason:intent.lastError,
     attempt:attempt?{id:attempt.id,status:attempt.state,startedAt:attempt.startedAt,finishedAt:attempt.finishedAt,
       httpStatus:attempt.httpStatus,providerResult:attempt.providerResult,errorCode:attempt.errorCode}:null};

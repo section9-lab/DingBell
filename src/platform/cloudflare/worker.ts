@@ -11,13 +11,14 @@ class RuntimeObject extends DurableObject<CloudflareEnv> {
 export const ConversationController=createConversationController(RuntimeObject as typeof DurableObject);
 export const StoreCoordinator=createStoreCoordinator(RuntimeObject as typeof DurableObject);
 // Retain historical namespaces and SQLite data. Legacy executions must be drained before upgrading.
+// Migration v7 renames the original v3-v5 archive classes to these neutral names.
 class LegacyArchive extends DurableObject {
   fetch(){return new Response(null,{status:410});}
   async alarm(){await this.ctx.storage.deleteAlarm();}
 }
-export class FlueReplyPreviewAgent extends LegacyArchive {}
-export class FlueReplyTestAgent extends LegacyArchive {}
-export class FlueSupportAgent extends LegacyArchive {}
+export class LegacyReplyPreviewArchive extends LegacyArchive {}
+export class LegacyReplyTestArchive extends LegacyArchive {}
+export class LegacySupportArchive extends LegacyArchive {}
 export function createWorker(app = createApp()) { return {
   async fetch(request:Request,env:CloudflareEnv,ctx:ExecutionContext){
     const path=new URL(request.url).pathname;

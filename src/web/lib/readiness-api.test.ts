@@ -10,7 +10,6 @@ const readiness = {
   companyId: 'a/b', role: 'owner',
   deployment: {
     sync: true, outbound: false,
-    translation: { enabled: false, configured: false, model: false },
     ai: { enabled: false, modelConfigured: false, pricesConfigured: false },
     aiOutbound: false,
     knowledge: { text: true },

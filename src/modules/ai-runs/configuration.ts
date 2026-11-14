@@ -1,4 +1,4 @@
-import {nvidiaProvider} from '@earendil-works/pi-ai/providers/nvidia';
+import {nvidiaProvider} from './nvidia.ts';
 import {freezeAiConfig} from './storage.ts';
 import {SUPPORT_BASE_URL,SUPPORT_MODEL_TEMPLATE_ID,validateSupportModel} from './policy.ts';
 import type {SupportBindings} from './execution.ts';
@@ -12,7 +12,7 @@ export function parseSupportConfiguration(value:unknown){
 }
 /** Deployment metadata only: inspecting configuration grants no execution or spending permission. */
 export function supportConfigurationView(env:SupportBindings):AiBudgetWorkspace['configuration']{
- const base={modelConfigured:!!env.NVAPI_KEY?.trim()&&!(!env.FLUE_SUPPORT_AGENT&&!env.AGENT_RUNTIME)&&!!env.CONVERSATION_CONTROLLER};
+ const base={modelConfigured:!!env.NVAPI_KEY?.trim()&&!!env.AGENT_RUNTIME&&!!env.CONVERSATION_CONTROLLER};
  try{
   const raw=env.AI_RECEPTION_CONFIG_JSON;if(!raw||raw.length>32768)throw new Error('SUPPORT_CONFIG_MISSING');
   const cost=parseSupportConfiguration(JSON.parse(raw)),enabled=base.modelConfigured&&(!isOutboundPromptVersion(cost.config.model.promptVersion)||env.AI_OUTBOUND_ENABLED==='true'&&env.OUTBOUND_ENABLED==='true');

@@ -7,7 +7,7 @@ test('conversation reads expose only authorized imported facts with exact IDs an
   try {
     const response=await f.request();assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
     const result=await response.json() as any;assert.equal(result.companyId,'company');
-    assert.equal(result.viewerMemberId,'owner-member');assert.deepEqual(result.counts,{all:3,mine:0,unassigned:3});
+    assert.equal(result.viewerMemberId,'owner-member');assert.deepEqual(result.counts,{all:3,mine:0,unassigned:3,ai:0});
     assert.deepEqual(result.conversations.map((item:any)=>item.id),['conv-a','conv-b','conv-empty']);
     const item=result.conversations[0];assert.equal(item.store.name,'可见店铺');assert.equal(item.store.status,'paused');assert.equal(item.platformThreadId,'18446744073709551615');
     assert.equal(item.platformCreatedAt,new Date(100).toISOString());assert.equal(item.latestMessage.platformMessageId,'18446744073709551615');
@@ -37,27 +37,27 @@ test('conversation queues return list workflow and scoped counts independent of 
   try {
     await seedWorkflow(f);
     for(const [query,ids,counts] of [
-      ['?queue=all&state=all&limit=1',['conv-a'],{all:3,mine:1,unassigned:1}],
-      ['?queue=mine&state=all',['conv-b'],{all:3,mine:1,unassigned:1}],
-      ['?queue=unassigned&state=all',['conv-empty'],{all:3,mine:1,unassigned:1}],
-      ['?queue=all&state=needs_reply',['conv-empty'],{all:1,mine:0,unassigned:1}],
-      ['?queue=all&state=waiting_customer',['conv-a'],{all:1,mine:0,unassigned:0}],
-      ['?queue=all&state=waiting_internal',[],{all:0,mine:0,unassigned:0}],
-      ['?queue=mine&state=resolved',['conv-b'],{all:1,mine:1,unassigned:0}],
-      ['?storeId=store-a&queue=all',['conv-a','conv-empty'],{all:2,mine:0,unassigned:1}],
-      ['?searchField=thread&search=18446744073709551615&queue=mine',[],{all:1,mine:0,unassigned:0}],
+      ['?queue=all&state=all&limit=1',['conv-a'],{all:3,mine:1,unassigned:1,ai:0}],
+      ['?queue=mine&state=all',['conv-b'],{all:3,mine:1,unassigned:1,ai:0}],
+      ['?queue=unassigned&state=all',['conv-empty'],{all:3,mine:1,unassigned:1,ai:0}],
+      ['?queue=all&state=needs_reply',['conv-empty'],{all:1,mine:0,unassigned:1,ai:0}],
+      ['?queue=all&state=waiting_customer',['conv-a'],{all:1,mine:0,unassigned:0,ai:0}],
+      ['?queue=all&state=waiting_internal',[],{all:0,mine:0,unassigned:0,ai:0}],
+      ['?queue=mine&state=resolved',['conv-b'],{all:1,mine:1,unassigned:0,ai:0}],
+      ['?storeId=store-a&queue=all',['conv-a','conv-empty'],{all:2,mine:0,unassigned:1,ai:0}],
+      ['?searchField=thread&search=18446744073709551615&queue=mine',[],{all:1,mine:0,unassigned:0,ai:0}],
     ] as const) {
       const response=await f.request(query);assert.equal(response.status,200,query);const result=await response.json() as any;
       assert.equal(result.viewerMemberId,'owner-member');assert.deepEqual(result.counts,counts,query);assert.deepEqual(result.conversations.map((item:any)=>item.id),ids,query);
     }
     const staff=await (await f.request('?queue=mine','staff')).json() as any;
-    assert.equal(staff.viewerMemberId,'staff-member');assert.deepEqual(staff.counts,{all:2,mine:1,unassigned:1});assert.deepEqual(staff.conversations.map((item:any)=>item.id),['conv-a']);
+    assert.equal(staff.viewerMemberId,'staff-member');assert.deepEqual(staff.counts,{all:2,mine:1,unassigned:1,ai:0});assert.deepEqual(staff.conversations.map((item:any)=>item.id),['conv-a']);
     assert.deepEqual(staff.conversations[0].workflow,{version:4,lifecycle:'open',workStatus:'waiting_customer',assignedMemberId:'staff-member',assigneeName:'staff'});
     const detail=await (await f.request('/conv-a')).json() as any;assert.equal('workflow'in detail.conversation,false);assert.equal('counts'in detail,false);
     await f.DB.prepare("UPDATE user SET name='客服新名字' WHERE id='staff'").run();
     const renamed=await (await f.request('?state=waiting_customer')).json() as any;assert.equal(renamed.conversations[0].workflow.assigneeName,'客服新名字');assert.equal(renamed.conversations[0].workflow.version,4);
     await f.DB.prepare("DELETE FROM member WHERE id='staff-member'").run();
-    const removed=await (await f.request()).json() as any;assert.equal(removed.conversations[0].workflow.assignedMemberId,'staff-member');assert.equal(removed.conversations[0].workflow.assigneeName,null);assert.deepEqual(removed.counts,{all:3,mine:1,unassigned:1});
+    const removed=await (await f.request()).json() as any;assert.equal(removed.conversations[0].workflow.assignedMemberId,'staff-member');assert.equal(removed.conversations[0].workflow.assigneeName,null);assert.deepEqual(removed.counts,{all:3,mine:1,unassigned:1,ai:0});
     assert.equal(await f.DB.prepare('SELECT count(*) AS n FROM conversation_control').first('n'),2,'reading must not initialize conv-empty');
   } finally {await f.close();}
 });
@@ -69,7 +69,7 @@ test('conversation queue queries reject invalid values and bind pagination to st
       const response=await f.request(suffix);assert.equal(response.status,400,suffix);assert.equal((await response.json() as any).error.code,'INVALID_REQUEST');
     }
     const response=await f.request('?queue=all&state=all&limit=1');assert.equal(response.status,200);const first=await response.json() as any;
-    assert.deepEqual(first.counts,{all:3,mine:0,unassigned:3});
+    assert.deepEqual(first.counts,{all:3,mine:0,unassigned:3,ai:0});
     const second=await (await f.request(`?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json() as any;
     assert.deepEqual(second.counts,first.counts);assert.equal(second.conversations[0].id,'conv-b');
     for(const filter of ['queue=mine','queue=unassigned','state=needs_reply'])assert.equal((await f.request(`?${filter}&cursor=${encodeURIComponent(first.nextCursor)}`)).status,400);
@@ -158,7 +158,7 @@ test('strict conversation queries reject unknown, duplicate, malformed and scope
     for(const search of ['18446744073709551615','order-1']){
       const combined=await (await f.request(`?search=${search}`)).json() as any;
       assert.deepEqual(combined.conversations.map((item:any)=>item.id),['conv-a']);
-      assert.deepEqual(combined.counts,{all:1,mine:0,unassigned:1});
+      assert.deepEqual(combined.counts,{all:1,mine:0,unassigned:1,ai:0});
     }
     assert.deepEqual((await (await f.request('?searchField=order&search=order')).json() as any).conversations,[]);
   }finally{await f.close();}

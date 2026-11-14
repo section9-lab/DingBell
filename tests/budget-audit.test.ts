@@ -12,7 +12,7 @@ async function fixture(){
   const f=await knowledgeFixture(),actor={orgId:'company',actorUserId:'owner',sessionId:f.sqlite.prepare("SELECT id FROM session WHERE user_id='owner'").get()!.id as string,expectedMemberId:'owner'};
   f.sqlite.exec("INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at) VALUES('audit-conv','company','store-a','audit-thread','BUYER_SELLER','Opened',1,1)");
   function budget(table:string,id='budget',org='company'){
-    f.sqlite.prepare(`INSERT INTO ${table}(id,organization_id,starts_at,ends_at,limit_micros${table==='translation_budget_bucket'?'':',max_runs'}) VALUES(?,?,1,2,9007199254740991${table==='translation_budget_bucket'?'':',100'})`).run(id,org);
+    f.sqlite.prepare(`INSERT INTO ${table}(id,organization_id,starts_at,ends_at,limit_micros,max_runs) VALUES(?,?,1,2,9007199254740991,100)`).run(id,org);
   }
   function aiRun(id='run',per=100,max=3){
     const scope={organizationId:'company',storeId:'store-a',conversationId:'audit-conv',controllerId:'controller'};
@@ -37,20 +37,6 @@ test('AI audit includes unused generations and unknown claimed usage',async t=>{
   const before=JSON.stringify(f.sqlite.prepare('SELECT * FROM ai_budget').all());
   assert.deepEqual({...await m.readCompanyBudgetAudit(f.db,f.actor,'ai','budget'),at:0},{...closed,at:0});assert.equal(JSON.stringify(f.sqlite.prepare('SELECT * FROM ai_budget').all()),before);
   assert.equal(closed!.canRelease,false);assert.equal(closed!.supplierCostsVerified,false);
-});
-test('translation audits distinguish held, settled and released runs',async t=>{
-  const m=await api(),f=await fixture();t.after(f.close);
-  const [kind,table,runTable]=['translation','translation_budget_bucket','reply_preview_run'] as const;
-  f.budget(table);for(const state of ['held','settled','released']){
-    const id=`${kind}-${state}`,held=state==='held',settled=state==='settled';
-    f.sqlite.prepare(`INSERT INTO ${runTable}(id,organization_id,store_id,conversation_id,request_id,actor_user_id,actor_member_id,source,source_hash,source_revision,budget_id,config,reserved_micros,created_at,receipt,provider_request_claimed_at,settlement,usage,charged_micros,settled_at,release_evidence)
-      VALUES(?,'company','store-a','audit-conv',?,'owner','owner','private original',?,0,'budget','{}',100,1,?,?,?, ?,?,?,?)`)
-      .run(id,id,'a'.repeat(64),settled?'{}':null,settled?1:null,state,settled?'{}':null,held?null:settled?25:0,held?null:1,state==='released'?'{}':null);
-  }
-  f.sqlite.exec(`UPDATE ${table} SET reserved_micros=100,spent_micros=25`);
-  const audit=await m.readCompanyBudgetAudit(f.db,f.actor,kind,'budget');assert.equal(audit!.status,'balanced');
-  assert.deepEqual(audit!.expected,{reservedMicros:'100',spentMicros:'25',admittedRuns:null});
-  assert.equal(JSON.stringify(audit).includes('private original'),false);
 });
 test('differences and missing generation records are reported without fixing money or granting authority',async t=>{
   const m=await api(),f=await fixture();t.after(f.close);f.budget('ai_budget');f.aiRun();
@@ -96,15 +82,12 @@ test('scheduled reconciliation persists bounded alerts and never changes financi
 });
 test('0047 atomically backfills existing budgets and preserves them on an injected migration failure',async t=>{
   const f=await knowledgeFixture('0046');t.after(f.close);
-  for(const [table,id] of [['ai_budget','a'],['translation_budget_bucket','t']] as const){
-   const count=table==='translation_budget_bucket'?'':',max_runs',value=table==='translation_budget_bucket'?'':',10';
-   f.sqlite.exec(`INSERT INTO ${table}(id,organization_id,starts_at,ends_at,limit_micros${count}) VALUES('${id}','company',1,2,100${value})`);
-  }
+  f.sqlite.exec("INSERT INTO ai_budget(id,organization_id,starts_at,ends_at,limit_micros,max_runs) VALUES('a','company',1,2,100,10)");
   const migration=readFileSync(new URL('../migrations/0047_budget_reconciliation.sql',import.meta.url),'utf8');
   f.sqlite.exec('BEGIN');assert.throws(()=>{f.sqlite.exec(migration);f.sqlite.exec('SELECT * FROM synthetic_missing_reconciliation_table');});f.sqlite.exec('ROLLBACK');
   assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='budget_reconciliation_state'").get()!.n,0);
   assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM ai_budget').get()!.n,1);
-  f.sqlite.exec(migration);assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM budget_reconciliation_state').get()!.n,2);
+  f.sqlite.exec(migration);assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM budget_reconciliation_state').get()!.n,1);
   f.sqlite.exec("INSERT INTO ai_budget(id,organization_id,starts_at,ends_at,limit_micros,max_runs) VALUES('new','company',3,4,1,1)");
   assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM budget_reconciliation_state WHERE kind='ai'").get()!.n,2);assert.deepEqual(f.sqlite.prepare('PRAGMA foreign_key_check').all(),[]);
 });
@@ -116,10 +99,10 @@ test('large reconciliation backlogs remain bounded, fair and company scoped',asy
   assert.equal(first.length,25);assert.equal(second.length,25);assert.equal(new Set([...first,...second].map(c=>c.budgetId)).size,50);assert.equal(first[0].budgetId,'queued-0001');assert.equal(second[0].budgetId,'queued-0026');
   const summary=await m.readCompanyBudgetReconciliationSummary(f.db,f.actor);assert.equal(summary!.totals.tracked,1000);assert.equal(summary!.items.length,50);assert.equal(summary!.truncated,true);
 });
-test('new budgets of every kind enter the persistent reconciliation queue without business content',async t=>{
-  const f=await fixture();t.after(f.close);f.budget('ai_budget','a');f.budget('translation_budget_bucket','t');
+test('new AI budgets enter the persistent reconciliation queue without business content',async t=>{
+  const f=await fixture();t.after(f.close);f.budget('ai_budget','a');
   assert.deepEqual(f.sqlite.prepare("SELECT kind,budget_id AS id FROM budget_reconciliation_state ORDER BY kind").all().map(row=>({...row})),[
-    {kind:'ai',id:'a'},{kind:'translation',id:'t'}]);
+    {kind:'ai',id:'a'}]);
   const serialized=JSON.stringify(f.sqlite.prepare('SELECT * FROM budget_reconciliation_state').all());assert.equal(serialized.includes('private'),false);
 });
 test('a manager losing their role during the read cannot receive an old financial snapshot',async t=>{

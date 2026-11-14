@@ -17,15 +17,6 @@ test('budget audit route returns only scoped totals and never exposes supplier c
   assert.equal(data.canRelease,false);assert.equal(data.supplierCostsVerified,false);
   assert.equal((await f.request({kind:'unknown'})).status,400);assert.equal((await f.request({method:'POST'})).status,404);
 });
-test('company reconciliation summary is manager-only, bounded and includes translation alerts without content',{timeout:30000},async t=>{
-  const f=await fixture();t.after(f.close);await f.DB.prepare("INSERT INTO translation_budget_bucket(id,organization_id,starts_at,ends_at,limit_micros) VALUES('translation-budget','company',1,2,100)").run();
-  await f.DB.prepare("UPDATE budget_reconciliation_state SET status='mismatch',payload='{}',observed_at=1,mismatch_since=1,consecutive_mismatches=2,next_due_at=2 WHERE kind='translation' AND budget_id='translation-budget'").run();
-  const response=await f.request({summary:true});assert.equal(response.status,200,await response.clone().text());const data=await response.json() as any;
-  assert.deepEqual(data.totals,{tracked:2,pending:1,balanced:0,mismatch:1,unavailable:0,alerting:1});assert.equal(data.items.length,2);assert.equal(data.items[0].kind,'translation');
-  assert.equal(JSON.stringify(data).includes('payload'),false);assert.equal(data.truncated,false);assert.equal(response.headers.get('cache-control'),'no-store');
-  assert.equal((await f.request({summary:true,user:'staff',member:'staff-member'})).status,404);assert.equal((await f.request({summary:true,company:'other-company'})).status,404);
-  assert.equal((await f.request({summary:true,query:'?all=true'})).status,400);assert.equal((await f.request({summary:true,method:'POST'})).status,404);
-});
 test('budget audit route requires authenticated managers and a canonical current member binding',{timeout:30000},async t=>{
   const f=await fixture();t.after(f.close);
   assert.equal((await f.request({user:'none'})).status,401);

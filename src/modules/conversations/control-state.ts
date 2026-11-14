@@ -2,7 +2,6 @@ import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import * as v from 'valibot';
 import { REPLY_BODY_MAX } from '../../shared/reply-body.ts';
 import type { ControlState } from './control-types.ts';
-import type { ReplyTranslation } from './reply-types.ts';
 
 const identifier = v.pipe(v.string(), v.minLength(1), v.maxLength(256));
 const counter = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER));
@@ -28,18 +27,9 @@ export const controlCommandSchema = v.union([
   v.strictObject({ ...commandFields, action: v.literal('transfer'), targetMemberId: identifier,
     reason: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(500)) }),
   v.strictObject({ ...commandFields, action: v.literal('add_note'), body: noteBodySchema }),
-  v.strictObject({ ...commandFields, action: v.literal('send_reply'), body: replyBodySchema, previewRequestId: v.optional(v.pipe(v.string(),v.uuid())) }),
+  v.strictObject({ ...commandFields, action: v.literal('send_reply'), body: replyBodySchema }),
   v.strictObject({ ...commandFields, action: v.literal('cancel_reply'), targetIntentId: v.pipe(v.string(),v.uuid()) }),
 ]);
-
-const digest=v.pipe(v.string(),v.regex(/^[a-f0-9]{64}$/));
-const translationSchema=v.strictObject({requestId:v.pipe(v.string(),v.uuid()),runId:v.pipe(v.string(),v.uuid()),sourceRevision:counter,sourceHash:digest,outputHash:digest,confirmedBodyHash:digest});
-export function checkedReplyTranslation(value:unknown,requestId:string|undefined,bodyHash?:string):ReplyTranslation|undefined{
-  if(value===undefined&&requestId===undefined)return undefined;
-  const parsed=v.safeParse(translationSchema,value);
-  if(!parsed.success||parsed.output.requestId!==requestId||(bodyHash!==undefined&&parsed.output.confirmedBodyHash!==bodyHash))throw new Error('INVALID_REPLY_TRANSLATION');
-  return parsed.output;
-}
 
 export function normalizeControlState(value: unknown): ControlState {
   const parsed = v.safeParse(storedControlStateSchema, value);

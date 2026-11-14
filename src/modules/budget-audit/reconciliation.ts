@@ -15,7 +15,7 @@ export async function claimBudgetReconciliations(db:D1Database,now:number,limit=
  const [result]=await db.batch([db.prepare(`UPDATE budget_reconciliation_state SET lease_token=?,next_due_at=?,updated_at=? WHERE rowid IN
   (SELECT rowid FROM budget_reconciliation_state WHERE next_due_at<=? ORDER BY next_due_at,organization_id,kind,budget_id LIMIT ?)
   RETURNING organization_id AS organizationId,kind,budget_id AS budgetId,consecutive_mismatches AS consecutiveMismatches,consecutive_failures AS consecutiveFailures`).bind(token,now+60000,now,now,limit)]);
- return (result.results as Row[]).map(row=>v.parse(v.strictObject({organizationId:id,kind:v.picklist(['ai','translation']),budgetId:id,consecutiveMismatches:count,consecutiveFailures:count,token:v.pipe(v.string(),v.uuid())}),{...row,token}));
+ return (result.results as Row[]).map(row=>v.parse(v.strictObject({organizationId:id,kind:v.picklist(['ai']),budgetId:id,consecutiveMismatches:count,consecutiveFailures:count,token:v.pipe(v.string(),v.uuid())}),{...row,token}));
 }
 function payloadOf(value:NonNullable<Awaited<ReturnType<typeof readBudgetAuditForRepair>>>){
  const {companyId:_,at:__,canRelease:___,supplierCostsVerified:____,...financial}=value;

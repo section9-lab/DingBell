@@ -4,13 +4,19 @@ import { readCompanyModel } from './storage.ts';
 import { modelExecutionSchema, defaultModelGenerations } from '../../shared/company-model.ts';
 import { SUPPORT_REPLY_V2, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
 import { credentialConfig } from '../stores/credentials.ts';
-import { modelBaseUrl, modelEndpoint, openModelKey } from './security.ts';
+import { modelBaseUrl, modelEndpoint } from './security.ts';
+import { modelAccessToken } from './oauth.ts';
 import { providerRequestHeaders } from './providers.ts';
-import type { TranslationConfig } from '../translations/types.ts';
+import type { AiModelConfig } from '../ai-runs/finance.ts';
 import * as v from 'valibot';
 
-// A saved company connection overrides deployment defaults. Missing reviewed execution
-// parameters are unavailable, not a zero-price substitute or another provider's configuration.
+// A saved company connection overrides deployment defaults. A connection without reviewed
+// execution parameters runs with the default token envelope and zero recorded cost, so AI
+// reception never depends on maintaining prices or usage limits first.
+const defaultExecution={
+  maxInputTokens:131072,maxOutputTokens:2048,maxGenerations:defaultModelGenerations,
+  inputMicrosPerMillion:0,outputMicrosPerMillion:0,cacheReadMicrosPerMillion:0,cacheWriteMicrosPerMillion:0,
+} as const;
 export async function resolveSupportConfiguration(env:SupportBindings,companyId:string){
   const row=env.DB?await readCompanyModel(env.DB,companyId):null;
   if(!row){
@@ -18,8 +24,7 @@ export async function resolveSupportConfiguration(env:SupportBindings,companyId:
   }
   if(!env.AGENT_RUNTIME||!credentialConfig(env)||modelBaseUrl(row.baseUrl,env)!==row.baseUrl)return null;
   try{
-    if(!row.execution)return null;
-    const execution=v.parse(modelExecutionSchema,JSON.parse(row.execution));
+    const execution=row.execution?v.parse(modelExecutionSchema,JSON.parse(row.execution)):defaultExecution;
     const promptVersion=SUPPORT_REPLY_V2;
     const maxGenerations=execution.maxGenerations??defaultModelGenerations;
     return parseSupportConfiguration({maxGenerations,model:{provider:'openai-compatible',model:row.model,modelConfigVersion:'company-model-v1',promptVersion,
@@ -36,10 +41,10 @@ export async function companySupportConfigurationView(env:SupportBindings,compan
   const enabled=modelConfigured&&!!cost&&(!isOutboundPromptVersion(cost.config.model.promptVersion)||env.AI_OUTBOUND_ENABLED==='true'&&env.OUTBOUND_ENABLED==='true');
   return {enabled,modelConfigured,pricesConfigured:!!cost,model:cost?row.model:null,maxGenerations:cost?.config.maxGenerations??null,perGenerationMicros:cost?.per??null,runReservationMicros:cost?.total??null};
 }
-export async function frozenCompanyProvider(env:SupportBindings,config:TranslationConfig,companyId:string,sessionId:string){
+export async function frozenCompanyProvider(env:SupportBindings,config:AiModelConfig,companyId:string,sessionId:string,send:typeof fetch=fetch){
   const connection=config.connection;
   if(config.provider!=='openai-compatible'||!connection||connection.companyId!==companyId||!env.DB||modelBaseUrl(connection.baseUrl,env)!==connection.baseUrl)throw new Error('MODEL_CONNECTION_UNAVAILABLE');
   const row=await readCompanyModel(env.DB,companyId,connection.revision);
   if(!row||row.baseUrl!==connection.baseUrl||row.model!==config.model)throw new Error('MODEL_CONNECTION_UNAVAILABLE');
-  return {endpoint:modelEndpoint(row.baseUrl),apiKey:await openModelKey(env,companyId,row.revision,row.baseUrl,row.model,row),headers:providerRequestHeaders(row.provider,sessionId)};
+  return {endpoint:modelEndpoint(row.baseUrl),apiKey:await modelAccessToken(env,row,send),headers:providerRequestHeaders(row.provider,sessionId)};
 }

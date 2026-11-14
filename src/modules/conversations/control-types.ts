@@ -1,4 +1,4 @@
-import type { ReplyRejectCode, ReplyTranslation } from './reply-types.ts';
+import type { ReplyRejectCode } from './reply-types.ts';
 import type { StoreActor } from '../stores/storage.ts';
 import type {AiReceipt} from './ai-state.ts';
 import type {AiListeningReceipt} from './ai-listening.ts';
@@ -38,7 +38,7 @@ export type ControlCommand = {
   | { action: 'set_work_status'; workStatus: WorkStatus }
   | { action: 'transfer'; targetMemberId: string; reason: string }
   | { action: 'add_note'; body: string }
-  | { action: 'send_reply'; body: string; previewRequestId?: string }
+  | { action: 'send_reply'; body: string }
   | { action: 'cancel_reply'; targetIntentId: string }
 );
 interface ReceiptFields {
@@ -49,7 +49,7 @@ interface ReceiptFields {
 export type ControlReceipt =
   | (Exclude<ControlCommand, { action: 'add_note' | 'send_reply' }> & ReceiptFields)
   | (Extract<ControlCommand, { action: 'add_note' }> & ReceiptFields & { authorName: string })
-  | (Extract<ControlCommand, { action: 'send_reply' }> & ReceiptFields & { intentId: string; translation?: ReplyTranslation });
+  | (Extract<ControlCommand, { action: 'send_reply' }> & ReceiptFields & { intentId: string });
 export interface ControlEvent {
   scope: ControlScope;
   receipt: ControlReceipt;
@@ -63,7 +63,7 @@ export interface ControlView {
 export type ControlReadResult = { outcome: 'found'; view: ControlView } | { outcome: 'not_found' };
 export type ControlCommandResult =
   | { outcome: 'accepted'; receipt: ControlReceipt; view: ControlView }
-  | { outcome: 'rejected'; code: ReplyRejectCode | 'PREVIEW_UNAVAILABLE' | 'REPLY_NOT_CANCELABLE'; view: ControlView }
+  | { outcome: 'rejected'; code: ReplyRejectCode | 'REPLY_NOT_CANCELABLE'; view: ControlView }
   | { outcome: 'conflict'; reason: 'version' | 'command' | 'state' | 'target'; view: ControlView }
   | { outcome: 'not_found' };
 export interface ControlDirectory {

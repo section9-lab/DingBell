@@ -37,21 +37,6 @@ test('a canceled public reply cannot claim a provider attempt or an error',async
   }
 });
 
-test('translated send acknowledgements bind the preview reference and hash of the confirmed body',async t=>{
-  const input={...command,action:'send_reply',body:'  Ответ после проверки.  ',previewRequestId:crypto.randomUUID()};
-  const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(input.body)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
-  const proof={requestId:input.previewRequestId,runId:crypto.randomUUID(),sourceRevision:3,sourceHash:'a'.repeat(64),outputHash:'b'.repeat(64),confirmedBodyHash:hash};
-  const accepted={...receipt,...input,intentId:input.commandId,translation:proof};let payload:any=accepted;
-  const mock=t.mock.method(globalThis,'fetch',async(_url:string,init:RequestInit)=>{assert.deepEqual(JSON.parse(String(init.body)),input);return Response.json({...response,receipt:payload});});
-  assert.deepEqual((await api.sendConversationCommand('company','conversation',input as any,'member-agent')).receipt,accepted);
-  for(const change of [{previewRequestId:undefined},{previewRequestId:crypto.randomUUID()},{translation:undefined},
-    {translation:{...proof,requestId:crypto.randomUUID()}},{translation:{...proof,confirmedBodyHash:'f'.repeat(64)}},
-    {translation:{...proof,runId:'forged'}},{translation:{...proof,sourceRevision:-1}}]){
-    payload={...accepted,...change};await assert.rejects(api.sendConversationCommand('company','conversation',input as any,'member-agent'),{code:'OPERATION_UNCONFIRMED'});
-  }
-  assert.equal(mock.mock.callCount(),8);
-});
-
 test('reply commands preserve confirmed text, bind the intent to the command and allow an immutable older acceptance',async t=>{
   const send=method('sendConversationCommand');
   const input={...command,action:'send_reply',body:'  Здравствуйте!\nРазмер — 26 см.  '};
@@ -122,7 +107,6 @@ test('reply gates preserve explicit rejection codes and Chinese guidance without
     ['OUTBOUND_DISABLED',403,'当前部署或店铺尚未开启对外回复。'],
     ['CAPABILITY_UNVERIFIED',412,'尚未确认店铺的回复权限，请联系管理员核实。'],
     ['REPLY_UNAVAILABLE',412,'当前会话或店铺暂不满足发送条件，请刷新状态后确认。'],
-    ['PREVIEW_UNAVAILABLE',412,'原翻译预览不可用于本次回复，请核对原文并重新生成预览。'],
   ] as const){
     const mock=t.mock.method(globalThis,'fetch',async()=>Response.json({error:{code},requestId:'reply-gate'},{status}));
     await assert.rejects(send('company','conversation',input,'member-agent'),(error:any)=>error instanceof ApiError&&error.code===code&&error.message===message&&error.requestId==='reply-gate');

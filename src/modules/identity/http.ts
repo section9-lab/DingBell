@@ -4,6 +4,8 @@ import { bodyLimit } from 'hono/body-limit';
 import { apiError, authError, jsonResponse, type ApplicationEnv, type IdentitySession } from '../../http.ts';
 import { auditedChange, type AuditOutcome } from '../audit/operation.ts';
 import { identityAuditEvent } from '../audit/schema.ts';
+import { isMailbox, mailConfigured } from '../mail/config.ts';
+import type { IdentityDependencies } from '../mail/types.ts';
 import { identityConfig } from './config.ts';
 import * as schema from './schema.ts';
 import { services } from './services.ts';
@@ -39,7 +41,7 @@ export async function companyFor(c: Context<ApplicationEnv>, organizationId: str
   )).where(eq(schema.organization.id, organizationId)).get();
 }
 
-function userDTO(user: IdentitySession['user']) {
+export function userDTO(user: IdentitySession['user']) {
   return { id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified, image: user.image ?? null };
 }
 
@@ -59,7 +61,7 @@ function unconfirmed(c: Context<ApplicationEnv>, response: Response) {
 
 type WorkspaceSetup = { identity: { configured: boolean }; registration: { enabled: boolean }; email: { configured: boolean } };
 
-export function registerIdentityRoutes(app: Hono<ApplicationEnv>, workspaceSetup?: (c: Context<ApplicationEnv>) => WorkspaceSetup) {
+export function registerIdentityRoutes(app: Hono<ApplicationEnv>, workspaceSetup?: (c: Context<ApplicationEnv>) => WorkspaceSetup, dependencies: IdentityDependencies = {}) {
   if (workspaceSetup) app.get('/api/workspace-bootstrap', async c => {
     const setup = workspaceSetup(c);
     if (!setup.identity.configured) return jsonResponse(c, { setup, session: null, companies: null });
@@ -111,6 +113,80 @@ export function registerIdentityRoutes(app: Hono<ApplicationEnv>, workspaceSetup
       if (!response.ok) return authError(c, response, true);
       return jsonResponse(c, payload, 200, response);
     } catch { return unconfirmed(c, response); }
+  });
+
+  app.post('/api/auth/sign-in/email-otp', configured, limitedBody, async c => {
+    const body: unknown = await c.req.raw.clone().json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).length !== 2
+      || typeof (body as { email?: unknown }).email !== 'string'
+      || !isMailbox((body as { email: string }).email)
+      || typeof (body as { otp?: unknown }).otp !== 'string'
+      || !/^\d{6}$/.test((body as { otp: string }).otp)) {
+      return apiError(c, 'INVALID_REQUEST', 'Provide only the email address and the six-digit code.', 400);
+    }
+    const email = (body as { email: string }).email.trim().toLowerCase();
+    const otp = (body as { otp: string }).otp;
+    const identity = services(c.env, dependencies)!;
+    c.set('identity', identity);
+    const existing = await identity.db.select({ id: schema.user.id, emailVerified: schema.user.emailVerified })
+      .from(schema.user).where(eq(schema.user.email, email)).get();
+    if (existing && !existing.emailVerified) {
+      // Prove the code before promoting a legacy unverified account. Better Auth
+      // otherwise removes its credential account, which would break password sign-in.
+      try {
+        const api = identity.auth.api as typeof identity.auth.api & {
+          checkVerificationOTP: (input: { body: { email: string; type: 'sign-in'; otp: string } }) => Promise<unknown>;
+        };
+        await api.checkVerificationOTP({ body: { email, type: 'sign-in', otp } });
+      } catch {
+        return apiError(c, 'INVALID_OTP', 'The code is invalid or expired.', 400);
+      }
+      await identity.db.update(schema.user).set({ emailVerified: true }).where(eq(schema.user.id, existing.id));
+      const promoted = await identity.db.select({ emailVerified: schema.user.emailVerified })
+        .from(schema.user).where(eq(schema.user.id, existing.id)).get();
+      if (!promoted?.emailVerified) return apiError(c, 'IDENTITY_UNAVAILABLE', 'The account could not be verified safely.', 503);
+    }
+    const response = await identity.auth.handler(c.req.raw);
+    if (response.status === 429) return authError(c, response);
+    try {
+      const value = response.ok ? await response.json() as { user: IdentitySession['user'] } : null;
+      const payload = value ? { user: userDTO(value.user), redirect: false } : null;
+      await recorder(c, 'auth.sign_in.otp', value?.user.id)(response.ok ? 'succeeded' : response.status < 500 ? 'rejected' : 'unknown');
+      if (!response.ok) {
+        if (response.status === 400) return apiError(c, 'INVALID_OTP', 'The code is invalid or expired.', 400, response);
+        return authError(c, response, true);
+      }
+      return jsonResponse(c, payload, 200, response);
+    } catch { return unconfirmed(c, response); }
+  });
+
+  app.post('/api/auth/email-otp/send-verification-otp', configured, limitedBody, async c => {
+    if (!mailConfigured(c.env, dependencies)) return apiError(c, 'MAIL_NOT_CONFIGURED', 'Email service is not configured.', 503);
+    const body: unknown = await c.req.raw.clone().json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).length !== 2
+      || (body as { type?: unknown }).type !== 'sign-in'
+      || typeof (body as { email?: unknown }).email !== 'string'
+      || !isMailbox((body as { email: string }).email)) {
+      return apiError(c, 'INVALID_REQUEST', 'Provide only a valid email address and the sign-in type.', 400);
+    }
+    let execution: Pick<ExecutionContext, 'waitUntil'>;
+    try { execution = c.executionCtx; } catch { return apiError(c, 'IDENTITY_UNAVAILABLE', 'The request cannot safely schedule email delivery.', 503); }
+    if (typeof execution.waitUntil !== 'function') return apiError(c, 'IDENTITY_UNAVAILABLE', 'The request cannot safely schedule email delivery.', 503);
+    const identity = services(c.env, dependencies, delivery => {
+      execution.waitUntil((async () => {
+        const outcome = await delivery.then(() => 'succeeded' as const, () => 'rejected' as const);
+        try { await recorder(c, 'mail.otp.submit')(outcome); } catch { /* The request audit remains the durable acceptance record. */ }
+      })());
+    })!;
+    c.set('identity', identity);
+    const response = await identity.auth.handler(c.req.raw);
+    if (response.status === 429) return authError(c, response);
+    if (!response.ok) return authError(c, response, true);
+    try { await recorder(c, 'auth.otp.send')('succeeded'); }
+    catch { return unconfirmed(c, response); }
+    return jsonResponse(c, { accepted: true }, 202, response);
   });
 
   app.post('/api/auth/sign-out', configured, limitedBody, async c => {

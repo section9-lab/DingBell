@@ -17,13 +17,13 @@ import { Alert,AlertDescription,AlertTitle } from './ui/alert';
 import { Dialog,DialogTrigger,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter } from './ui/dialog';
 import { Spinner } from './ui/spinner';
 const budgetTitle='AI 接待预算';
-const budgetDescription='用于消费者会话中的 AI 接待。金额为 USD 用量估算，不是充值余额或供应商账单；翻译与客户消息发送另行管理。';
+const budgetDescription='用于消费者会话中的 AI 接待。金额为 USD 用量估算，不是充值余额或供应商账单；客户消息发送另行管理。';
 const dayText=(ms:number)=>new Date(ms).toISOString().slice(0,10);
-const auditKindName={ai:'AI 接待',translation:'回复翻译'};
+const auditKindName={ai:'AI 接待'};
 function BudgetReconciliationOverview({companyId,memberId,date}:{companyId:string;memberId:string;date:(value:string)=>string}){
  const query=useQuery({queryKey:['budget-reconciliation-summary',companyId,memberId],queryFn:({signal})=>readBudgetReconciliationSummary(companyId,memberId,signal),gcTime:0,refetchInterval:30000});
  const data=query.data;
- return <Card><CardHeader><CardTitle>预算核对监控</CardTitle><CardDescription>汇总 AI 接待与回复翻译的后台账本核对。仅显示财务状态，不包含客户正文。</CardDescription></CardHeader>
+ return <Card><CardHeader><CardTitle>预算核对监控</CardTitle><CardDescription>汇总 AI 接待的后台账本核对。仅显示财务状态，不包含客户正文。</CardDescription></CardHeader>
   <CardContent className="flex flex-col gap-4">
    {!data?(query.isPending?<LoadingState>正在读取核对状态…</LoadingState>:<ErrorNotice error={query.error} />):<>
     <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">{[['已跟踪',data.totals.tracked],['账本一致',data.totals.balanced],['待首次核对',data.totals.pending],['存在差异',data.totals.mismatch],['后台不可用',data.totals.unavailable]].map(([label,value])=><div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 text-sm font-medium">{value}</dd></div>)}</dl>

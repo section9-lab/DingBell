@@ -67,7 +67,7 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
     {store && dialog === 'grants' && <StoreGrantsDialog {...shared} store={store} />}
     {store && (dialog === 'paused' || dialog === 'unverified' || dialog === 'disconnected') && <StoreStateDialog {...shared} store={store} state={dialog} />}
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="flex flex-col gap-2"><h1 className="text-2xl font-semibold tracking-tight">店铺管理</h1>
+      <div className="flex flex-col gap-2"><h1 className="page-title">店铺管理</h1>
         <p className="text-sm leading-6 text-muted-foreground">{management ? '管理 Ozon 连接、只读能力和团队访问范围。' : '这里只显示你有权访问的店铺。连接配置由公司管理员维护。'}</p>
       </div>
       {management && <Button disabled={pending || !stores.data.configured} onClick={() => setDialog('platform')}><Plus data-icon="inline-start" />添加店铺</Button>}
@@ -105,7 +105,7 @@ export function StoresPage({ company, refresh }: { company: Company; refresh: (n
         {(['fbs_postings','fbo_postings','fbp_postings'] as const).map(source=><StoreSyncPanel key={source} pushDriven={pushDriven} pushActive={pushActive} source={source} companyId={company.id} storeId={store.id} management={management} pending={pending} change={change} refresh={refresh}
           canEnable={store.hasCredentials && ['verified', 'partial'].includes(store.status) && ['auth', source==='fbs_postings'?'orders_fbs_read':source==='fbo_postings'?'orders_fbo_read':'orders_fbp_read'].every(code => store.capabilities.some(capability => capability.code === code && capability.status === 'available'))} />)}
         <section aria-labelledby="store-capabilities" className="flex flex-col gap-4"><h3 id="store-capabilities" className="font-medium">平台能力</h3>
-          <dl className="divide-y rounded-lg border px-4">{store.capabilities.map(capability => <div key={capability.code} className="flex flex-wrap items-center justify-between gap-3 py-4">
+          <dl className="surface-card divide-y px-4">{store.capabilities.map(capability => <div key={capability.code} className="flex flex-wrap items-center justify-between gap-3 py-4">
             <div className="flex min-w-0 flex-col gap-1"><dt className="text-sm font-medium">{capabilities[capability.code] ?? '其他平台能力'}</dt><dd className="text-xs leading-5 text-muted-foreground">{reasons[capability.reason] ?? '请依据本次检查状态确认可用范围'}</dd></div>
             <Badge variant={capability.status === 'available' ? 'secondary' : 'outline'}>{capabilityStates[capability.status]}</Badge>
           </div>)}</dl>

@@ -62,7 +62,7 @@ test('real workerd R2, Queues, DLQ and scheduled contracts', { timeout: 240_000 
     children.add(build);
     const [exitCode] = await once(build, 'exit');
     await stop(build); children.delete(build);
-    assert.equal(exitCode, 0, 'the Flue-generated platform Worker must build');
+    assert.equal(exitCode, 0, 'the platform Worker must build');
     const child = spawn(process.execPath, [join(root, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--config', 'probes/platform/dist/dingbell_platform_probe/wrangler.json', '--bundle', '--local', '--test-scheduled', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0', '--persist-to', statePath, '--var', `PROBE_TOKEN:${probeToken}`], {
       cwd: root, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
       env,

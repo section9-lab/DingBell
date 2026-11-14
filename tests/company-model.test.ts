@@ -58,7 +58,7 @@ test('company model routes enforce current managers, verified sessions, origin a
 test('saved model connection tests are explicit, bounded, single-attempt and never leak upstream errors or keys',{timeout:30000},async t=>{
  let calls=0,fail=false;
  const f=await fixture(async(input,init)=>{calls++;assert.equal(String(input),'https://api.openai.com/v1/chat/completions');assert.equal(init?.redirect,'manual');assert.equal(new Headers(init?.headers).get('authorization'),`Bearer ${command.apiKey}`);
-  const body=JSON.parse(String(init?.body));assert.equal(body.model,command.model);assert.equal(Object.hasOwn(body,'max_tokens'),false);assert.equal(body.stream,true);assert.equal(body.tools[0].function.name,'connection_probe');assert.equal(JSON.stringify(body).includes('Здравствуйте'),false);
+  const body=JSON.parse(String(init?.body));assert.equal(body.model,command.model);assert.equal(Object.hasOwn(body,'max_tokens'),false);assert.equal(body.stream,true);assert.equal(body.tools[0].function.name,'connection_probe');assert.equal(body.tool_choice,'auto');assert.equal(JSON.stringify(body).includes('Здравствуйте'),false);
   return fail?new Response('raw-secret-provider-error',{status:302,headers:{location:'http://127.0.0.1/'}}):success();});t.after(f.close);
  assert.equal((await f.request('',command)).status,200);assert.equal(calls,0);
  const probe=await f.request('/test',{expectedVersion:1});assert.equal(probe.status,200,await probe.clone().text());assert.equal((await probe.json() as any).test.status,'passed');assert.equal(calls,1);
@@ -126,12 +126,14 @@ test('model catalog permits serialize concurrent requests and discard facts afte
  response=await f.request('/models',draft);assert.equal(response.status,409);assert.equal((await response.text()).includes('must-not-leak'),false);
 });
 
-test('company models require reviewed prices before new direct-reply execution',{timeout:30000},async t=>{
+test('company models run with a default envelope and zero recorded cost without reviewed prices',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);assert.equal((await f.request('',command)).status,200);
  const env=Object.assign(f.env,{AGENT_RUNTIME:{} as any,CONVERSATION_CONTROLLER:{} as any,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'});
- assert.equal(await resolveSupportConfiguration(env,'company'),null);
- const unavailable=await companySupportConfigurationView(env,'company');
- assert.equal(unavailable.enabled,false);assert.equal(unavailable.pricesConfigured,false);assert.equal(unavailable.runReservationMicros,null);
+ const defaults=await resolveSupportConfiguration(env,'company');assert.ok(defaults);
+ assert.equal(defaults.config.maxGenerations,6);assert.equal(defaults.per,0);assert.equal(defaults.total,0);
+ assert.equal(defaults.config.model.maxInputTokens,131072);assert.equal(defaults.config.model.maxOutputTokens,2048);
+ const available=await companySupportConfigurationView(env,'company');
+ assert.equal(available.enabled,true);assert.equal(available.pricesConfigured,true);assert.equal(available.runReservationMicros,0);
  const result=await f.request('',{...command,expectedVersion:1,execution:{...prices,maxGenerations:2}});assert.equal(result.status,200);
  const cost=await resolveSupportConfiguration(env,'company');assert.ok(cost);assert.equal(cost.config.model.provider,'openai-compatible');assert.equal(cost.config.model.model,command.model);assert.equal(cost.config.model.connection?.revision,2);
  assert.equal(cost.config.model.promptVersion,'support-reply-v2');assert.equal(cost.config.maxGenerations,2);assert.ok(cost.total>0);assert.equal(JSON.stringify(cost).includes(command.apiKey),false);
@@ -159,6 +161,19 @@ test('pi providers resolve their bundled endpoint and add provider routing heade
  const probe=await f.request('/test',{expectedVersion:1});assert.equal(probe.status,200,await probe.clone().text());
  assert.equal((await probe.json() as any).test.status,'passed');
  assert.match(headers?.get('x-opencode-session')??'',/^[0-9a-f-]{36}$/);
+});
+
+test('default providers derive their endpoint while custom providers still require a base URL',{timeout:30000},async t=>{
+ const f=await fixture();t.after(f.close);
+ const providers=await(await f.request('/providers')).json() as any;
+ const go=providers.providers.find((entry:any)=>entry.id==='opencode-go');
+ const expected=go.models.find((entry:any)=>entry.id==='deepseek-v4-pro').baseUrl;
+ const saved=await f.request('',{expectedVersion:0,provider:'opencode-go',model:'deepseek-v4-pro',apiKey:'synthetic-private-model-key',execution:null});
+ assert.equal(saved.status,200,await saved.clone().text());
+ assert.equal((await readCompanyModel(f.DB,'company'))!.baseUrl,expected);
+ const custom=await f.request('',{expectedVersion:1,provider:'custom',model:'manual-model',apiKey:'synthetic-private-model-key',execution:null});
+ assert.equal(custom.status,400);assert.equal((await custom.json() as any).error.code,'INVALID_REQUEST');
+ assert.equal((await readCompanyModel(f.DB,'company'))!.revision,1);
 });
 
 test('providers without an executable OpenAI-compatible surface are rejected before any write',{timeout:30000},async t=>{

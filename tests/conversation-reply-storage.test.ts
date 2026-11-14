@@ -1,18 +1,15 @@
 import assert from 'node:assert/strict';
-import { readFileSync,readdirSync } from 'node:fs';
 import { test } from 'node:test';
-import { URL } from 'node:url';
-import { Miniflare } from 'miniflare';
 import { projectReplyEvents,readReplyDispatchContext } from '../src/modules/conversations/reply-storage.ts';
+import { createSqliteD1 } from './fixtures/d1-sqlite.ts';
 import { projectControlEvents } from '../src/modules/conversations/control-storage.ts';
 import type { ControlEvent,ControlScope } from '../src/modules/conversations/control-types.ts';
 import type { HumanReplyIntent,ReplySnapshot } from '../src/modules/conversations/reply-types.ts';
 const scope:ControlScope={organizationId:'org',storeId:'store',conversationId:'conv',controllerId:'controller'};
 async function fixture(){
-  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("reply fixture")}}',compatibilityDate:'2026-06-01',d1Databases:{DB:crypto.randomUUID()}});
+  const database=createSqliteD1();
   try{
-    const db=await mf.getD1Database('DB') as unknown as D1Database,folder=new URL('../migrations/',import.meta.url);
-    for(const file of readdirSync(folder).filter(name=>name.endsWith('.sql')).sort())for(const sql of readFileSync(new URL(file,folder),'utf8').split('--> statement-breakpoint').map(value=>value.trim()).filter(Boolean))await db.prepare(sql).run();
+    const db=database.db;
     await db.batch([
       db.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES ('org','Org','org',1),('other','Other','other',1)"),
       db.prepare("INSERT INTO user(id,name,email,email_verified) VALUES ('owner','Owner','owner@example.invalid',1),('staff','Staff','staff@example.invalid',1),('unverified','Unverified','unverified@example.invalid',0)"),
@@ -22,8 +19,8 @@ async function fixture(){
       db.prepare("INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at) VALUES ('conv','org','store','18446744073709551615','BUYER_SELLER','Opened',1,1),('conv-2','org','store','chat-2','BUYER_SELLER','Opened',1,1)"),
       db.prepare("INSERT INTO conversation_control(conversation_id,organization_id,store_id,controller_id,schema_version,work_status,repair_due_at) VALUES ('conv','org','store','controller',2,'needs_reply',1),('conv-2','org','store','controller-2',2,'needs_reply',1)"),
     ]);
-    return {db,close:()=>mf.dispose()};
-  }catch(error){await mf.dispose().catch(()=>{});throw error;}
+    return {db,close:database.close};
+  }catch(error){database.close();throw error;}
 }
 function snapshot(revision=1,state:ReplySnapshot['intent']['state']='queued'):ReplySnapshot & {intent:HumanReplyIntent}{
   return {intent:{schemaVersion:1,id:'command',commandId:'command',actorUserId:'staff',actorMemberId:'staff-member',body:'  Ответ\r\n请确认  ',bodyHash:'a'.repeat(64),platformThreadId:'18446744073709551615',credentialVersion:1,controlEpoch:2,state,revision,createdAt:100,updatedAt:110+revision*10,dueAt:state==='queued'||state==='sending'?210:null,lastError:state==='unknown'?'TRANSPORT_UNKNOWN':null},attempt:state==='queued'||state==='skipped'?null:{id:'command:1',intentId:'command',state:state as 'sending'|'sent'|'failed'|'unknown',startedAt:110,deadlineAt:210,finishedAt:state==='sending'?null:120,httpStatus:state==='sent'?200:null,providerResult:state==='sent'?'success':null,errorCode:state==='unknown'?'TRANSPORT_UNKNOWN':null}};

@@ -1,5 +1,7 @@
 # DingBell 实施进度与验证记录
 
+> **历史记录说明（2026-11-14）：** 下文包含 Flue 时期的实施与验收记录，其中 `probes/flue`、`probes/external`、`probes/nvidia`、`tests/integration/flue.test.ts`、`tests/integration/reply-preview.test.ts` 及相关夹具已随 Flue 运行时移除。保留这些记录仅用于追溯当时的合同与证据，不代表当前仍可执行。
+
 **2026-11-04 当前补充：** 首轮生产加固已覆盖 Node 显式并发边界、商品货源最终 SQL 授权、全目录 FTS5 文本检索、旧发布证明兼容、预算/价格失败关闭及退役记录归档。最终完整本地单元/模块回归为 1148/1148（无失败、无跳过，Node 24.22.1），另有便携浏览器 15 项、编译 Cloudflare 浏览器 1 项、编译产物/native 集成 14 项及升级 20 项通过；范围与限制见[首轮记录](16-production-hardening.md)，具体结果以实际执行日志为准。本补充不改写下文历史结果，也不表示历史浏览器全集、真实模型/平台、灾难恢复或生产容量已验收。
 
 更新日期：2026-10-11。对应方案：0.2。当前阶段：**6B-20 已完成本地 AI 共享发送链路并合并到 main；R12-1 已补跨账本只读核对，R12-2 已收口回归，R12-3 已补 Gateway 嵌入结算，R12-4 已补翻译/问答测试的持久费用修复，R12-5 已补持久账本核对状态和受限页面告警，R12-6 已补公司异常汇总、退避和本地积压边界；R09-1—4 已完成受控转人工资料处理；R14-1—4 已完成会话/公司日志、全部组合筛选和冻结业务时间线；R15-1/2 已完成两类 CSV；R16-1 已新增 100,000 行作业数据库状态机与可选私有 R2 适配；R17 已完成基础分析与公开口径；R18-1 已补独立自部署、贡献、升级、排障和锁定许可证清单骨架；R20-1 已公开数据治理现状并固定删除失败关闭；R19-1 已并列公开技术 claims 与确认 AI 外发意图；R21-1 已交付全产品只读降级状态合同；R22-1 已补真实 D1 文件备份升级、旧/新恢复和密钥轮换矩阵；R23-1 已增加 10,000 会话/100,000 消息本地容量夹具；R06-1 已新增旧知识向量清理状态机；R07-1 已扩大双语检索语料并增加 10,000 文档目录夹具；R10-1 已新增主动通知调度和发送前失败关闭合同；新增严格限制为 local D1 的随机密码演示账号命令。真实 Gateway/供应商发票、外部通知及生产规模核对，以及真实模型、平台与云端整阶段验收仍未完成。** 历史分批结果保留在下文，R09 最终范围见第 94—97 节。
@@ -65,7 +67,7 @@ npm run probe:build
 
 ## 3. 测试发现与修正
 
-1. **构建成功不能证明运行时兼容。** 最初精确锁定模板版本范围的下界（Cloudflare Vite plugin 1.39.2）时，构建通过，但真实 dispatch 出现 `startActiveSpan is not a function`。其内部 workerd 过旧，无法满足 Agents SDK 0.20.1 的 tracing 调用。改为 Flue 上游锁文件使用的 plugin 1.49.0 / Wrangler 4.116.0 后，同一集成测试通过。未修改依赖内部代码；来源见[文档核对记录](05-flue-documentation-audit.md)。
+1. **构建成功不能证明运行时兼容。** 最初精确锁定模板版本范围的下界（Cloudflare Vite plugin 1.39.2）时，构建通过，但真实 dispatch 出现 `startActiveSpan is not a function`。其内部 workerd 过旧，无法满足 Agents SDK 0.20.1 的 tracing 调用。改为 Flue 上游锁文件使用的 plugin 1.49.0 / Wrangler 4.116.0 后，同一集成测试通过。未修改依赖内部代码；来源见[文档核对记录](archive/05-flue-documentation-audit.md)。
 2. **跨入口不能作为原生幂等重试。** HTTP 提交与服务端 `dispatch` 的提交种类不同。同入口、同键、同完整载荷才回放原回执；跨入口同键返回 `409 submission_conflict`。已修正架构合同与 AC-085，后续业务调度必须固定入口和完整载荷。
 3. **测试与正式服务分开构建。** 测试应用提供原生 Agent 与调试接口，便于观察合同；正式应用不挂载这些接口。新增产物扫描防止测试 provider、路由或 Agent 进入正式输出。云端部署前，测试接口统一加入专用令牌鉴权。
 
@@ -3289,3 +3291,14 @@ Cloudflare 最新真云检查使用全新 D1、全部 54 份迁移、实际 Pi W
 - **增量**：引导完成后，聊天、商品、FBS 只由 Ozon Push Webhook + `StoreCoordinator` alarm 驱动。FBO/FBP 没有完整通知覆盖，保留显式人工回补；旧的周期性发现不再运行。
 - **边界**：启动引导只写入持久任务并唤醒协调器，不直接访问 Ozon；真正的分页读取仍走现有店铺凭证、限流、epoch/fence 和响应校验。订单初始窗口沿用现有 30 天引导预算，更早订单继续使用人工历史导入。
 - **验证**：新增 `tests/sync-bootstrap.test.ts`，覆盖启动标记、初始 chat/product/FBS 工作、逐店完成和无读取能力店铺；`tests/integration/sync.test.ts` 改为验证 Cron 不轮询、显式 wake 才读取。`npm test` 1174/1174、`tests/integration/sync.test.ts` 6/6、`npm run check:types`、`npm run check:platforms`、`npm run check:release`、`npm run test:portable`（26/26）与 `npm run build` 均通过。
+
+## 143. AI 接待取消执行限额与预算门槛（2026-11-08）
+
+产品决定：AI 接待不再要求先填写执行限制与价格，也不再需要维护预算；保存公司模型连接并通过测试即可启用。
+
+- 执行参数可选：`resolveSupportConfiguration` 在 `company_ai_model_revision.execution` 为空时使用默认包络 131072 输入 / 2048 输出 token、6 轮生成、四项价格 0，预留与结算金额均为 0；`pricesConfigured` 恒为可用，不再因此阻断接待。模型页移除「执行限制与价格」表单，再次保存时保留已存的 execution 快照。
+- 预算不再拦截准入：`selectAiBudget` 在找不到可用商家预算时，自动创建每公司一条 `ai-unbounded-<orgId>` 兜底台账并返回；预算列表、当前预算与重叠校验继续忽略该保留编号，因此商家仍可创建自己的预算而不冲突。`ai-http` 的 412 分支与 `AI_BUDGET_UNAVAILABLE` 实际不再触发。
+- 设置页移除「AI 接待用量预算」区块；预算接口与历史台账保留，仅影响记录口径，不再决定新接待是否准入。降级页不再返回 `budget_unavailable`。
+- 已知代价：未配置价格时 `ai_generation.charged_micros` 与预算台账恒为 0，用量记录不再是真实成本来源。
+
+验证：`tsc --noEmit`（根与 `src/web`）通过；完整 `npm test` 1174/1174 通过。

@@ -1,12 +1,10 @@
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import { createApplicationConfig } from '../../../vite.config.ts';
-import { previewConfig } from './translation-runtime.ts';
 
 export default defineConfig(({ command }) => {
 const config = createApplicationConfig(command, {
   envDir: fileURLToPath(new URL('.', import.meta.url)),
-  runtime: 'pi',
   cloudflare: {
     configPath: process.env.DINGBELL_WEB_CONFIG_PATH!,
     persistState: { path: process.env.DINGBELL_WEB_IDENTITY_STATE_PATH! },
@@ -36,9 +34,7 @@ const config = createApplicationConfig(command, {
       STORE_CREDENTIAL_KEYS: process.env.DINGBELL_WEB_STORE_KEYS ?? '',
       STORE_CREDENTIAL_ACTIVE_KEY: process.env.DINGBELL_WEB_STORE_KEYS ? 'v1' : '',
       OUTBOUND_ENABLED: process.env.DINGBELL_TEST_REPLIES === 'true' ? 'true' : 'false',
-      TRANSLATION_ENABLED: process.env.DINGBELL_TEST_PREVIEW_TOKEN ? 'true' : 'false',
-      TRANSLATION_CONFIG_JSON: process.env.DINGBELL_TEST_PREVIEW_TOKEN ? JSON.stringify(previewConfig) : '',
-      NVAPI_KEY: process.env.DINGBELL_TEST_PREVIEW_TOKEN || process.env.DINGBELL_TEST_AI_RECEPTION ? 'synthetic-never-real' : '',
+      NVAPI_KEY: process.env.DINGBELL_TEST_AI_RECEPTION ? 'synthetic-never-real' : '',
       AI_RECEPTION_CONFIG_JSON: process.env.DINGBELL_TEST_AI_CONFIG ?? '',
     };
   },
@@ -47,7 +43,6 @@ if (process.env.DINGBELL_TEST_MAILBOX || process.env.DINGBELL_TEST_STORE_CHECKER
   config.define = {
     DINGBELL_TEST_MAILBOX: JSON.stringify(process.env.DINGBELL_TEST_MAILBOX ?? ''),
     DINGBELL_TEST_STORE_CHECKER: JSON.stringify(process.env.DINGBELL_TEST_STORE_CHECKER ?? ''),
-    DINGBELL_TEST_PREVIEW_TOKEN: JSON.stringify(process.env.DINGBELL_TEST_PREVIEW_TOKEN ?? ''),
     DINGBELL_TEST_KNOWLEDGE_TOKEN: JSON.stringify(process.env.DINGBELL_TEST_KNOWLEDGE_TOKEN ?? ''),
     DINGBELL_TEST_ANSWER_TOKEN: JSON.stringify(process.env.DINGBELL_TEST_ANSWER_TOKEN ?? ''),
     DINGBELL_TEST_AI_DRAFT_TOKEN: JSON.stringify(process.env.DINGBELL_TEST_AI_DRAFT_TOKEN ?? ''),
