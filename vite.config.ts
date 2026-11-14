@@ -6,11 +6,20 @@ import { artifactGate } from './deploy/artifact-gate.ts';
 import { resolveRuntime } from './deploy/resolve-runtime.ts';
 import { defineConfig, type ConfigEnv, type UserConfig } from 'vite';
 
+/** Explicit selection wins; Workers Builds otherwise deploys the production configuration. */
+function selectedWranglerConfig(options: { cloudflare?: Omit<PluginConfig, 'config'> }) {
+  const configured = options.cloudflare?.configPath
+    ?? process.env.DINGBELL_WRANGLER_CONFIG
+    ?? (process.env.WORKERS_CI ? 'wrangler.production.jsonc' : undefined);
+  return configured ? fileURLToPath(new URL(configured, import.meta.url)) : undefined;
+}
+
 export function createApplicationConfig(command: ConfigEnv['command'], options: {
   envDir?: string;
   cloudflare?: Omit<PluginConfig, 'config'>;
   configureWorker?: (config: WorkerConfig) => void;
 } = {}): UserConfig {
+  const configPath = selectedWranglerConfig(options);
   return {
     envDir: options.envDir,
     resolve: { alias: { '@': fileURLToPath(new URL('./src/web', import.meta.url)) } },
@@ -24,9 +33,9 @@ export function createApplicationConfig(command: ConfigEnv['command'], options: 
       // A production build may point at a deployment-specific Wrangler configuration that
       // carries the real D1 database ID. Local development keeps the checked-in local-only
       // placeholder so `demo:local` cannot seed a remote database.
-      configPath: options.cloudflare?.configPath ?? (process.env.DINGBELL_WRANGLER_CONFIG
-        ? fileURLToPath(new URL(process.env.DINGBELL_WRANGLER_CONFIG, import.meta.url))
-        : undefined),
+      // Workers Builds sets WORKERS_CI: without this fallback it would package the placeholder
+      // database_id and the deploy would fail with "d1 must have a valid database_id".
+      configPath,
       config(config) {
         config.main=fileURLToPath(new URL('./src/platform/cloudflare/worker.ts',import.meta.url));
         options.configureWorker?.(config);
