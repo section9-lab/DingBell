@@ -8,7 +8,7 @@ import { createApp } from '../src/application.ts';
 import { services } from '../src/modules/identity/services.ts';
 
 const automatic = (name='售前接待', storeIds=['store-a']) => ({ kind:'automatic', name, storeIds, priority:50,
-  stages:['presale'], mode:'suggest', language:'customer', tone:'concise', instructions:'先回答消费者的问题。' });
+  stage:'presale', mode:'suggest', language:'customer', tone:'concise', instructions:'先回答消费者的问题。' });
 const notification = () => ({ kind:'notification', name:'发货通知', storeIds:['store-a'], priority:50,
   event:'dispatched', delayMinutes:0, expiresAfterMinutes:1440, quietHours:{start:'22:00',end:'08:00'},
   maxPerDay:1, content:'您的订单 {{order_number}} 已发货。' });
@@ -45,8 +45,8 @@ async function fixture() {
     const response=await services(env)!.auth.api.signInEmail({body:{email:`${id}@example.invalid`,password},asResponse:true});
     assert.equal(response.status,200);cookies[id]=response.headers.getSetCookie().map(cookie=>cookie.split(';',1)[0]).join('; ');
   }
-  const request=(suffix='',body?:unknown,actor='owner',company='company',origin=env.APP_BASE_URL)=>app.request(`${env.APP_BASE_URL}/api/companies/${company}/reply-policies${suffix}`,{
-    method:body===undefined?'GET':'POST',headers:{cookie:cookies[actor]??'',origin,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),
+  const request=(suffix='',body?:unknown,actor='owner',company='company',origin=env.APP_BASE_URL,method?:'POST'|'DELETE')=>app.request(`${env.APP_BASE_URL}/api/companies/${company}/reply-policies${suffix}`,{
+    method:method??(body===undefined?'GET':'POST'),headers:{cookie:cookies[actor]??'',origin,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),
   },env);
   const create=async(config:unknown=automatic())=>{const id=crypto.randomUUID(),r=await request('',{id,config});assert.equal(r.status,200,await r.clone().text());return await r.json() as Detail;};
   const action=async(detail:Detail,name:string,extra={})=>{const r=await request(`/${detail.policy.id}/${name}`,{expectedVersion:detail.policy.version,...extra});assert.equal(r.status,200,await r.clone().text());return await r.json() as Detail;};
@@ -98,9 +98,11 @@ test('drafts and checks do not publish; publications are immutable and restorati
 test('automatic overlap is checked against published scope; notifications have independent versions',async t=>{
   const f=await fixture();t.after(f.close);
   let first=await f.publish(await f.create());
+  const all=await f.create({...automatic('全部店铺'),storeIds:[]});
+  assert.equal((await f.request(`/${all.policy.id}/test`,{expectedVersion:all.policy.version})).status,409,'an all-store scope overlaps an active scoped policy');
   const other=await f.create(automatic('相同范围'));
   assert.equal((await f.request(`/${other.policy.id}/test`,{expectedVersion:other.policy.version})).status,409);
-  let independent=await f.create({...automatic('另一阶段'),stages:['aftersale']});independent=await f.publish(independent);
+  let independent=await f.create({...automatic('另一阶段'),stage:'aftersale'});independent=await f.publish(independent);
   const high=await f.publish(await f.create({...automatic('更高优先级'),priority:60}));assert.equal(high.policy.enabled,true);
   const notify=await f.publish(await f.create(notification()));assert.equal(notify.policy.published?.revision,1);
   first=await f.action(first,'draft',{config:automatic('未发布范围',['store-b'])});
@@ -128,7 +130,7 @@ test('invalid conditions and template variables are rejected without creating po
   const f=await fixture();t.after(f.close);
   assert.equal((await f.request()).status,200);
   for(const config of [
-    {...automatic(),storeIds:[]},{...automatic(),storeIds:['store-a','store-a']},{...automatic(),stages:[]},
+    {...automatic(),storeIds:['store-a','store-a']},{...automatic(),stage:'unknown'},{...automatic(),stage:['presale','order']},
     {...automatic(),priority:1.5},{...automatic(),instructions:'x'.repeat(2001)},{...automatic(),runCode:'danger'},
     {...notification(),content:'{{unknown}}'},{...notification(),content:'{{ order_number'},
     {...notification(),quietHours:{start:'25:00',end:'08:00'}},{...notification(),quietHours:{start:'08:00',end:'08:00'}},
@@ -139,6 +141,42 @@ test('invalid conditions and template variables are rejected without creating po
   for(const expectedVersion of [-1,0,0.5,'1',null,Number.MAX_SAFE_INTEGER])
     assert.equal((await f.request(`/${detail.policy.id}/test`,{expectedVersion})).status,400);
   assert.equal((await f.request(`/${detail.policy.id}/draft`,{expectedVersion:1,config:notification()})).status,400,'kind is immutable');
+});
+
+test('the three presets install one policy per stage, idempotently, and never duplicate a configured stage',async t=>{
+ const f=await fixture();t.after(f.close);
+ assert.equal((await f.request()).status,200);
+ const installed=await f.request('/presets',{});assert.equal(installed.status,200,await installed.clone().text());
+ const created=(await installed.json() as {created:string[]}).created;
+ assert.equal(created.length,3);
+ const stages=[] as string[];
+ for(const id of created){
+   const detail=await (await f.request(`/${id}`)).json() as Detail,config=detail.policy.published?.config;
+   assert.equal(detail.policy.enabled,true);assert.equal(detail.policy.published?.revision,1);assert.equal(config?.kind,'automatic');
+   if(config?.kind==='automatic'){stages.push(config.stage);assert.deepEqual(config.storeIds,[],'presets apply to every store');}
+ }
+ assert.deepEqual(stages.sort(),['aftersale','order','presale']);
+ const again=await f.request('/presets',{});assert.deepEqual((await again.json() as {created:string[]}).created,[],'a second call creates nothing');
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM reply_policy').get()?.n,3);
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM policy_version').get()?.n,3);
+ await f.create({...automatic('自定义售前'),stage:'presale',storeIds:['store-b'],priority:70});
+ const third=await f.request('/presets',{});assert.deepEqual((await third.json() as {created:string[]}).created,[],'a configured stage keeps its own policy');
+});
+
+test('deleting a policy requires the current version, cascades its versions and keeps the audit trail',async t=>{
+ const f=await fixture();t.after(f.close);
+ const detail=await f.publish(await f.create()),id=detail.policy.id;
+ assert.equal((await f.request(`/${id}`,{expectedVersion:detail.policy.version},'staff','company',undefined,'DELETE')).status,403);
+ assert.equal((await f.request(`/${id}`,{expectedVersion:1},'other','other',undefined,'DELETE')).status,404);
+ assert.equal((await f.request(`/${id}`,{expectedVersion:99},'owner','company',undefined,'DELETE')).status,409);
+ assert.equal((await f.request(`/${id}`,{expectedVersion:1.5},'owner','company',undefined,'DELETE')).status,400);
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM reply_policy').get()?.n,1);
+ const response=await f.request(`/${id}`,{expectedVersion:detail.policy.version},'owner','company',undefined,'DELETE');
+ assert.equal(response.status,200,await response.clone().text());
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM reply_policy').get()?.n,0);
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM policy_version').get()?.n,0,'versions cascade with the policy');
+ assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM reply_policy_audit_event WHERE action='delete' AND outcome='succeeded'").get()?.n,1);
+ assert.equal((await f.request(`/${id}`)).status,404);
 });
 
 test('writes recheck authorization; audit or snapshot failure cannot leave a partial publication',async t=>{
@@ -208,6 +246,9 @@ test('direct saves validate and activate atomically without draft or publication
   detail=await f.action(detail,'pause');
   response=await save(detail.policy.version,automatic('恢复启用'));assert.equal(response.status,200);
   detail=await response.json() as Detail;assert.equal(detail.policy.enabled,true);assert.equal(detail.policy.published?.revision,3);
+  const allId=crypto.randomUUID();
+  response=await f.request(`/${allId}/save`,{expectedVersion:0,config:{...automatic('全部店铺',[]),stage:'aftersale'}});assert.equal(response.status,200,await response.clone().text());
+  const all=await response.json() as Detail;assert.deepEqual(all.policy.published?.config.storeIds,[]);assert.equal(all.policy.enabled,true);
   const events=f.sqlite.prepare("SELECT action FROM reply_policy_audit_event WHERE policy_id=? AND outcome='succeeded'").all(id);
   assert.deepEqual(events.map(row=>row.action),['save','save','pause','save']);
 });
@@ -217,7 +258,7 @@ test('direct saves reject invalid scope, access and uncertain duplicate writes',
   const id=crypto.randomUUID(),body={expectedVersion:0,config:automatic()};
   assert.equal((await f.request(`/${id}/save`,body,'staff')).status,403);
   assert.equal((await f.request(`/${id}/save`,{...body,config:automatic('跨公司',['store-other'])})).status,409);
-  assert.equal((await f.request(`/${id}/save`,{...body,config:{...automatic(),storeIds:[]}})).status,400);
+  assert.equal((await f.request(`/${id}/save`,{...body,config:{...automatic(),name:''}})).status,400);
   assert.equal((await f.request(`/${id}/save`,{...body,expectedVersion:-1})).status,400);
   assert.equal((await f.request(`/${id}/save`,body,'owner','company','https://evil.invalid')).status,403);
   f.sqlite.exec("CREATE TRIGGER direct_outcome_offline BEFORE INSERT ON reply_policy_audit_event WHEN NEW.outcome='succeeded' BEGIN SELECT RAISE(ABORT,'offline'); END");

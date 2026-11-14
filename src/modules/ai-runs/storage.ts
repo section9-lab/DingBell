@@ -5,8 +5,8 @@ import {aiScopeSchema} from '../conversations/ai-state.ts';
 import {aiWorkSchema,type AiWork} from '../conversations/ai-intake.ts';
 import type {ControlScope} from '../conversations/control-types.ts';
 import {knowledgeHash} from '../knowledge/content.ts';
-import {freezeTranslationConfig,estimateTranslationReservation,estimateTranslationUsage} from '../translations/config.ts';
-import type {TranslationConfig,TranslationReceipt,TranslationUsage} from '../translations/types.ts';
+import {freezeAiModelConfig,estimateAiReservation,estimateAiUsage} from './finance.ts';
+import type {AiModelConfig,AiReceipt,AiUsage} from './finance.ts';
 export {changeAiBudget,readAiBudget} from './budget.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256));
 const count=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER));
@@ -19,21 +19,21 @@ const closureSchema=v.variant('kind',[
  v.strictObject({...closureFields,kind:v.literal('runtime_closed'),providerPermits:v.pipe(count,v.maxValue(8)),receipt:receiptSchema,outcome:v.picklist(['completed','failed','aborted'])}),
  v.strictObject({...closureFields,kind:v.literal('unstarted_closed'),providerPermits:v.literal(0)}),
 ]);
-type Config={model:TranslationConfig;maxGenerations:number};
+type Config={model:AiModelConfig;maxGenerations:number};
 type Closure=v.InferOutput<typeof closureSchema>;
 type Payload={schemaVersion:1;run:AiWork;target:ReturnType<typeof target>;modelInput:ReturnType<typeof modelInput>};
-type Generation={sequence:number;claimedAt:number;usage:TranslationUsage|null;chargedMicros:number|null;settledAt:number|null};
+type Generation={sequence:number;claimedAt:number;usage:AiUsage|null;chargedMicros:number|null;settledAt:number|null};
 export type AiRunReader=(scope:ControlScope,runId:string)=>Promise<AiWork|null>;
 export interface AiExecution {id:string;budgetId:string;agent:'Support';instanceId:string;dispatchKey:string;payload:Payload;modelInput:Payload['modelInput'];config:Config;reservedMicros:number;perGenerationMicros:number;
- createdAt:number;receipt:TranslationReceipt|null;closure:Closure|null;generations:Generation[];remainingReservedMicros:number;status:'open'|'unconfirmed'|'settled'}
+ createdAt:number;receipt:AiReceipt|null;closure:Closure|null;generations:Generation[];remainingReservedMicros:number;status:'open'|'unconfirmed'|'settled'}
 type Row={id:string;organizationId:string;storeId:string;conversationId:string;controllerId:string;budgetId:string;payload:string;payloadHash:string;config:string;perGenerationMicros:number;reservedMicros:number;maxGenerations:number;generations:number;createdAt:number;receipt:string|null;closure:string|null};
 const now = NOW_MS;
 const columns='r.id,r.organization_id AS organizationId,r.store_id AS storeId,r.conversation_id AS conversationId,r.controller_id AS controllerId,r.budget_id AS budgetId,r.payload,r.payload_hash AS payloadHash,r.config,r.per_generation_micros AS perGenerationMicros,r.reserved_micros AS reservedMicros,r.max_generations AS maxGenerations,r.generations,r.created_at AS createdAt,r.receipt,r.closure';
 const where='r.id=? AND r.organization_id=? AND r.store_id=? AND r.conversation_id=? AND r.controller_id=?';
 function bound(scope:ControlScope,runId:string){v.parse(aiScopeSchema,scope);v.parse(v.pipe(v.string(),v.uuid()),runId);return [runId,scope.organizationId,scope.storeId,scope.conversationId,scope.controllerId];}
 export function freezeAiConfig(value:unknown){
- const input=v.parse(v.strictObject({model:v.unknown(),maxGenerations:generation}),value),config={model:freezeTranslationConfig(input.model),maxGenerations:input.maxGenerations};
- const per=estimateTranslationReservation(config.model),total=BigInt(per)*BigInt(config.maxGenerations);if(total>BigInt(Number.MAX_SAFE_INTEGER))throw new RangeError('AI_BUDGET_OVERFLOW');
+ const input=v.parse(v.strictObject({model:v.unknown(),maxGenerations:generation}),value),config={model:freezeAiModelConfig(input.model),maxGenerations:input.maxGenerations};
+ const per=estimateAiReservation(config.model),total=BigInt(per)*BigInt(config.maxGenerations);if(total>BigInt(Number.MAX_SAFE_INTEGER))throw new RangeError('AI_BUDGET_OVERFLOW');
  return {config,per,total:Number(total)};
 }
 function modelInput(run:AiWork){
@@ -52,12 +52,14 @@ export const currentPayload=`EXISTS (SELECT 1 FROM conversation_control cc JOIN 
  AND NOT EXISTS(SELECT 1 FROM ozon_push_chat_head AS head WHERE head.organization_id=c.organization_id AND head.store_id=c.store_id AND head.conversation_id=c.id AND head.message_id IS NOT json_extract(plan.value,'$.run.admission.messageId')) AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened'
  AND s.status IN ('verified','partial','attention') AND p.enabled=1 AND p.kind='automatic'
  AND ((json_extract(plan.value,'$.run.schemaVersion')=1 AND p.id=json_extract(plan.value,'$.run.admission.policyId') AND p.published_revision=json_extract(plan.value,'$.run.admission.policyRevision'))
-  OR (json_extract(plan.value,'$.run.kind')='intake' AND EXISTS (SELECT 1 FROM json_each(plan.value,'$.run.admission.candidates') candidate
-   JOIN policy_version pv ON pv.organization_id=p.organization_id AND pv.policy_id=p.id AND pv.revision=p.published_revision AND pv.schema_version=1
-   WHERE p.id=json_extract(candidate.value,'$.policyId') AND p.published_revision=json_extract(candidate.value,'$.policyRevision')
-    AND json_extract(candidate.value,'$.mode')='automatic' AND json_extract(pv.config,'$.mode')='automatic'
-    AND EXISTS(SELECT 1 FROM json_each(pv.config,'$.storeIds') WHERE value=c.store_id)
-    AND EXISTS(SELECT 1 FROM json_each(pv.config,'$.stages') WHERE value=json_extract(candidate.value,'$.stage')))
+  OR (json_extract(plan.value,'$.run.kind')='intake'
+   AND (SELECT count(*) FROM json_each(plan.value,'$.run.admission.candidates'))=(SELECT count(*) FROM json_each(plan.value,'$.run.admission.candidates') candidate
+    JOIN reply_policy frozen ON frozen.organization_id=p.organization_id AND frozen.id=json_extract(candidate.value,'$.policyId')
+    JOIN policy_version pv ON pv.organization_id=frozen.organization_id AND pv.policy_id=frozen.id AND pv.revision=frozen.published_revision AND pv.schema_version=1
+    WHERE frozen.enabled=1 AND frozen.kind='automatic' AND frozen.published_revision=json_extract(candidate.value,'$.policyRevision')
+     AND json_extract(candidate.value,'$.mode')='automatic' AND json_extract(pv.config,'$.mode')='automatic'
+     AND EXISTS(SELECT 1 FROM json_each(pv.config,'$.storeIds') WHERE value=c.store_id)
+     AND json_extract(pv.config,'$.stage')=json_extract(candidate.value,'$.stage'))
    AND EXISTS (SELECT 1 FROM ingest_event e JOIN message m ON m.id=e.message_id AND m.organization_id=e.organization_id AND m.store_id=e.store_id AND m.conversation_id=e.conversation_id
     WHERE e.id=json_extract(plan.value,'$.run.admission.event.eventId') AND e.message_id=json_extract(plan.value,'$.run.request.messageId')
      AND e.organization_id=c.organization_id AND e.store_id=c.store_id AND e.conversation_id=c.id AND e.state='pending' AND e.live_observed_at IS NOT NULL AND m.direction='inbound' AND m.ingest_mode='incremental')))
@@ -73,7 +75,7 @@ export async function readAiExecution(db:D1Database,scope:ControlScope,runId:str
  if(payload.schemaVersion!==1||JSON.stringify(payload.target)!==JSON.stringify(target(runId))||JSON.stringify(payload.modelInput)!==JSON.stringify(modelInput(run))||run.request.runId!==row.id||JSON.stringify(bound(run.scope,row.id))!==JSON.stringify(values)
   ||await knowledgeHash({payload,config:cost.config})!==row.payloadHash||cost.per!==row.perGenerationMicros||cost.total!==row.reservedMicros||cost.config.maxGenerations!==row.maxGenerations)throw new Error('AI_EXECUTION_INVALID');
  const generations=rows[1].results.map((g:any)=>({...g,usage:g.usage===null?null:v.parse(usageSchema,JSON.parse(g.usage))})) as Generation[];
- if(generations.length!==row.generations||generations.some((g,i)=>g.sequence!==i+1||g.chargedMicros!==(g.usage===null?null:estimateTranslationUsage(cost.config.model,g.usage))))throw new Error('AI_GENERATIONS_INVALID');
+ if(generations.length!==row.generations||generations.some((g,i)=>g.sequence!==i+1||g.chargedMicros!==(g.usage===null?null:estimateAiUsage(cost.config.model,g.usage))))throw new Error('AI_GENERATIONS_INVALID');
  const receipt=row.receipt===null?null:v.parse(receiptSchema,JSON.parse(row.receipt)),closure=row.closure===null?null:v.parse(closureSchema,JSON.parse(row.closure));
  if(closure&&(closure.instanceId!==`ai-support:${runId}`||closure.providerPermits!==generations.length||(closure.kind==='runtime_closed'?JSON.stringify(closure.receipt)!==JSON.stringify(receipt):receipt!==null)))throw new Error('AI_CLOSURE_INVALID');
  const unsettled=generations.filter(g=>g.usage===null).length;
@@ -127,7 +129,7 @@ export async function settleAiGeneration(db:D1Database,scope:ControlScope,runId:
  scope=v.parse(aiScopeSchema,scope);
  v.parse(generation,sequence);const receipt=JSON.stringify(v.parse(receiptSchema,value)),usage=v.parse(usageSchema,usageValue),run=await required(db,scope,runId);
  if(JSON.stringify(run.receipt)!==receipt)throw new Error('AI_RECEIPT_CONFLICT');const attempt=run.generations[sequence-1];if(!attempt)throw new Error('AI_GENERATION_NOT_FOUND');
- const charged=estimateTranslationUsage(run.config.model,usage),encoded=JSON.stringify(usage);if(attempt.usage!==null){if(JSON.stringify(attempt.usage)!==encoded||attempt.chargedMicros!==charged)throw new Error('AI_SETTLEMENT_CONFLICT');return;}
+ const charged=estimateAiUsage(run.config.model,usage),encoded=JSON.stringify(usage);if(attempt.usage!==null){if(JSON.stringify(attempt.usage)!==encoded||attempt.chargedMicros!==charged)throw new Error('AI_SETTLEMENT_CONFLICT');return;}
  const token=crypto.randomUUID(),marker=[run.budgetId,scope.organizationId,token];await db.batch([
   db.prepare(`UPDATE ai_budget SET reserved_micros=reserved_micros-?,spent_micros=spent_micros+?,commit_token=? WHERE id=? AND organization_id=? AND reserved_micros>=? AND spent_micros<=9007199254740991-?
    AND EXISTS (SELECT 1 FROM ai_execution r JOIN ai_generation g ON g.run_id=r.id WHERE ${where} AND r.receipt=? AND g.sequence=? AND g.usage IS NULL)`)

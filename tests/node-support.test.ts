@@ -35,7 +35,7 @@ for(const mode of ['handoff','cancel-before-dispatch','company-model'] as const)
  INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at) VALUES('conv','org','store','thread','BUYER_SELLER','Opened',1,1);
  INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('message','org','store','conv','message','Customer','inbound','["Мне нужен человек."]',0,0,1,1,'incremental');`);
  const actor={orgId:'org',actorUserId:'owner',sessionId:'owner-session',expectedMemberId:'owner-member'},policyId=crypto.randomUUID(),budgetId=crypto.randomUUID();
- const policy={kind:'automatic' as const,name:'Support',storeIds:['store'],priority:50,stages:['presale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
+ const policy={kind:'automatic' as const,name:'Support',storeIds:['store'],priority:50,stage:'presale' as const,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
  assert.ok(await createPolicy(db,actor,policyId,policy));assert.ok(await changePolicy(db,actor,policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(db,actor,policyId,2,{action:'publish'},crypto.randomUUID()));
  assert.equal((await changeAiBudget(db,actor,{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:1000000,maxRuns:10})).outcome,'applied');
  assert.equal((await changeAiBudget(db,actor,{id:crypto.randomUUID(),action:'set_enabled',budgetId,expectedRevision:0,enabled:true})).outcome,'applied');

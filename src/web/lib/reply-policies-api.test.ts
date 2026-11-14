@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createReplyPolicy, readReplyPolicy, readReplyPolicies, saveReplyPolicy, updateReplyPolicy } from './reply-policies-api.ts';
 
-const config={kind:'automatic' as const,name:'售前接待',storeIds:['store-a'],priority:50,stages:['presale' as const],mode:'suggest' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
+const config={kind:'automatic' as const,name:'售前接待',storeIds:['store-a'],priority:50,stage:'presale' as const,mode:'suggest' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
 const policy={id:'p/id',kind:'automatic',version:1,draftRevision:1,testedRevision:null,testedTimeZone:null,draftBaseRevision:null,draftRollbackOf:null,draft:config,enabled:false,published:null,updatedAt:'2026-10-10T00:00:00.000Z'};
 const detail={companyId:'a/b',policy,history:{versions:[],nextBefore:null}};
 test('policy requests bind company and policy IDs and send exact versioned actions',async t=>{

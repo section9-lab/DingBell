@@ -11,7 +11,7 @@ export async function aiAnswerFixture(promptVersion='support-reply-v2',config:{o
  const f=await conversationControlFixture(undefined,{aiEnabled:'true',...config}),actor={...f.actor(),expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
-  const policy={kind:'automatic' as const,name:'Answer',storeIds:['store'],priority:50,stages:['presale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
+  const policy={kind:'automatic' as const,name:'Answer',storeIds:['store'],priority:50,stage:'presale' as const,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
   assert.ok(await createPolicy(f.db,actor,policyId,policy));assert.ok(await changePolicy(f.db,actor,policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,actor,policyId,2,{action:'publish'},crypto.randomUUID()));
   const scope=(await ensureControlDirectory(f.db,actor,'conv',Date.now()))!.scope;
   await f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('question','org','store','conv','question','Customer','inbound','[\"Какая ширина?\"]',0,0,1,1,'incremental')").run();

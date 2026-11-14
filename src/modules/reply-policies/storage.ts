@@ -15,8 +15,9 @@ const noOverlap=`(kind<>'automatic' OR NOT EXISTS (
   AND active.policy_id=other.id AND active.revision=other.published_revision
   WHERE other.organization_id=reply_policy.organization_id AND other.id<>reply_policy.id AND other.kind='automatic' AND other.enabled=1
   AND json_extract(active.config,'$.priority')=json_extract(reply_policy.draft_config,'$.priority')
-  AND EXISTS (SELECT 1 FROM json_each(active.config,'$.storeIds') s JOIN json_each(reply_policy.draft_config,'$.storeIds') d ON s.value=d.value)
-  AND EXISTS (SELECT 1 FROM json_each(active.config,'$.stages') s JOIN json_each(reply_policy.draft_config,'$.stages') d ON s.value=d.value)))`;
+  AND (json_array_length(active.config,'$.storeIds')=0 OR json_array_length(reply_policy.draft_config,'$.storeIds')=0
+    OR EXISTS (SELECT 1 FROM json_each(active.config,'$.storeIds') s JOIN json_each(reply_policy.draft_config,'$.storeIds') d ON s.value=d.value))
+  AND json_extract(active.config,'$.stage')=json_extract(reply_policy.draft_config,'$.stage')))`;
 type Row={id:string;kind:ReplyPolicyConfig['kind'];version:number;draft_revision:number;tested_revision:number|null;tested_time_zone:string|null;
   draft_base_revision:number|null;draft_rollback_of:number|null;draft_config:string;published_revision:number|null;enabled:number;updated_at:number};
 type VersionRow={revision:number;schema_version:1;config:string;time_zone:string;published_by:string;published_at:number;rollback_of:number|null};
@@ -54,6 +55,12 @@ export async function ownsPolicyStores(db:D1Database,actor:PolicyActor,config:Re
     WHERE NOT EXISTS (SELECT 1 FROM store WHERE store.organization_id=? AND store.id=requested.value))`)
     .bind(...params(actor),JSON.stringify(config.storeIds),actor.orgId).first();
 }
+/** 删除策略并级联删除不可变版本快照；审计事件不引用策略，因此保留。 */
+export function deletePolicy(db:D1Database,actor:PolicyActor,id:string,expectedVersion:number) {
+  return db.prepare(`DELETE FROM reply_policy WHERE organization_id=? AND id=? AND version=? AND EXISTS (${access}) RETURNING id`)
+    .bind(actor.orgId,id,expectedVersion,...params(actor)).first();
+}
+
 export function createPolicy(db:D1Database,actor:PolicyActor,id:string,config:ReplyPolicyConfig) {
   return db.prepare(`INSERT INTO reply_policy (organization_id,id,kind,version,draft_revision,draft_config,enabled,updated_at)
     SELECT ?,?,?,1,1,?,0,${NOW_MS_WHOLE_SECONDS} WHERE EXISTS (${access}) AND NOT EXISTS (SELECT 1 FROM json_each(?) requested
@@ -86,8 +93,9 @@ export function savePolicy(db:D1Database,actor:PolicyActor,id:string,expectedVer
       AND active.policy_id=other.id AND active.revision=other.published_revision
       WHERE other.organization_id=? AND other.id<>? AND other.kind='automatic' AND other.enabled=1
       AND json_extract(active.config,'$.priority')=json_extract(${candidate},'$.priority')
-      AND EXISTS (SELECT 1 FROM json_each(active.config,'$.storeIds') s JOIN json_each(${candidate},'$.storeIds') d ON s.value=d.value)
-      AND EXISTS (SELECT 1 FROM json_each(active.config,'$.stages') s JOIN json_each(${candidate},'$.stages') d ON s.value=d.value)))`;
+      AND (json_array_length(active.config,'$.storeIds')=0 OR json_array_length(${candidate},'$.storeIds')=0
+        OR EXISTS (SELECT 1 FROM json_each(active.config,'$.storeIds') s JOIN json_each(${candidate},'$.storeIds') d ON s.value=d.value))
+      AND json_extract(active.config,'$.stage')=json_extract(${candidate},'$.stage')))`;
   const zone="COALESCE((SELECT time_zone FROM company_settings WHERE organization_id=?),'UTC')";
   if(expectedVersion===0) return db.prepare(`WITH candidate(config) AS (SELECT ?)
     INSERT INTO reply_policy (organization_id,id,kind,version,draft_revision,draft_config,tested_revision,tested_time_zone,

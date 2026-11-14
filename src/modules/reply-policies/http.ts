@@ -5,7 +5,8 @@ import { policyVersionSchema, replyPolicyConfigSchema } from '../../shared/reply
 import { auditedChange, type AuditOutcome } from '../audit/operation.ts';
 import { readCompanySettings } from '../company-settings/storage.ts';
 import { configured, limitedBody, signedIn } from '../identity/http.ts';
-import { changePolicy, checkPolicy, checkPolicyConfig, createPolicy, listPolicies, ownsPolicyStores, readPolicy, readPolicyHistory, savePolicy, type PolicyActor, type PolicyChange } from './storage.ts';
+import { changePolicy, checkPolicy, checkPolicyConfig, createPolicy, deletePolicy, listPolicies, ownsPolicyStores, readPolicy, readPolicyHistory, savePolicy, type PolicyActor, type PolicyChange } from './storage.ts';
+import { seedPresetPolicies } from './presets.ts';
 
 const createSchema=v.strictObject({id:v.pipe(v.string(),v.uuid()),config:replyPolicyConfigSchema});
 const saveSchema=v.strictObject({expectedVersion:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1)),config:replyPolicyConfigSchema});
@@ -58,6 +59,23 @@ export function registerReplyPolicyRoutes(app:Hono<ApplicationEnv>) {
       if(denied)return changed?unconfirmed(c):denied;
       if(!changed)return conflict(c);
       const current=await readPolicy(c.env.DB!,actor,id);return current?jsonResponse(c,current):unconfirmed(c);
+    });
+    return result.auditComplete?result.response:unconfirmed(c);
+  });
+  app.post(`${base}/presets`,configured,limitedBody,signedIn,async c=>{
+    const actor=actorFor(c),denied=await authorize(c,actor);if(denied)return denied;
+    const created=await seedPresetPolicies(c.env.DB!,actor.orgId,actor.actorUserId,c.get('requestId'));
+    return await authorize(c,actor)??jsonResponse(c,{companyId:actor.orgId,created});
+  });
+  app.delete(`${base}/:id`,configured,limitedBody,signedIn,async c=>{
+    const actor=actorFor(c),denied=await authorize(c,actor);if(denied)return denied;
+    const id=c.req.param('id'),parsed=v.safeParse(v.strictObject({expectedVersion:policyVersionSchema}),await c.req.json().catch(()=>null));
+    if(!v.safeParse(v.pipe(v.string(),v.uuid()),id).success||!parsed.success)return apiError(c,'INVALID_REQUEST','Provide the current policy version.',400);
+    const current=await readPolicy(c.env.DB!,actor,id);if(!current)return unavailable(c);
+    const result=await auditedChange(record(c,actor,id,'delete',parsed.output.expectedVersion),async()=>{
+      if(current.policy.version!==parsed.output.expectedVersion)return conflict(c);
+      const deleted=await deletePolicy(c.env.DB!,actor,id,parsed.output.expectedVersion);
+      return deleted?jsonResponse(c,{companyId:actor.orgId,id}):conflict(c);
     });
     return result.auditComplete?result.response:unconfirmed(c);
   });

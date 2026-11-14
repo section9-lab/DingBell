@@ -15,7 +15,7 @@ async function fixture(upTo?:string){
  const f=await conversationControlFixture(upTo,{}),policyId=crypto.randomUUID(),actor={...f.actor(),expectedMemberId:'owner-member'};
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
-  const policy={kind:'automatic' as const,name:'Support',storeIds:['store'],priority:50,stages:['presale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
+  const policy={kind:'automatic' as const,name:'Support',storeIds:['store'],priority:50,stage:'presale' as const,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
   assert.ok(await createPolicy(f.db,actor,policyId,policy));assert.ok(await changePolicy(f.db,actor,policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,actor,policyId,2,{action:'publish'},crypto.randomUUID()));
   async function activate(conversationId='conv'){
    const scope=(await ensureControlDirectory(f.db,actor,conversationId,Date.now()))!.scope,messageId=`customer-${conversationId}`;
@@ -79,11 +79,11 @@ test('background AI repair addresses saved execution IDs without consulting the 
  const repair=await repairApi();assert.equal(typeof repair.repairAiExecutions,'function','Cron must reconcile historical financial plans independently');
  const m=await api(),f=await fixture();t.after(f.f.close);const id=await budget(m,f),ids:string[]=[];
  for(const conversationId of ['conv','second']){const run=await f.activate(conversationId);await m.reserveAiExecution(f.f.db,f.reader,run.scope,run.request.runId,id,config);ids.push(run.request.runId);}
- const env={DB:f.f.db,FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{get(){throw new Error('current slot must not be consulted');}}} as any,calls:string[]=[];
+ const env={DB:f.f.db,AGENT_RUNTIME:{},CONVERSATION_CONTROLLER:{get(){throw new Error('current slot must not be consulted');}}} as any,calls:string[]=[];
  await repair.repairAiExecutions(env,{reconcile:async(_env,scope,runId)=>{assert.equal(scope.organizationId,'org');calls.push(runId);throw new Error('synthetic runtime outage');}});
  assert.deepEqual(calls.sort(),ids.sort());assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at>0 AND repair_token IS NULL').first('n'),2);
  await repair.repairAiExecutions(env,{reconcile:async()=>{throw new Error('not yet due');}});assert.equal(calls.length,2);
- await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0').run();await repair.repairAiExecutions({...env,FLUE_SUPPORT_AGENT:undefined});assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at=0').first('n'),2);
+ await f.f.db.prepare('UPDATE ai_execution SET repair_due_at=0').run();await repair.repairAiExecutions({...env,AGENT_RUNTIME:undefined});assert.equal(await f.f.db.prepare('SELECT count(*) AS n FROM ai_execution WHERE repair_due_at=0').first('n'),2);
 });
 test('explicit AI resumption replaces only a closed run and preserves old receipts and unknown financial work',{timeout:30000},async t=>{
  const m=await api(),f=await fixture();t.after(f.f.close);const id=await budget(m,f),run=await f.activate();await m.reserveAiExecution(f.f.db,f.reader,run.scope,run.request.runId,id,config);

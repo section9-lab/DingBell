@@ -44,6 +44,14 @@ export function createReplyPolicy(companyId:string,id:string,config:ReplyPolicyC
 export function saveReplyPolicy(companyId:string,id:string,expectedVersion:number,config:ReplyPolicyConfig) {
   return request(`${path(companyId,id)}/save`,schema(companyId,id),{method:'POST',body:JSON.stringify({expectedVersion,config})});
 }
+export function deleteReplyPolicy(companyId:string,id:string,expectedVersion:number) {
+  return request(path(companyId,id),v.object({companyId:v.literal(companyId),id:v.literal(id)}),
+    {method:'DELETE',body:JSON.stringify({expectedVersion})});
+}
+/** 幂等套用三条预置策略：已启用策略覆盖的阶段会跳过。 */
+export function applyReplyPolicyPresets(companyId:string) {
+  return request(`${path(companyId)}/presets`,v.object({companyId:v.literal(companyId),created:v.array(v.string())}),{method:'POST'});
+}
 type Changes={draft:{expectedVersion:number;config:ReplyPolicyConfig};test:{expectedVersion:number};publish:{expectedVersion:number};pause:{expectedVersion:number};restore:{expectedVersion:number;revision:number}};
 export function updateReplyPolicy<A extends keyof Changes>(companyId:string,id:string,action:A,body:Changes[A]) {
   return request(`${path(companyId,id)}/${action}`,schema(companyId,id),{method:'POST',body:JSON.stringify(body)});

@@ -10,7 +10,7 @@ async function fixture(){
  const f=await conversationControlFixture(undefined,{}),policyId=crypto.randomUUID();let clock=Date.now();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
-  const config={kind:'automatic' as const,name:'Reception',storeIds:['store'],priority:50,stages:['presale' as const,'order' as const,'aftersale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
+  const config={kind:'automatic' as const,name:'Reception',storeIds:['store'],priority:50,stage:'presale' as const,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
   assert.ok(await createPolicy(f.db,f.actor(),policyId,config));assert.ok(await changePolicy(f.db,f.actor(),policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,f.actor(),policyId,2,{action:'publish'},crypto.randomUUID()));
   const append=async(enqueue=true)=>{
    const id=crypto.randomUUID(),now=++clock;await f.db.batch([
@@ -23,7 +23,7 @@ async function fixture(){
    readClassifiedInput:async(scope:any)=>(await f.call('ai-classified-input',{},scope)).body,
    startAi:async(scope:any,request:any)=>(await f.call('ai-start',{request},scope)).body,
    readAiWork:async(scope:any,runId:string)=>(await f.call('ai-work-read',{runId},scope)).body};
-  return {...f,get db(){return f.db;},policyId,append,controller,env:()=>({DB:f.db,FLUE_SUPPORT_AGENT:{},CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>controller}} as any)};
+  return {...f,get db(){return f.db;},policyId,append,controller,env:()=>({DB:f.db,AGENT_RUNTIME:{},CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>controller}} as any)};
  }catch(e){await f.close();throw e;}
 }
 test('inbound acknowledgement atomically queues one fixed intake target; lease expiry and restart retain it',{timeout:30000},async t=>{

@@ -22,6 +22,6 @@ export async function readAiAdmission(db:D1Database,scope:ControlScope,value:AiS
   const content=v.parse(v.pipe(v.array(v.string()),v.minLength(1),v.maxLength(16)),JSON.parse(row.content)),config=JSON.parse(row.config);
   const admission=v.parse(aiAdmissionSchema,{messageId:input.messageId,inputRevision:row.inputRevision,question:content.join('\n'),policyId:input.policyId,policyRevision:row.policyRevision,
    policyConfig:config,stage:input.stage,language:config.language==='customer'?input.language:config.language});
-  return admission.policyConfig.kind==='automatic'&&admission.policyConfig.storeIds.includes(scope.storeId)&&admission.policyConfig.stages.includes(input.stage)?admission:null;
+  return admission.policyConfig.kind==='automatic'&&admission.policyConfig.storeIds.includes(scope.storeId)&&admission.policyConfig.stage===input.stage?admission:null;
  }catch{return null;}
 }

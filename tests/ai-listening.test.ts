@@ -10,7 +10,7 @@ async function fixture(through?:string,aiTimeoutMs=60000){
  const f=await conversationControlFixture(through,{aiTimeoutMs}),actor={...f.actor(),expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
-  const config={kind:'automatic' as const,name:'Future support',storeIds:['store'],priority:50,stages:['presale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
+  const config={kind:'automatic' as const,name:'Future support',storeIds:['store'],priority:50,stage:'presale' as const,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
   assert.ok(await createPolicy(f.db,actor,policyId,config));assert.ok(await changePolicy(f.db,actor,policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,actor,policyId,2,{action:'publish'},crypto.randomUUID()));
   const message=async(id:string,eventAt:number,mode='incremental',direction='inbound')=>f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES(?,'org','store','conv',?,?,?,'[\"Какая ширина?\"]',0,0,?,?,?)").bind(id,id,direction==='inbound'?'Customer':'Seller',direction,eventAt,Date.now(),mode).run();
   await message('old',1);

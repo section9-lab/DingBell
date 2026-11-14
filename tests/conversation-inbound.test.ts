@@ -22,7 +22,7 @@ async function command(f:Fixture,expectedVersion:number,action:string,extra:Reco
 async function receive(f:Fixture,eventId:string){const r=await f.call('inbound',{eventId});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
 async function policy(f:Fixture){
  await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();const id=crypto.randomUUID();
- assert.ok(await createPolicy(f.db,f.actor(),id,{kind:'automatic',name:'Reception',storeIds:['store'],priority:50,stages:['presale','order','aftersale'],mode:'automatic',language:'customer',tone:'concise',instructions:''}));
+ assert.ok(await createPolicy(f.db,f.actor(),id,{kind:'automatic',name:'Reception',storeIds:['store'],priority:50,stage:'presale',mode:'automatic',language:'customer',tone:'concise',instructions:''}));
  assert.ok(await changePolicy(f.db,f.actor(),id,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,f.actor(),id,2,{action:'publish'},crypto.randomUUID()));return id;
 }
 test('new committed input updates human work and reopens resolved conversations without restoring AI',{timeout:30000},async t=>{

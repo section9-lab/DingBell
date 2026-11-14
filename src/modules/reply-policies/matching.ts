@@ -12,12 +12,12 @@ export async function selectReplyPolicy(db:D1Database,scope:ControlScope,stage:P
   JOIN policy_version pv ON pv.organization_id=p.organization_id AND pv.policy_id=p.id AND pv.revision=p.published_revision AND pv.schema_version=1
   WHERE cc.controller_id=? AND cc.organization_id=? AND cc.store_id=? AND cc.conversation_id=?
   AND s.status IN ('verified','partial','attention') AND c.platform_type='BUYER_SELLER' AND lower(c.platform_status)='opened'
-  AND EXISTS (SELECT 1 FROM json_each(pv.config,'$.storeIds') WHERE value=c.store_id)
-  AND EXISTS (SELECT 1 FROM json_each(pv.config,'$.stages') WHERE value=?)
+  AND (json_array_length(pv.config,'$.storeIds')=0 OR EXISTS (SELECT 1 FROM json_each(pv.config,'$.storeIds') WHERE value=c.store_id))
+  AND json_extract(pv.config,'$.stage')=?
   ORDER BY json_extract(pv.config,'$.priority') DESC,p.id LIMIT 2`).bind(scope.controllerId,scope.organizationId,scope.storeId,scope.conversationId,stage).all<{id:string;revision:number;config:string}>()).results;
  try{
   const policies=rows.map(row=>({...row,config:v.parse(replyPolicyConfigSchema,JSON.parse(row.config))})),first=policies[0];
-  if(!first||first.config.kind!=='automatic'||!first.config.storeIds.includes(scope.storeId)||!first.config.stages.includes(stage)||policies[1]?.config.priority===first.config.priority)return null;
+  if(!first||first.config.kind!=='automatic'||(first.config.storeIds.length>0&&!first.config.storeIds.includes(scope.storeId))||first.config.stage!==stage||policies[1]?.config.priority===first.config.priority)return null;
   return {...first,config:first.config};
  }catch{return null;}
 }

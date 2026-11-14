@@ -2,18 +2,18 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import * as v from 'valibot';
 import type {AiRun,AiHandoffToolInput} from '../src/modules/conversations/ai-state.ts';
-async function api(){const m=await import('../src/modules/conversations/handoff-tool.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.createHandoffTool,'function','handoff must use a bounded Flue tool bound to the admitted run');return m!;}
+async function api(){const m=await import('../src/modules/conversations/handoff-tool.ts').catch(e=>{if(e.code==='ERR_MODULE_NOT_FOUND')return null;throw e;});assert.equal(typeof m?.createHandoffTool,'function','handoff must use a bounded agent tool bound to the admitted run');return m!;}
 function fixture(){
  const run:AiRun={schemaVersion:1,scope:{organizationId:'org',storeId:'store',conversationId:'conv',controllerId:'controller'},
   request:{runId:crypto.randomUUID(),expectedVersion:0,messageId:'message',policyId:'policy',stage:'presale',language:'ru'},
-  admission:{messageId:'message',inputRevision:1,question:'Мне нужен человек.',policyId:'policy',policyRevision:1,policyConfig:{kind:'automatic',name:'Support',storeIds:['store'],priority:50,stages:['presale'],mode:'automatic',language:'customer',tone:'concise',instructions:''},stage:'presale',language:'ru'},controlEpoch:1,startedAt:1,deadlineAt:60001};
+  admission:{messageId:'message',inputRevision:1,question:'Мне нужен человек.',policyId:'policy',policyRevision:1,policyConfig:{kind:'automatic',name:'Support',storeIds:['store'],priority:50,stage:'presale',mode:'automatic',language:'customer',tone:'concise',instructions:''},stage:'presale',language:'ru'},controlEpoch:1,startedAt:1,deadlineAt:60001};
  const input:AiHandoffToolInput={reason:'customer_request',neededInformation:[]},stored={...input,schemaVersion:2 as const};
  const receipt={action:'request_handoff',origin:'agent',commandId:`ai-handoff:${run.request.runId}`,expectedVersion:1,actorUserId:null,actorMemberId:null,run:structuredClone(run),input:stored,
   appliedState:{schemaVersion:2,lifecycle:'open',reception:'paused',assignedMemberId:null,workStatus:'needs_reply',version:2,sequence:2,controlEpoch:2,updatedAt:2}};
  return {run,input,stored,result:{outcome:'accepted',receipt}};
 }
 const context=(data:AiHandoffToolInput)=>({data,toolCallId:'synthetic-tool-call',step:{do:async<T>(_name:string,fn:()=>T|Promise<T>)=>fn()},log:{info(){},warn(){},error(){}}});
-test('Flue handoff captures its authority, exposes only constrained input and returns a terminal minimal result',async()=>{
+test('Agent handoff captures its authority, exposes only constrained input and returns a terminal minimal result',async()=>{
  const {createHandoffTool}=await api(),f=fixture(),original=structuredClone(f.run);let args:unknown[]=[];
  const tool=createHandoffTool(f.run,{async requestHandoff(...input){args=input;return f.result;}});
  f.run.scope.organizationId='other';f.run.request.runId=crypto.randomUUID();

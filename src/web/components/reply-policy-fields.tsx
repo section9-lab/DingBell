@@ -1,70 +1,241 @@
 import type { ReplyPolicyConfig } from '../../shared/reply-policy';
 import type { StoreRecord } from '../lib/stores-api';
-import { notificationVariables } from '../../shared/reply-policy';
-import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
-import { Field, FieldGroup, FieldLabel, FieldDescription, FieldSet, FieldLegend } from './ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from './ui/field';
 import { Input } from './ui/input';
 import { NativeSelect, NativeSelectOption } from './ui/native-select';
 import { Textarea } from './ui/textarea';
 
 export const stages = { presale: '售前咨询', order: '售中订单查询', aftersale: '售后维护' };
-export const events = { order_placed: '订单创建', dispatched: '已发货', ready_for_pickup: '待取件', delivered: '已签收' };
+export const languages = {
+  customer: '跟随消费者语言',
+  ru: '俄语',
+  'zh-CN': '简体中文',
+  en: '英语',
+};
+export const tones = { concise: '简洁清晰', friendly: '亲切友好', formal: '正式礼貌' };
+export type StoreScope = 'all' | 'stores';
 export function defaultPolicy(kind: ReplyPolicyConfig['kind']): ReplyPolicyConfig {
   const common = { name: '', storeIds: [], priority: 50 };
-  return kind === 'automatic' ? { ...common, kind, stages: ['presale'], mode: 'suggest', language: 'customer', tone: 'concise', instructions: '' } :
-    { ...common, kind, event: 'dispatched', delayMinutes: 0, expiresAfterMinutes: 1440, maxPerDay: 1, quietHours: { start: '22:00', end: '08:00' }, content: '您的订单 {{order_number}} 已发货，请耐心等待。' };
+  return kind === 'automatic'
+    ? {
+        ...common,
+        kind,
+        stage: 'presale',
+        mode: 'automatic',
+        language: 'customer',
+        tone: 'concise',
+        instructions: '',
+      }
+    : {
+        ...common,
+        kind,
+        event: 'dispatched',
+        delayMinutes: 0,
+        expiresAfterMinutes: 1440,
+        maxPerDay: 1,
+        quietHours: { start: '22:00', end: '08:00' },
+        content: '您的订单 {{order_number}} 已发货，请耐心等待。',
+      };
 }
-export function PolicyFields({ config, stores, timeZone, onChange }: { config: ReplyPolicyConfig; stores: StoreRecord[]; timeZone: string; onChange: (config: ReplyPolicyConfig) => void }) {
-  return <FieldGroup className="gap-7">
-    <Field><FieldLabel htmlFor="policy-name">策略名称</FieldLabel><Input id="policy-name" placeholder={config.kind === 'automatic' ? '例如：商品咨询接待' : '例如：订单发货提醒'} value={config.name} maxLength={80} required onChange={e => onChange({ ...config, name: e.target.value })} /></Field>
-    <FieldSet className="border-t pt-5"><FieldLegend>适用范围</FieldLegend><FieldDescription>选择这条策略服务的店铺{config.kind === 'automatic' ? '和业务阶段' : ''}。</FieldDescription>
-      <FieldSet><FieldLegend variant="label">适用店铺 <span className="font-normal text-muted-foreground">已选 {config.storeIds.length} 家 / 最多 20 家</span></FieldLegend>
-        <FieldGroup className="max-h-48 gap-3 overflow-y-auto rounded-lg border p-3">{stores.map(store => <Field key={store.id} orientation="horizontal"><Checkbox id={`policy-store-${store.id}`} checked={config.storeIds.includes(store.id)} disabled={config.storeIds.length >= 20 && !config.storeIds.includes(store.id)} onCheckedChange={checked => onChange({ ...config, storeIds: checked ? [...config.storeIds, store.id] : config.storeIds.filter(id => id !== store.id) })} /><FieldLabel htmlFor={`policy-store-${store.id}`}>{store.name}</FieldLabel></Field>)}{stores.length === 0 && <p className="text-sm text-muted-foreground">暂无可选店铺，请先在店铺管理中连接店铺。</p>}</FieldGroup>
+export function PolicyFields({
+  config,
+  onChange,
+  storeScope,
+  onStoreScopeChange,
+  stores,
+  storesPending,
+  storesError,
+  hasMoreStores,
+  loadingMoreStores,
+  onLoadMoreStores,
+  onRetryStores,
+}: {
+  config: ReplyPolicyConfig;
+  onChange: (config: ReplyPolicyConfig) => void;
+  storeScope: StoreScope;
+  onStoreScopeChange: (scope: StoreScope) => void;
+  stores: StoreRecord[];
+  storesPending: boolean;
+  storesError: unknown;
+  hasMoreStores: boolean;
+  loadingMoreStores: boolean;
+  onLoadMoreStores: () => void;
+  onRetryStores: () => void;
+}) {
+  if (config.kind !== 'automatic') return null;
+  return (
+    <FieldGroup className="gap-6">
+      <Field className="pr-10">
+        <FieldLabel htmlFor="policy-name">策略名称</FieldLabel>
+        <Input
+          id="policy-name"
+          placeholder="例如：商品咨询接待"
+          value={config.name}
+          maxLength={80}
+          required
+          onChange={(event) => onChange({ ...config, name: event.target.value })}
+        />
+      </Field>
+      <FieldSet>
+        <FieldLegend variant="label">业务阶段</FieldLegend>
+        <FieldDescription>每条策略只服务一个阶段；三个阶段各建一条才能全覆盖。</FieldDescription>
+        <FieldGroup className="gap-3 sm:flex-row sm:flex-wrap">
+          {(Object.keys(stages) as (keyof typeof stages)[]).map((stage) => (
+            <Field orientation="horizontal" key={stage} className="sm:w-auto">
+              <input
+                id={`policy-stage-${stage}`}
+                type="radio"
+                name="policy-stage"
+                className="size-4 accent-primary"
+                checked={config.stage === stage}
+                onChange={() => onChange({ ...config, stage })}
+              />
+              <FieldLabel htmlFor={`policy-stage-${stage}`}>{stages[stage]}</FieldLabel>
+            </Field>
+          ))}
+        </FieldGroup>
       </FieldSet>
-      {config.kind === 'automatic' && <FieldSet><FieldLegend variant="label">业务阶段</FieldLegend><FieldGroup className="gap-3 sm:flex-row sm:flex-wrap">{(Object.keys(stages) as (keyof typeof stages)[]).map(stage => <Field orientation="horizontal" key={stage} className="sm:w-auto"><Checkbox id={`policy-stage-${stage}`} checked={config.stages.includes(stage)} onCheckedChange={checked => onChange({ ...config, stages: checked ? [...config.stages, stage] : config.stages.filter(value => value !== stage) })} /><FieldLabel htmlFor={`policy-stage-${stage}`}>{stages[stage]}</FieldLabel></Field>)}</FieldGroup></FieldSet>}
-    </FieldSet>
-    {config.kind === 'automatic' ? <>
-      <FieldSet className="border-t pt-5"><FieldLegend>回复方式</FieldLegend><FieldDescription>决定 AI 是协助起草，还是直接回复消费者。</FieldDescription>
-        <div className="grid gap-3 sm:grid-cols-2">{([
-          { value: 'suggest', title: '生成建议', description: 'AI 起草回复，由客服确认后发送。' },
-          { value: 'automatic', title: '自动回复', description: 'AI 在授权范围内直接回复，人工接管后暂停。' },
-        ] as const).map(mode => <label key={mode.value} className="flex cursor-pointer items-start gap-3 rounded-lg border p-4 has-checked:border-primary has-checked:bg-muted/50 has-focus-visible:ring-2 has-focus-visible:ring-ring has-disabled:cursor-not-allowed has-disabled:opacity-50"><input type="radio" name="policy-mode" value={mode.value} checked={config.mode === mode.value} onChange={() => onChange({ ...config, mode: mode.value })} className="mt-0.5 size-4 shrink-0 accent-primary" /><span className="space-y-1"><span className="block text-sm font-medium">{mode.title}</span><span className="block text-xs leading-relaxed text-muted-foreground">{mode.description}</span></span></label>)}</div>
+      <FieldSet>
+        <FieldLegend variant="label">适用店铺</FieldLegend>
+        <FieldDescription>选择全部店铺，或只对指定店铺生效。</FieldDescription>
+        <FieldGroup className="gap-3 sm:flex-row sm:flex-wrap">
+          <Field orientation="horizontal" className="sm:w-auto">
+            <input
+              id="policy-store-scope-all"
+              type="radio"
+              name="policy-store-scope"
+              className="size-4 accent-primary"
+              checked={storeScope === 'all'}
+              onChange={() => onStoreScopeChange('all')}
+            />
+            <FieldLabel htmlFor="policy-store-scope-all">全部店铺</FieldLabel>
+          </Field>
+          <Field orientation="horizontal" className="sm:w-auto">
+            <input
+              id="policy-store-scope-stores"
+              type="radio"
+              name="policy-store-scope"
+              className="size-4 accent-primary"
+              checked={storeScope === 'stores'}
+              onChange={() => onStoreScopeChange('stores')}
+            />
+            <FieldLabel htmlFor="policy-store-scope-stores">
+              指定店铺
+              {storeScope === 'stores' && (
+                <span className="font-normal text-muted-foreground">
+                  已选 {config.storeIds.length} 家
+                </span>
+              )}
+            </FieldLabel>
+          </Field>
+        </FieldGroup>
+        {storeScope === 'stores' && (
+          <div className="max-h-48 space-y-3 overflow-y-auto rounded-lg border p-3">
+            {storesPending ? (
+              <p className="text-sm text-muted-foreground">正在读取店铺…</p>
+            ) : storesError ? (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">店铺读取失败。</p>
+                <Button type="button" variant="outline" size="sm" onClick={onRetryStores}>
+                  重新读取店铺
+                </Button>
+              </div>
+            ) : (
+              <>
+                {stores.map((store) => (
+                  <Field key={store.id} orientation="horizontal">
+                    <Checkbox
+                      id={`policy-store-${store.id}`}
+                      checked={config.storeIds.includes(store.id)}
+                      disabled={config.storeIds.length >= 20 && !config.storeIds.includes(store.id)}
+                      onCheckedChange={(checked) =>
+                        onChange({
+                          ...config,
+                          storeIds: checked
+                            ? [...config.storeIds, store.id]
+                            : config.storeIds.filter((id) => id !== store.id),
+                        })
+                      }
+                    />
+                    <FieldLabel htmlFor={`policy-store-${store.id}`}>{store.name}</FieldLabel>
+                  </Field>
+                ))}
+                {stores.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    暂无可选店铺，请先在店铺管理中连接店铺。
+                  </p>
+                )}
+                {hasMoreStores && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingMoreStores}
+                    onClick={onLoadMoreStores}
+                  >
+                    载入更多店铺
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        {storeScope === 'stores' && config.storeIds.length === 0 && (
+          <FieldDescription>请至少选择一家店铺。</FieldDescription>
+        )}
       </FieldSet>
-      <FieldSet className="border-t pt-5"><FieldLegend>回复内容与风格</FieldLegend><div className="grid gap-4 sm:grid-cols-2">
-        <Field><FieldLabel htmlFor="policy-language">回复语言</FieldLabel><NativeSelect id="policy-language" className="w-full" value={config.language} onChange={e => onChange({ ...config, language: e.target.value as typeof config.language })}>{Object.entries({ customer: '跟随消费者语言', ru: '俄语', 'zh-CN': '简体中文', en: '英语' }).map(([value, label]) => <NativeSelectOption key={value} value={value}>{label}</NativeSelectOption>)}</NativeSelect></Field>
-        <Field><FieldLabel htmlFor="policy-tone">回复语气</FieldLabel><NativeSelect id="policy-tone" className="w-full" value={config.tone} onChange={e => onChange({ ...config, tone: e.target.value as typeof config.tone })}>{Object.entries({ concise: '简洁清晰', friendly: '亲切友好', formal: '正式礼貌' }).map(([value, label]) => <NativeSelectOption key={value} value={value}>{label}</NativeSelectOption>)}</NativeSelect></Field>
-      </div><Field><FieldLabel htmlFor="policy-instructions">补充说明 <span className="font-normal text-muted-foreground">选填</span></FieldLabel><Textarea id="policy-instructions" aria-label="补充说明" placeholder="例如：先简短回答问题，再补充必要的使用建议。" rows={3} maxLength={2000} value={config.instructions} onChange={e => onChange({ ...config, instructions: e.target.value })} /><FieldDescription>仅用于补充表达要求。商品事实与店铺政策请在知识库维护。</FieldDescription></Field>
-        <Alert><AlertTitle>以下情况仍会转人工</AlertTitle><AlertDescription>缺少可靠依据、消费者要求人工，或退款与额外折扣需要商家决定。补充说明不会授予 AI 新的操作权限。</AlertDescription></Alert>
-      </FieldSet>
-    </> : <>
-      <FieldSet className="border-t pt-5"><FieldLegend>触发与发送</FieldLegend>
-        <Field><FieldLabel htmlFor="policy-event">触发阶段</FieldLabel><NativeSelect id="policy-event" className="w-full" value={config.event} onChange={e => onChange({ ...config, event: e.target.value as typeof config.event })}>{Object.entries(events).map(([value, label]) => <NativeSelectOption key={value} value={value}>{label}</NativeSelectOption>)}</NativeSelect><FieldDescription>是否可用取决于店铺的履约方式与平台能力。</FieldDescription></Field>
-        <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor="policy-delay">延迟发送（分钟）</FieldLabel><Input id="policy-delay" type="number" min={0} max={10080} required value={config.delayMinutes} onChange={e => onChange({ ...config, delayMinutes: e.target.valueAsNumber })} /><FieldDescription>0 表示事件发生后即可发送。</FieldDescription></Field>
-          <Field><FieldLabel htmlFor="policy-expiry">事件有效期（分钟）</FieldLabel><Input id="policy-expiry" type="number" min={1} max={43200} required value={config.expiresAfterMinutes} onChange={e => onChange({ ...config, expiresAfterMinutes: e.target.valueAsNumber })} /><FieldDescription>从事件发生时计算，须长于延迟时间。</FieldDescription></Field></div>
-        <Field><FieldLabel htmlFor="policy-cap">同一消费者每日通知上限</FieldLabel><Input id="policy-cap" className="sm:max-w-40" type="number" min={1} max={3} required value={config.maxPerDay} onChange={e => onChange({ ...config, maxPerDay: e.target.valueAsNumber })} /><FieldDescription>此规则每日最多发送 1–3 次，平台限制仍优先。</FieldDescription></Field>
-        <FieldSet><FieldLegend variant="label">免打扰时间</FieldLegend><Field orientation="horizontal"><Checkbox id="policy-quiet" checked={config.quietHours !== null} onCheckedChange={checked => onChange({ ...config, quietHours: checked ? { start: '22:00', end: '08:00' } : null })} /><FieldLabel htmlFor="policy-quiet">启用免打扰</FieldLabel></Field>
-          {config.quietHours && <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor="policy-quiet-start">开始时间</FieldLabel><Input id="policy-quiet-start" type="time" required value={config.quietHours.start} onChange={e => onChange({ ...config, quietHours: { ...config.quietHours!, start: e.target.value } })} /></Field><Field><FieldLabel htmlFor="policy-quiet-end">结束时间</FieldLabel><Input id="policy-quiet-end" type="time" required value={config.quietHours.end} onChange={e => onChange({ ...config, quietHours: { ...config.quietHours!, end: e.target.value } })} /></Field></div>}
-          <FieldDescription>使用公司时区 {timeZone}。免打扰结束后仍会检查事件是否过期。</FieldDescription>
-        </FieldSet>
-      </FieldSet>
-      <FieldSet className="border-t pt-5"><FieldLegend>通知内容</FieldLegend><Field><FieldLabel htmlFor="policy-content">通知内容</FieldLabel><Textarea id="policy-content" rows={4} maxLength={1000} required value={config.content} onChange={e => onChange({ ...config, content: e.target.value })} /><FieldDescription>支持：{notificationVariables.map(value => `{{${value}}}`).join('、')}。变量缺失时不发送不完整消息。</FieldDescription></Field></FieldSet>
-    </>}
-    <details className="border-t pt-4"><summary className="cursor-pointer text-sm font-medium">高级设置</summary><Field className="mt-4"><FieldLabel htmlFor="policy-priority">优先级</FieldLabel><Input id="policy-priority" className="sm:max-w-40" type="number" min={0} max={100} step={1} required value={config.priority} onChange={e => onChange({ ...config, priority: e.target.valueAsNumber })} /><FieldDescription>0–100，数值越高越优先。同一店铺与业务阶段的自动回复策略不能有相同优先级。</FieldDescription></Field></details>
-  </FieldGroup>;
-}
-export function PolicySummary({ config, stores }: { config: ReplyPolicyConfig; stores: StoreRecord[] }) {
-  return <div className="flex flex-col gap-2 text-sm">
-    <p className="font-medium break-words">{config.name}</p>
-    <p className="break-words">店铺：{config.storeIds.map(id => stores.find(store => store.id === id)?.name ?? '未载入的店铺').join('、')} · 优先级 {config.priority}</p>
-    {config.kind === 'automatic' ? <>
-      <p>阶段：{config.stages.map(stage => stages[stage]).join('、')}</p>
-      <p>{config.mode === 'suggest' ? '人工确认发送' : '授权范围内自动回复'} · {({ customer: '跟随消费者语言', ru: '俄语', 'zh-CN': '简体中文', en: '英语' })[config.language]} · {({ concise: '简洁清晰', friendly: '亲切友好', formal: '正式礼貌' })[config.tone]}</p>
-      {config.instructions && <p className="whitespace-pre-wrap break-words">{config.instructions}</p>}
-    </> : <>
-      <p>{events[config.event]} · 延迟 {config.delayMinutes} 分钟 · {config.expiresAfterMinutes} 分钟内有效 · 每日最多 {config.maxPerDay} 次</p>
-      <p>{config.quietHours ? `免打扰 ${config.quietHours.start}–${config.quietHours.end}` : '未设置免打扰'}</p>
-      <p className="whitespace-pre-wrap break-words">{config.content}</p>
-    </>}
-  </div>;
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor="policy-language">回复语言</FieldLabel>
+          <NativeSelect
+            id="policy-language"
+            className="w-full"
+            value={config.language}
+            onChange={(event) =>
+              onChange({ ...config, language: event.target.value as typeof config.language })
+            }
+          >
+            {Object.entries(languages).map(([value, label]) => (
+              <NativeSelectOption key={value} value={value}>
+                {label}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="policy-tone">回复语气</FieldLabel>
+          <NativeSelect
+            id="policy-tone"
+            className="w-full"
+            value={config.tone}
+            onChange={(event) =>
+              onChange({ ...config, tone: event.target.value as typeof config.tone })
+            }
+          >
+            {Object.entries(tones).map(([value, label]) => (
+              <NativeSelectOption key={value} value={value}>
+                {label}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      </div>
+      <Field>
+        <FieldLabel htmlFor="policy-instructions">提示词内容</FieldLabel>
+        <Textarea
+          id="policy-instructions"
+          rows={6}
+          maxLength={2000}
+          placeholder="例如：先简短回答问题，再补充必要的使用建议。"
+          value={config.instructions}
+          onChange={(event) => onChange({ ...config, instructions: event.target.value })}
+        />
+        <FieldDescription>
+          商品事实与店铺政策请在知识库维护，提示词只补充表达要求。
+        </FieldDescription>
+      </Field>
+    </FieldGroup>
+  );
 }

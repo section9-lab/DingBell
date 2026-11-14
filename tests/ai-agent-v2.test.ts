@@ -98,7 +98,7 @@ test('the v2 tools stay scoped to the frozen run and cannot name a document path
     scope: { organizationId: 'org', storeId: 'store', conversationId: 'conv', controllerId: 'controller' },
     request: { runId: crypto.randomUUID(), expectedVersion: 0, messageId: 'message', policyId: 'policy', stage: 'presale' as const, language: 'ru' as const },
     admission: { messageId: 'message', inputRevision: 1, question: 'Вопрос', policyId: 'policy', policyRevision: 1,
-      policyConfig: { kind: 'automatic' as const, name: 'Support', storeIds: ['store'], priority: 50, stages: ['presale' as const], mode: 'automatic' as const, language: 'customer' as const, tone: 'concise' as const, instructions: '' },
+      policyConfig: { kind: 'automatic' as const, name: 'Support', storeIds: ['store'], priority: 50, stage: 'presale' as const, mode: 'automatic' as const, language: 'customer' as const, tone: 'concise' as const, instructions: '' },
       stage: 'presale' as const, language: 'ru' as const },
     controlEpoch: 1, startedAt: 1, deadlineAt: 60_001,
   };

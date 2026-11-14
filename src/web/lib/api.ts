@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-const userSchema = v.object({
+export const userSchema = v.object({
   id: v.string(),
   name: v.string(),
   email: v.string(),
@@ -57,6 +57,13 @@ const messages: Record<string, string> = {
   REPLY_TEST_DISABLED: 'AI 回复测试尚未启用，请联系部署管理员配置模型和预算。',
   AI_DISABLED: 'AI 接待尚未启用，请先在「公司设置 > AI 模型」保存连接并完成测试。',
   MODEL_URL_REJECTED: 'API 地址不可用：请填写允许的 HTTPS Base URL，不含 /chat/completions；自定义网关需配置 AI_MODEL_ALLOWED_HOSTS。',
+  MODEL_PROVIDER_UNSUPPORTED: '该供应商暂不支持当前模型或认证方式，请改选目录中的模型。',
+  OAUTH_LOGIN_REQUIRED: '请先完成供应商订阅登录，再保存模型配置。',
+  OAUTH_DENIED: '供应商登录被拒绝，请重新发起登录。',
+  OAUTH_EXPIRED: '登录已过期，请重新发起供应商登录。',
+  OAUTH_UNAVAILABLE: '暂时无法连接供应商登录服务，请稍后重试。',
+  OAUTH_INVALID_RESPONSE: '供应商登录返回了无法识别的数据，请稍后重试。',
+  OAUTH_REFRESH_FAILED: '供应商登录已失效，请重新登录后再使用。',
   SETTINGS_CHANGED: '设置已被修改，请先读取已保存配置，再继续操作。',
   MODEL_KEY_REQUIRED: '首次配置或更换接口域名时，请重新输入 API Key。',
   MODEL_CATALOG_UNAUTHORIZED: '无法读取模型列表：API Key 无效，或没有列出模型的权限；也可以手动填写供应商提供的 Model ID。',
@@ -67,7 +74,7 @@ const messages: Record<string, string> = {
   MODEL_TEST_RATE_LIMITED: '测试过于频繁，请一分钟后读取配置再试。',
   AI_NOT_CONFIGURED: 'AI 接待还缺可用的模型配置，请在「公司设置 > AI 模型」保存并测试模型。',
   AI_BUDGET_UNAVAILABLE: '当前没有足够的 AI 接待预算或次数，请联系公司管理员。',
-  AI_POLICY_DRAFT_ONLY: '当前回复策略仅生成建议，需人工确认发送，不能开启自动托管。请到「回复策略」把回复方式改为「自动回复」，保存后再开启。',
+  AI_POLICY_DRAFT_ONLY: '当前回复策略仍是旧的“仅生成建议”模式，需打开该策略并重新保存，之后才能开启自动托管。',
   AI_POLICY_UNPUBLISHED: '当前店铺与业务阶段没有已启用的自动回复策略，请先到「回复策略」创建并保存一条覆盖该店铺的策略。',
   AI_RECEPTION_UNAVAILABLE: '暂时不能恢复 AI。请核对店铺状态与会话渠道；上一次接待尚未结束时，需要等待关闭。',
   HANDOFF_REVIEW_CONFLICT: '跟进要求已经变化或由其他成员核对，请刷新后确认最新记录。',
@@ -98,6 +105,7 @@ const messages: Record<string, string> = {
   PRODUCT_SOURCE_CHANGED: '商品来源已更新，请刷新预览并重新核对。',
   PRODUCT_SOURCE_UNAVAILABLE: '商品资料尚未同步完整、已归档或超出支持范围，请核对来源后再导入。',
   INVALID_CREDENTIALS: '邮箱或密码不正确，请重新输入。',
+  INVALID_OTP: '验证码不正确或已过期，请重新获取。',
   AUTHENTICATION_REJECTED: '暂时无法登录，请确认账号已完成邮箱验证。',
   UNAUTHENTICATED: '登录已失效，请重新登录。',
   RATE_LIMITED: '尝试次数较多，请稍后再试。',
@@ -110,8 +118,8 @@ const messages: Record<string, string> = {
   POLICY_CHANGED: '策略已被修改，请读取最新版本并核对后再操作。',
   KNOWLEDGE_CHANGED: '知识版本已变化，请读取最新版本并核对后再操作。',
   POLICY_TEST_REQUIRED: '请先检查已保存的草稿，再发布策略。',
-  POLICY_OVERLAP: '同一店铺和业务阶段已有相同优先级的自动回复策略，请调整范围或优先级。',
-  POLICY_STORE_UNAVAILABLE: '策略中的店铺已不可用，请重新选择店铺后保存。',
+  POLICY_OVERLAP: '相同业务阶段已有生效的回复策略且范围重叠，请编辑现有策略或调整业务阶段。',
+  POLICY_STORE_UNAVAILABLE: '策略关联的店铺已不可用，请先在店铺管理中确认店铺状态。',
   INVALID_REQUEST: '填写的信息不完整或格式不正确，请检查后重试。',
   ACCOUNTING_LIMIT: '当前范围超过 5000 个包裹或费用记录，请缩短日期范围后重试。',
   ACCOUNTING_CONFLICT: '请检查商品 ID 是否属于当前店铺、生效日期是否晚于已有版本，或费用记录是否重复/已作废。请刷新核对；首次录入可以选择历史日期。',
@@ -159,7 +167,6 @@ const messages: Record<string, string> = {
   OUTBOUND_DISABLED: '当前部署或店铺尚未开启对外回复。',
   CAPABILITY_UNVERIFIED: '尚未确认店铺的回复权限，请联系管理员核实。',
   REPLY_UNAVAILABLE: '当前会话或店铺暂不满足发送条件，请刷新状态后确认。',
-  PREVIEW_UNAVAILABLE: '原翻译预览不可用于本次回复，请核对原文并重新生成预览。',
   REPLY_NOT_CANCELABLE: '这条回复已开始发送或已结束，无法取消。请刷新发送结果。',
   CHECK_RATE_LIMITED: '检查过于频繁，请稍后再试。',
   GRANT_CHANGED: '成员或店铺授权已变化，请重新读取权限后再操作。',
@@ -190,7 +197,7 @@ export class ApiError extends Error {
 export async function request<
   S extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>,
 >(path: string, schema: S, init: RequestInit = {}): Promise<v.InferOutput<S>> {
-  const writing = init.method === 'POST';
+  const writing = init.method === 'POST' || init.method === 'DELETE';
   const headers = new Headers(init.headers);
   if (writing && !(init.body instanceof FormData)) headers.set('content-type', 'application/json');
   let response: Response;
@@ -237,6 +244,22 @@ export function signIn(email: string, password: string) {
     '/api/auth/sign-in/email',
     v.object({ user: userSchema, redirect: v.boolean() }),
     { method: 'POST', body: JSON.stringify({ email, password }) },
+  );
+}
+
+export function sendEmailOtp(email: string) {
+  return request(
+    '/api/auth/email-otp/send-verification-otp',
+    v.object({ accepted: v.literal(true) }),
+    { method: 'POST', body: JSON.stringify({ email, type: 'sign-in' }) },
+  );
+}
+
+export function signInWithEmailOtp(email: string, otp: string) {
+  return request(
+    '/api/auth/sign-in/email-otp',
+    v.object({ user: userSchema, redirect: v.boolean() }),
+    { method: 'POST', body: JSON.stringify({ email, otp }) },
   );
 }
 

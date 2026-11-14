@@ -14,6 +14,7 @@ import { mailConfigured } from '../mail/config.ts';
 import type { IdentityDependencies } from '../mail/types.ts';
 import { auditedChange, type AuditOutcome } from '../audit/operation.ts';
 import { identityAuditEvent } from '../audit/schema.ts';
+import { seedPresetPolicies } from '../reply-policies/presets.ts';
 import { bootstrapInstallation, type BootstrapJob } from './schema.ts';
 
 const bootstrapSecret = (env: IdentityBindings) => typeof env.BOOTSTRAP_SECRET === 'string'
@@ -211,6 +212,9 @@ export function registerBootstrapRoutes(app: Hono<ApplicationEnv>, deps: Identit
         }
         if (members.length !== 1 || members[0].id !== job.expectedMemberId
           || members[0].userId !== job.expectedUserId || !hasRole(members[0].role, 'owner')) throw new BootstrapConflict('Company ownership does not match the installation claim.');
+        // 三条预置回复策略：没有策略时 AI 托管不会自动回复任何会话（阶段视为策略缺失）。
+        // 幂等，重复执行中断的启动步骤不会重复创建。
+        await seedPresetPolicies(c.env.DB!, company.id, job.expectedUserId, crypto.randomUUID());
         await checkpoint({ organizationId: company.id, state: 'initialized', executionId: null, leaseUntil: 0 });
         return jsonResponse(c, { state: 'initialized', organizationId: company.id }, 200, login);
       } catch (error) {

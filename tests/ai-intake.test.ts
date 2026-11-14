@@ -9,11 +9,17 @@ import {changeAiBudget,reserveAiExecution,readAiExecution,bindAiExecutionReceipt
 const intakeConfig={maxGenerations:1,model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'intake-v1',maxInputTokens:100,maxOutputTokens:100,
  pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}}};
 async function fixture(through?:string,aiTimeoutMs=60000){
- const f=await conversationControlFixture(through,{aiTimeoutMs}),policyId=crypto.randomUUID();
+ const f=await conversationControlFixture(through,{aiTimeoutMs});
  try{
   await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
-  const config={kind:'automatic' as const,name:'All stages',storeIds:['store'],priority:50,stages:['presale' as const,'order' as const,'aftersale' as const],mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:'merchant data'};
-  assert.ok(await createPolicy(f.db,f.actor(),policyId,config));assert.ok(await changePolicy(f.db,f.actor(),policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,f.actor(),policyId,2,{action:'publish'},crypto.randomUUID()));
+  // One policy per stage: all three stages must admit, and the answer run uses the order policy.
+  const publish=async(stage:'presale'|'order'|'aftersale')=>{
+   const id=crypto.randomUUID(),config={kind:'automatic' as const,name:`All stages ${stage}`,storeIds:['store'],priority:50,stage,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:'merchant data'};
+   assert.ok(await createPolicy(f.db,f.actor(),id,config));assert.ok(await changePolicy(f.db,f.actor(),id,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,f.actor(),id,2,{action:'publish'},crypto.randomUUID()));
+   return {id,config};
+  };
+  await publish('presale');const order=await publish('order');await publish('aftersale');
+  const policyId=order.id,config=order.config;
   const append=async()=>{
    const id=crypto.randomUUID(),now=Date.now();await f.db.batch([
     f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES(?,'org','store','conv',?,'Customer','inbound','[\"Когда приедет заказ?\"]',0,0,?,?,'incremental')").bind(id,id,now,now),
@@ -65,7 +71,8 @@ test('classification selects the server policy and persists a bound next-run ide
  assert.equal(first.receipt.decision.kind,'ready');assert.equal(first.receipt.decision.policyId,f.policyId);assert.equal(first.state.version,2);assert.equal(first.state.reception,'ai');assert.equal((await f.call('ai-work-read',{runId:f.request.runId})).body,null);
  const next=(await f.call('ai-classified-input')).body;assert.equal(next.request.stage,'order');assert.equal(next.request.language,'ru');assert.equal(next.request.policyId,f.policyId);assert.equal(next.request.expectedVersion,2);assert.notEqual(next.request.runId,f.request.runId);
  await f.restart();assert.deepEqual((await f.call('ai-classified-input')).body,next);assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);
- assert.equal((await f.call('ai-start',{request:{...next.request,stage:'presale'}})).body.outcome,'conflict');assert.equal((await f.call('ai-start',{request:next.request})).body.outcome,'accepted');assert.equal((await f.call('ai-classified-input')).body,null);
+ // 每条策略只服务一个阶段：换阶段等于换策略身份，因此是 unavailable 而不是 conflict。
+ assert.equal((await f.call('ai-start',{request:{...next.request,stage:'presale'}})).body.outcome,'unavailable');assert.equal((await f.call('ai-start',{request:next.request})).body.outcome,'accepted');assert.equal((await f.call('ai-classified-input')).body,null);
 });
 test('classification committed during a live read replays its original receipt and rejects a different decision',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);assert.equal((await f.start()).body.outcome,'accepted');

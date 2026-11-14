@@ -10,8 +10,12 @@ async function setup(page:Page){
   const post=async(path:string,data:unknown)=>{const response=await page.request.post(`${api}${path}`,{headers,data});expect(response.status(),await response.text()).toBe(200);return await response.json();};
   const storeId=crypto.randomUUID();await post('/stores',{id:storeId,name:'AI 托管测试店',clientId:'910001',apiKey:crypto.randomUUID()});await post(`/stores/${storeId}/check`,{expectedRevision:1});
   const history=await app.seedConversationHistory(storeId);await app.prepareAiReceptionConversation(history.id);await app.prepareReplyStore(storeId);
-  const policyId=crypto.randomUUID();await post('/reply-policies',{id:policyId,config:{kind:'automatic',name:'合成自动接待',storeIds:[storeId],priority:50,stages:['presale','order','aftersale'],mode:'automatic',language:'customer',tone:'concise',instructions:''}});
-  await post(`/reply-policies/${policyId}/test`,{expectedVersion:1});await post(`/reply-policies/${policyId}/publish`,{expectedVersion:2});
+  // 一条策略只服务一个阶段：三个阶段各建一条，才能覆盖全部分类结果。
+  for(const stage of ['presale','order','aftersale'] as const){
+    const policyId=crypto.randomUUID();
+    await post('/reply-policies',{id:policyId,config:{kind:'automatic',name:`合成自动接待 ${stage}`,storeIds:[storeId],priority:50,stage,mode:'automatic',language:'customer',tone:'concise',instructions:''}});
+    await post(`/reply-policies/${policyId}/test`,{expectedVersion:1});await post(`/reply-policies/${policyId}/publish`,{expectedVersion:2});
+  }
   const budgetId=crypto.randomUUID(),startsAt=Math.floor(Date.now()/86400000)*86400000;await post('/ai-budgets',{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:2000000,maxRuns:10});await post('/ai-budgets',{id:crypto.randomUUID(),action:'set_enabled',budgetId,expectedRevision:0,enabled:true});
   const path=`/conversations/${history.id}`,url=`${app.baseURL}/workspace/messages?${new URLSearchParams({store:storeId,conversation:history.id})}`;
   await page.goto(url);return {app,post,path,url};
