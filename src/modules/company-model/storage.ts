@@ -41,14 +41,16 @@ export function insertAuthSession(db:D1Database,record:AuthSessionRecord){return
   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(record.id,record.organizationId,record.provider,record.status,record.deviceCodeKeyVersion,record.deviceCodeNonce,record.deviceCodeCiphertext,record.userCode,record.verificationUri,record.intervalSeconds,record.expiresAt,record.nextPollAt,record.failureCode,record.createdAt,record.updatedAt).run();}
 export function readAuthSession(db:D1Database,organizationId:string,id:string){return db.prepare(`SELECT id,organization_id AS organizationId,provider,status,device_code_key_version AS deviceCodeKeyVersion,device_code_nonce AS deviceCodeNonce,device_code_ciphertext AS deviceCodeCiphertext,user_code AS userCode,verification_uri AS verificationUri,interval_seconds AS intervalSeconds,expires_at AS expiresAt,next_poll_at AS nextPollAt,failure_code AS failureCode,created_at AS createdAt,updated_at AS updatedAt FROM company_ai_model_auth_session WHERE organization_id=? AND id=?`).bind(organizationId,id).first<AuthSessionRecord>();}
 export function updateAuthSession(db:D1Database,organizationId:string,id:string,status:AuthSessionRecord['status'],nextPollAt:number,intervalSeconds:number,failureCode:string|null){return db.prepare(`UPDATE company_ai_model_auth_session SET status=?,next_poll_at=?,interval_seconds=?,failure_code=?,updated_at=? WHERE organization_id=? AND id=? RETURNING id`).bind(status,nextPollAt,intervalSeconds,failureCode,Date.now(),organizationId,id).first<{id:string}>();}
+// Tests are intentionally not rate limited: every explicit request claims a fresh attempt.
+// next_test_at is kept only for schema compatibility and records the claim time.
 export function claimModelTest(db:D1Database,actor:SettingsActor,revision:number,attemptId:string){
   const now=Date.now();
   return db.prepare(`INSERT INTO company_ai_model_test(organization_id,revision,attempt_id,status,tested_at,next_test_at)
     SELECT ?,?,?,'pending',?,? WHERE ${modelManagerAccess}
     AND (SELECT MAX(revision) FROM company_ai_model_revision WHERE organization_id=?)=?
     ON CONFLICT(organization_id) DO UPDATE SET revision=excluded.revision,attempt_id=excluded.attempt_id,status='pending',failure_code=NULL,provider_status=NULL,tested_at=excluded.tested_at,next_test_at=excluded.next_test_at
-    WHERE company_ai_model_test.next_test_at<=? RETURNING attempt_id`)
-    .bind(actor.orgId,revision,attemptId,now,now+60000,...actorValues(actor),actor.orgId,revision,now).first();
+    RETURNING attempt_id`)
+    .bind(actor.orgId,revision,attemptId,now,now,...actorValues(actor),actor.orgId,revision).first();
 }
 // Reuse the persistent request limiter, with a company-scoped namespace and no provider data.
 export function claimModelCatalog(db:D1Database,actor:SettingsActor,revision:number){

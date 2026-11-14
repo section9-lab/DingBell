@@ -22,7 +22,7 @@ test('message synchronization persists its company-scoped entities and checkpoin
 
 import { Miniflare } from 'miniflare';
 import { applyMigrations } from './fixtures/migrations.ts';
-import { getSyncSource, setSyncSourceEnabled, getStoreCoordinatorRuntime, releaseSyncLease, prepareSyncPageGate, syncPageCondition, prepareSyncPageFinish, claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getStoreSync, getSyncRuntime, setStoreSyncEnabled } from '../src/modules/sync/storage.ts';
+import { listStoresAwaitingDiscovery, getSyncSource, setSyncSourceEnabled, getStoreCoordinatorRuntime, releaseSyncLease, prepareSyncPageGate, syncPageCondition, prepareSyncPageFinish, claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getStoreSync, getSyncRuntime, setStoreSyncEnabled } from '../src/modules/sync/storage.ts';
 import type { NormalizedMessage, SyncLease } from '../src/modules/sync/types.ts';
 
 test('real D1 synchronization commits an immutable page and its checkpoint under live fences', { timeout: 60_000 }, async context => {
@@ -66,6 +66,19 @@ test('real D1 synchronization commits an immutable page and its checkpoint under
     return commitSyncPage(db, claimed, { cursor,nextCursor,nextDueAt:1,completed:false,messages });
   }
 
+  await context.test('discovery wake covers polled stores only', async () => {
+    const polled = await addStore('polled'), cutOver = await addStore('cutover'), blocked = await addStore('blocked');
+    await db.prepare('UPDATE store_sync_source SET due_at=1').run();
+    const ids = async () => (await listStoresAwaitingDiscovery(db, 50)).results.map(row => row.storeId).sort();
+    assert.deepEqual(await ids(), ['blocked', 'cutover', 'polled']);
+    await db.prepare(`INSERT INTO store_push_endpoint (store_id,organization_id,endpoint_id,revision,generation,mode,seller_id,secret_hash,key_version,nonce,ciphertext,cutover_at,created_at,updated_at)
+      VALUES (?,'sync-org','endpoint-cutover',1,1,'active','999','hash','v1','nonce','ciphertext',1,1,1)`).bind(cutOver).run();
+    assert.deepEqual(await ids(), ['blocked', 'polled'], 'a Push cutover stops timer discovery');
+    await db.prepare('UPDATE store_coordinator SET blocked_until=? WHERE store_id=?').bind(Date.now() + 60_000, blocked).run();
+    assert.deepEqual(await ids(), ['polled']);
+    await db.prepare("UPDATE store_coordinator SET blocked_until=NULL,lease_source='chat',lease_token='lease',lease_until=? WHERE store_id=?").bind(Date.now() + 20_000, polled).run();
+    assert.deepEqual(await ids(), [], 'a live lease is not woken twice');
+  });
   await context.test('only current managers enable, machine authorization persists after logout, and lease has one winner', async () => {
     const id = await addStore('permissions');
     assert.equal(await setStoreSyncEnabled(db, { ...actor, actorUserId:'sync-member' }, id, 1, false), null);

@@ -62,8 +62,8 @@ test('saved model connection tests are explicit, bounded, single-attempt and nev
   return fail?new Response('raw-secret-provider-error',{status:302,headers:{location:'http://127.0.0.1/'}}):success();});t.after(f.close);
  assert.equal((await f.request('',command)).status,200);assert.equal(calls,0);
  const probe=await f.request('/test',{expectedVersion:1});assert.equal(probe.status,200,await probe.clone().text());assert.equal((await probe.json() as any).test.status,'passed');assert.equal(calls,1);
- assert.equal((await f.request('/test',{expectedVersion:1})).status,429);assert.equal(calls,1);
- await f.DB.prepare('UPDATE company_ai_model_test SET next_test_at=0').run();fail=true;
+ // Tests are not frequency limited: an immediate second request runs the probe again.
+ fail=true;
  const result=await f.request('/test',{expectedVersion:1});assert.equal(result.status,200);const text=await result.text();assert.equal(JSON.parse(text).test.status,'failed');assert.equal(JSON.parse(text).test.failureCode,'redirect_refused');assert.equal(JSON.parse(text).test.providerStatus,302);assert.equal(text.includes('raw-secret-provider-error'),false);assert.equal(text.includes(command.apiKey),false);assert.equal(calls,2);
  assert.equal((await f.request('/test',{expectedVersion:2})).status,409);assert.equal(calls,2);
 });
@@ -73,8 +73,7 @@ test('provider 403 diagnostics survive rereads and clear before the next explici
  assert.equal((await f.request('',command)).status,200);
  let response=await f.request('/test',{expectedVersion:1});assert.equal(response.status,200);let result=await response.json() as any;assert.equal(result.test.status,'failed');assert.equal(result.test.failureCode,'forbidden');assert.equal(result.test.providerStatus,403);assert.equal(JSON.stringify(result).includes(command.apiKey),false);
  const reread=await(await f.request()).json() as any;assert.deepEqual(reread.test,result.test);
- assert.equal((await f.request('/test',{expectedVersion:1})).status,429);assert.equal(calls,1);
- await f.DB.prepare('UPDATE company_ai_model_test SET next_test_at=0').run();blocked=false;
+ blocked=false;
  response=await f.request('/test',{expectedVersion:1});result=await response.json() as any;assert.equal(result.test.status,'passed');assert.equal(result.test.failureCode,null);assert.equal(result.test.providerStatus,200);assert.equal(calls,2);
 });
 

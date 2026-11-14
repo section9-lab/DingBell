@@ -105,7 +105,10 @@ export function registerCompanyModelRoutes(app:Hono<ApplicationEnv>,deps:Company
         if(!current)return missing();
         const result=await auditedChange(audit,async()=>{
           const attemptId=crypto.randomUUID();
-          if(!await claimModelTest(db,actor,current.revision,attemptId))return apiError(c,'MODEL_TEST_RATE_LIMITED','Wait one minute before testing again, then refresh the configuration.',429);
+          if(!await claimModelTest(db,actor,current.revision,attemptId)){
+            if(!await manager(db,actor))return missing();
+            return conflict();
+          }
           if(!await manager(db,actor))return missing();
           if((await readCompanyModel(db,actor.orgId))?.revision!==current.revision)return conflict();
           const diagnostic=await probeCompanyModel(c.env,current,deps.modelFetch??fetch,c.req.raw.signal,async()=>!!await manager(db,actor)&&(await readCompanyModel(db,actor.orgId))?.revision===current.revision);

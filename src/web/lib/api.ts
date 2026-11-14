@@ -71,7 +71,6 @@ const messages: Record<string, string> = {
   MODEL_CATALOG_RATE_LIMITED: '模型列表读取过于频繁，请稍后再试（本系统每家公司至少间隔 10 秒）。',
   MODEL_CATALOG_UNAVAILABLE: '暂时无法获取模型列表，请检查地址和网络后重试，也可以手动填写 Model ID。本次未保存配置。',
   MODEL_CATALOG_INVALID_RESPONSE: '供应商返回的模型列表格式不受支持，请手动填写 Model ID。本次未保存配置。',
-  MODEL_TEST_RATE_LIMITED: '测试过于频繁，请一分钟后读取配置再试。',
   AI_NOT_CONFIGURED: 'AI 接待还缺可用的模型配置，请在「公司设置 > AI 模型」保存并测试模型。',
   AI_BUDGET_UNAVAILABLE: '当前没有足够的 AI 接待预算或次数，请联系公司管理员。',
   AI_POLICY_DRAFT_ONLY: '当前回复策略仍是旧的“仅生成建议”模式，需打开该策略并重新保存，之后才能开启自动托管。',

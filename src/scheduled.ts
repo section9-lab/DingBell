@@ -8,6 +8,8 @@ import { deliverInboundEvents } from './modules/conversations/inbound-delivery.t
 import { dispatchAiReceptions } from './modules/ai-runs/dispatch.ts';
 import {reconcileBudgetLedgers} from './modules/budget-audit/reconciliation.ts';
 import {runStartupBootstrap} from './modules/sync/bootstrap.ts';
+import {listStoresAwaitingDiscovery} from './modules/sync/storage.ts';
+import {wakeStoreSync} from './modules/sync/bindings.ts';
 
 
 type Bindings=SyncBindings&ControlBindings&SupportBindings;
@@ -20,6 +22,16 @@ async function repairOne(env:Bindings,scope:ControlScope) {
       new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('CONTROL_REPAIR_TIMEOUT')),3_000);})]);
   } finally {clearTimeout(timer);}
 }
+/**
+ * Keep discovery running for stores without a Push cutover. Configured Push stores are skipped
+ * here and the coordinator also refuses to poll once an endpoint cuts over.
+ */
+async function wakePollingStores(env:Bindings) {
+  if(!env.DB||!env.STORE_COORDINATOR)return;
+  const stores=(await listStoresAwaitingDiscovery(env.DB,50)).results;
+  for(let index=0;index<stores.length;index+=5)
+    await Promise.allSettled(stores.slice(index,index+5).map(scope=>wakeStoreSync(env,scope)));
+}
 async function repairControls(env:Bindings) {
   if(!env.DB||!env.CONVERSATION_CONTROLLER)return;
   const scopes=await listDueControlDirectories(env.DB,Date.now(),50);
@@ -31,5 +43,5 @@ export async function runScheduled(env:Bindings) {
     const reception=async()=>{try{await deliverInboundEvents(env);}finally{await dispatchAiReceptions(env);}};
     // One-time startup bootstrap starts the initial full read; after that, Ozon data is webhook-only.
     const bootstrap=async()=>{try{await runStartupBootstrap(env);}catch{/* The durable marker retries on the next tick. */}};
-    await Promise.allSettled([bootstrap(),reception(),repairControls(env),repairAiExecutions(env),reconcileBudgetLedgers(env)]);
+    await Promise.allSettled([bootstrap(),reception(),wakePollingStores(env),repairControls(env),repairAiExecutions(env),reconcileBudgetLedgers(env)]);
 }

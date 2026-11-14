@@ -1,11 +1,55 @@
 import { spawn } from 'node:child_process';
-import { readFile, readdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { dirname, relative, resolve } from 'node:path';
 import { retiringTables, retirementArchivePlan, assertRetirementArchives, assertRetirementInventory } from '../src/platform/database/retirement.ts';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..');
 export type DeployOptions = { config: string; dryRun: boolean; secretsFile?: string; archiveRetired?: boolean };
+
+// Inputs bundled into the Worker or copied into dist. Tests, docs, migrations and
+// other platform adapters do not change the uploaded artifact, so they stay out.
+const buildInputs = ['src', 'packages/agent-runtime', 'deploy/cloudflare', 'public',
+  'vite.config.ts', 'index.html', 'tsconfig.json', 'package.json', 'package-lock.json',
+  'wrangler.jsonc', 'wrangler.production.jsonc'] as const;
+const ignoredDirectories = new Set(['node_modules', 'dist', '.wrangler', 'test-results', '.git']);
+const ignoredFile = /(^|\/)(\.DS_Store|[^/]+\.test\.[cm]?[jt]sx?)$/;
+
+async function newestBuildInput(root: string, inputs: readonly string[]): Promise<{ path: string; mtimeMs: number } | null> {
+  let newest: { path: string; mtimeMs: number } | null = null;
+  const keep = (path: string, mtimeMs: number) => { if (!newest || mtimeMs > newest.mtimeMs) newest = { path, mtimeMs }; };
+  const visit = async (path: string) => {
+    const entries = await readdir(path, { withFileTypes: true }).catch(() => null);
+    for (const entry of entries ?? []) {
+      const child = resolve(path, entry.name);
+      if (entry.isDirectory()) { if (!ignoredDirectories.has(entry.name)) await visit(child); continue; }
+      if (!entry.isFile() || ignoredFile.test(entry.name)) continue;
+      const info = await stat(child).catch(() => null);
+      if (info) keep(child, info.mtimeMs);
+    }
+  };
+  for (const input of inputs) {
+    const path = resolve(root, input), info = await stat(path).catch(() => null);
+    if (!info) continue;
+    if (info.isDirectory()) await visit(path);
+    else if (info.isFile() && !ignoredFile.test(input)) keep(path, info.mtimeMs);
+  }
+  return newest;
+}
+
+/** Refuses to upload a stale build: an edited source file is newer than the worker entry. */
+export async function assertBuildFresh(options: { root: string; configPath: string; config: unknown }): Promise<void> {
+  const config = options.config;
+  if (!config || typeof config !== 'object' || !('main' in config)
+    || typeof config.main !== 'string' || !config.main) return;
+  const artifact = resolve(dirname(options.configPath), config.main);
+  const built = await stat(artifact).catch(() => null);
+  if (!built?.isFile()) throw new Error('The built worker entry is missing. Run npm run build before deploying. No remote command was run.');
+  const newest = await newestBuildInput(options.root, buildInputs);
+  if (!newest || newest.mtimeMs <= built.mtimeMs) return;
+  const path = relative(options.root, newest.path) || newest.path;
+  throw new Error(`Source ${path} is newer than the build. Run npm run build before deploying. No remote command was run.`);
+}
 
 export function deployArguments(options: DeployOptions, config: unknown): string[][] {
   if (!config || typeof config !== 'object' || !('name' in config)
@@ -86,6 +130,7 @@ async function archiveRetiredResources(options: DeployOptions, config: unknown) 
 }
 export async function deployCloudflare(options: DeployOptions): Promise<void> {
   const config = JSON.parse(await readFile(options.config, 'utf8')) as unknown;
+  await assertBuildFresh({ root, configPath: options.config, config });
   const commands = deployArguments(options, config);
   await legacyDrainCheck(options,config);
   await archiveRetiredResources(options,config);
