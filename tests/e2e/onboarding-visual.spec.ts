@@ -26,7 +26,7 @@ async function screenshot(page: Page, name: string) {
 test('team invitation form stays usable at 390px and mobile navigation closes after choosing a page', async ({ page, application }) => {
   await page.goto(`${application.baseURL}/login`);
   await page.getByLabel('邮箱', { exact: true }).fill('owner@example.invalid');
-  await page.getByLabel('密码', { exact: true }).fill(application.password).catch(() => { throw new Error('Synthetic password input failed'); });
+  await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码', { exact: true }).fill(application.password).catch(() => { throw new Error('Synthetic password input failed'); });
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByRole('button', { name: '测试公司 A', exact: true }).click();
   await page.getByRole('link', { name: '团队成员', exact: true }).click();

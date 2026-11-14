@@ -7,7 +7,7 @@ test('能力与数据总览列出部署开关、四类同步与接待准备，�
     await page.setViewportSize({width:1440,height:1000});
     await page.goto(`${app.baseURL}/login`);
     await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');
-    await page.getByLabel('密码',{exact:true}).fill(app.password);
+    await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码',{exact:true}).fill(app.password);
     await page.getByRole('button',{name:'登录',exact:true}).click();
     await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
     const api=`${app.baseURL}/api/companies/company-a`,headers={origin:app.baseURL,'X-DingBell-Member-Id':'owner-a'};

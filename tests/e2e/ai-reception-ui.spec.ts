@@ -5,7 +5,7 @@ const aiConfiguration=JSON.stringify({maxGenerations:2,model:{provider:'nvidia',
 async function setup(page:Page){
  const app=await startLocalApplication(true,{mail:true,team:'roles',stores:'configured',control:true,replies:true,aiReception:true,aiConfiguration});
  try{
-  await page.goto(`${app.baseURL}/login`);await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
+  await page.goto(`${app.baseURL}/login`);await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
   const api=`${app.baseURL}/api/companies/company-a`,headers={origin:app.baseURL,'X-DingBell-Member-Id':'owner-a'};
   const post=async(path:string,data:unknown)=>{const response=await page.request.post(`${api}${path}`,{headers,data});expect(response.status(),await response.text()).toBe(200);return await response.json();};
   const storeId=crypto.randomUUID();await post('/stores',{id:storeId,name:'AI 托管测试店',clientId:'910001',apiKey:crypto.randomUUID()});await post(`/stores/${storeId}/check`,{expectedRevision:1});

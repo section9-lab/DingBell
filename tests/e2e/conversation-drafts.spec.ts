@@ -8,7 +8,7 @@ const test = base.extend<{ application: Application }>({ application: async ({},
 } });
 async function login(page: Page, app: Application, actor = 'owner') {
   await page.goto(`${app.baseURL}/login`); await page.getByLabel('邮箱', { exact: true }).fill(`${actor}@example.invalid`);
-  await page.getByLabel('密码', { exact: true }).fill(app.password); await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码', { exact: true }).fill(app.password); await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByRole('button', { name: '测试公司 A', exact: true }).click();
 }
 const url = (app: Application, store: string, conversation: string) => `${app.baseURL}/workspace/messages?${new URLSearchParams({ store, conversation })}`;

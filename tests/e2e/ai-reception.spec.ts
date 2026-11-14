@@ -9,7 +9,7 @@ const aiConfiguration=JSON.stringify({maxGenerations:2,model:{provider:'nvidia',
 test('authenticated Worker HTTP resumes only waiting and retains original receipts after takeover',async({page})=>{
  const app=await startLocalApplication(true,{mail:true,team:'roles',stores:'configured',control:true,aiReception:true,aiConfiguration});
  try{
-  await page.goto(`${app.baseURL}/login`);await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();
+  await page.goto(`${app.baseURL}/login`);await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();
   await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
   const base=`${app.baseURL}/api/companies/company-a`,headers={origin:app.baseURL,'X-DingBell-Member-Id':'owner-a'};
   const post=async(path:string,data:unknown)=>{const response=await page.request.post(`${base}${path}`,{headers,data});expect(response.status(),await response.text()).toBe(200);return await response.json();};

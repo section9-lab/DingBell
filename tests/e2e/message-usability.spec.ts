@@ -12,7 +12,7 @@ async function setup(page: Page, app: Application, longName = false) {
   if (longName) await app.renameFixtureMember('客服负责人'.repeat(20), 'owner');
   await page.goto(`${app.baseURL}/login`);
   await page.getByLabel('邮箱', { exact: true }).fill('owner@example.invalid');
-  await page.getByLabel('密码', { exact: true }).fill(app.password);
+  await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码', { exact: true }).fill(app.password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByRole('button', { name: '测试公司 A', exact: true }).click();
   const storeId = crypto.randomUUID();

@@ -3,7 +3,7 @@ import { startLocalApplication } from '../fixtures/web-identity/local-app.ts';
 type Application=Awaited<ReturnType<typeof startLocalApplication>>;
 const test=base.extend<{application:Application}>({application:async({},use)=>{const app=await startLocalApplication(true,{mail:true,team:'roles'});try{await use(app);}finally{await app.close();}}});
 async function login(page:Page,app:Application,email='owner@example.invalid'){
-  await page.goto(`${app.baseURL}/login`);await page.getByLabel('邮箱',{exact:true}).fill(email);await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();
+  await page.goto(`${app.baseURL}/login`);await page.getByLabel('邮箱',{exact:true}).fill(email);await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();
   await page.getByRole('button',{name:'测试公司 A',exact:true}).click();await page.getByRole('link',{name:'公司设置',exact:true}).click();
 }
 async function draft(page:Page){await page.getByRole('tab',{name:'策略测试',exact:true}).click();await page.getByRole('button',{name:'新建测试预算',exact:true}).click();const dialog=page.getByRole('dialog',{name:'新建测试预算',exact:true});

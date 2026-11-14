@@ -8,7 +8,7 @@ const test=base.extend<{application:Application}>({application:async({},use)=>{
 }});
 async function login(page:Page,app:Application,email='owner@example.invalid') {
   await page.goto(`${app.baseURL}/login`); await page.getByLabel('邮箱',{exact:true}).fill(email);
-  await page.getByLabel('密码',{exact:true}).fill(app.password); await page.getByRole('button',{name:'登录',exact:true}).click();
+  await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码',{exact:true}).fill(app.password); await page.getByRole('button',{name:'登录',exact:true}).click();
   await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
 }
 const api=(app:Application)=>`${app.baseURL}/api/companies/company-a/settings`;

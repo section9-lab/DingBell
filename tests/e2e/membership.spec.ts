@@ -14,7 +14,7 @@ const test = base.extend<{ application: Application }>({
 async function signIn(page: Page, application: Application, actor: 'owner' | 'admin' | 'member', team = true) {
   await page.goto(`${application.baseURL}/login`);
   await page.getByLabel('邮箱', { exact: true }).fill(`${actor}@example.invalid`);
-  await page.getByLabel('密码', { exact: true }).fill(application.password).catch(() => { throw new Error('Synthetic password input failed'); });
+  await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:1500}).catch(()=>{});await page.getByLabel('密码', { exact: true }).fill(application.password).catch(() => { throw new Error('Synthetic password input failed'); });
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByRole('button', { name: '测试公司 A', exact: true }).click();
   await expect(page.getByRole('heading', { name: '公司工作区', exact: true })).toBeVisible();
