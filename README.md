@@ -41,7 +41,7 @@ The standalone build includes its dependencies; the deployed server does not nee
 
 ## Cloud deployments
 
-Cloudflare uses `npm run build` and `npm run deploy:cloudflare`. Provision a D1 database, replace the local-only database placeholder, configure installation secrets, then deploy. The deployment command verifies legacy drain and archives retiring tables before applying migrations and uploading. Existing historical data requires the explicit `--archive-retired` option after backup and quiescence; do not bypass this helper with direct migrations. `--dry-run` never queries or changes remote data.
+Cloudflare uses `npm run build` and `npm run deploy:cloudflare`. Provision a D1 database, replace the local-only database placeholder, configure installation secrets, then deploy. The deployment command verifies legacy drain and archives retiring tables before applying migrations and uploading. It also refuses to deploy when a bundled source file is newer than the build, so run `npm run build` after every change. Existing historical data requires the explicit `--archive-retired` option after backup and quiescence; do not bypass this helper with direct migrations. `--dry-run` never queries or changes remote data.
 
 Vercel uses the checked-in [vercel.json](vercel.json) and `npm run build:vercel`. Configure installation secrets plus `DINGBELL_GATEWAY_SECRET`; the adapter creates its own Drive and private business Sandbox. Native queues handle maintenance when no browser is connected. The Drive allows a single writer; this profile is a persistent Node backend and incurs Sandbox/Drive/queue usage. Preview deployments do not own the production business backend.
 
