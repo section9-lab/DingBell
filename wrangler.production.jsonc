@@ -5,8 +5,10 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "OUTBOUND_ENABLED": "false",
-    "AI_OUTBOUND_ENABLED": "false"
+    // 这是本仓库的唯一生产部署配置（含真实 D1 ID）：对外发送与 AI 自动外发在此开启。
+    // 本地默认 wrangler.jsonc 仍然保持 false，发布检查与本地 demo 不受影响。
+    "OUTBOUND_ENABLED": "true",
+    "AI_OUTBOUND_ENABLED": "true"
   },
   "durable_objects": {
     "bindings": [
