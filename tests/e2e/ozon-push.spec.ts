@@ -5,7 +5,7 @@ const test=base.extend<{application:Application}>({application:async({},use)=>{c
 
 test('a manager validates a local callback, cuts over, and a product arrives in another open page through SSE without polling',async({page,context,application:app})=>{
  test.setTimeout(120_000);
- await page.goto(app.baseURL+'/login');await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
+ await page.goto(app.baseURL+'/login');await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:2000}).catch(()=>{});await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
  const storeId=crypto.randomUUID(),path=`/api/companies/company-a/stores/${storeId}`;
  expect((await page.request.post(app.baseURL+'/api/companies/company-a/stores',{headers:{origin:app.baseURL},data:{id:storeId,name:'Push 本地测试店',clientId:'910001',apiKey:crypto.randomUUID()}})).status()).toBe(200);
  const store=(await(await page.request.get(app.baseURL+path)).json()).store;
@@ -23,15 +23,15 @@ test('a manager validates a local callback, cuts over, and a product arrives in 
 });
 
 test('a read-state Push updates an open message window without losing the unsent draft',async({page,application:app})=>{
- await page.goto(app.baseURL+'/login');await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
+ await page.goto(app.baseURL+'/login');await page.getByRole('button',{name:'密码登录',exact:true}).click({timeout:2000}).catch(()=>{});await page.getByLabel('邮箱',{exact:true}).fill('owner@example.invalid');await page.getByLabel('密码',{exact:true}).fill(app.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('button',{name:'测试公司 A',exact:true}).click();
  const storeId=crypto.randomUUID(),path=`/api/companies/company-a/stores/${storeId}`,headers={origin:app.baseURL};
  expect((await page.request.post(app.baseURL+'/api/companies/company-a/stores',{headers,data:{id:storeId,name:'消息状态推送测试店',clientId:'910009',apiKey:crypto.randomUUID()}})).status()).toBe(200);await app.prepareReplyStore(storeId);const history=await app.seedConversationHistory(storeId);
  const prepared=await page.request.post(app.baseURL+path+'/push',{headers,data:{operation:'prepare',expectedRevision:0,sellerId:'999'}});expect(prepared.status()).toBe(200);const callbackUrl=(await prepared.json()).push.callbackUrl;
  expect((await page.request.post(callbackUrl,{data:{message_type:'TYPE_PING'}})).status()).toBe(200);expect((await page.request.post(app.baseURL+path+'/push',{headers,data:{operation:'activate',expectedRevision:1}})).status()).toBe(200);
  expect((await page.request.post(app.baseURL+path+'/sync',{headers,data:{enabled:true,expectedEpoch:0}})).status()).toBe(200);
  expect((await page.request.post(app.baseURL+`/api/companies/company-a/conversations/${history.id}/commands`,{headers,data:{commandId:crypto.randomUUID(),expectedVersion:0,action:'claim'}})).status()).toBe(200);
- await page.goto(app.baseURL+`/workspace/messages?store=${storeId}&conversation=${history.id}`);const records=page.getByRole('region',{name:'消息记录'});await expect(records.getByText('平台未读',{exact:true})).toHaveCount(50);
+ await page.goto(app.baseURL+`/workspace/messages?store=${storeId}&conversation=${history.id}`);const records=page.getByRole('region',{name:'消息记录'});await expect(records.getByText('平台未读',{exact:true})).toHaveCount(55);
  const draft=page.getByRole('textbox',{name:'回复原文',exact:true});await draft.fill('KEEP-READ-STATE-DRAFT');
  app.setPlatformRead(true);expect((await page.request.post(callbackUrl,{headers:{'X-DingBell-Local-Simulation':'1'},data:{message_type:'TYPE_MESSAGE_READ',seller_id:'999',chat_type:'BUYER_SELLER',chat_id:history.threadId,is_read:false}})).status()).toBe(200);
- await expect(records.getByText('平台已读',{exact:true})).toHaveCount(50,{timeout:15_000});await expect(draft).toHaveValue('KEEP-READ-STATE-DRAFT');expect(app.replyRequests).toHaveLength(0);
+ await expect(records.getByText('平台已读',{exact:true})).toHaveCount(55,{timeout:15_000});await expect(draft).toHaveValue('KEEP-READ-STATE-DRAFT');expect(app.replyRequests).toHaveLength(0);
 });

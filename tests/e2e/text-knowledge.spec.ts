@@ -8,6 +8,8 @@ const test = base.extend<{ application: Application }>({ application: async ({},
 } });
 async function login(page: Page, application: Application, email = 'owner@example.invalid') {
   await page.goto(application.baseURL + '/login');
+  // 邮件可用时登录页默认验证码登录；这批用例走密码登录。
+  await page.getByRole('button', { name: '密码登录', exact: true }).click({ timeout: 2_000 }).catch(() => {});
   await page.getByLabel('邮箱', { exact: true }).fill(email);
   await page.getByLabel('密码', { exact: true }).fill(application.password);
   await page.getByRole('button', { name: '登录', exact: true }).click();

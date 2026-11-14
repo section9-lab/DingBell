@@ -7,7 +7,10 @@ const test = base.extend<{ application: Application; indexing: boolean }>({ inde
   try { await use(app); } finally { await app.close(); }
 } });
 async function login(page: Page, app: Application, email = 'owner@example.invalid') {
-  await page.goto(`${app.baseURL}/login`); await page.getByLabel('邮箱', { exact: true }).fill(email);
+  await page.goto(`${app.baseURL}/login`);
+  // 邮件可用时登录页默认验证码登录；这批用例走密码登录。
+  await page.getByRole('button', { name: '密码登录', exact: true }).click({ timeout: 2_000 }).catch(() => {});
+  await page.getByLabel('邮箱', { exact: true }).fill(email);
   await page.getByLabel('密码', { exact: true }).fill(app.password); await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByRole('button', { name: '测试公司 A', exact: true }).click();
 }

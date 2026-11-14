@@ -3,7 +3,7 @@ import { startLocalApplication } from '../fixtures/web-identity/local-app.ts';
 
 type Application = Awaited<ReturnType<typeof startLocalApplication>>;
 const test = base.extend<{ application: Application }>({
-  application: async (_fixtures, use) => {
+  application: async ({}, use) => {
     const app = await startLocalApplication(true, {
       mail: true,
       team: 'roles',
@@ -46,7 +46,8 @@ async function store(page: Page, app: Application) {
 async function createPolicy(page: Page, name = '售前接待') {
   await page.getByRole('button', { name: '新建策略', exact: true }).click();
   const card = page.getByRole('dialog', { name: '新建策略', exact: true });
-  await expect(card.getByRole('heading', { name: '新建策略', exact: true })).not.toBeVisible();
+  // 卡片没有可见标题栏：标题只对屏幕阅读器可见（sr-only），对话框的可访问名仍是「新建策略」。
+  await expect(card).toHaveAccessibleName('新建策略');
   await expect(card.getByRole('button', { name: '取消', exact: true })).toBeVisible();
   await card.getByLabel('策略名称', { exact: true }).fill(name);
   await card
@@ -65,7 +66,8 @@ test('a single strategy list edits through one card and saves directly', async (
   await page.getByRole('link', { name: '回复策略', exact: true }).click();
   await expect(page.getByRole('tab')).toHaveCount(0);
   await expect(page.getByText('主动通知', { exact: true })).toHaveCount(0);
-  await expect(page.getByText('创建第一条回复策略', { exact: true })).toBeVisible();
+  await expect(page.getByText('还没有回复策略', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '套用 3 条预置策略', exact: true })).toBeVisible();
   await createPolicy(page);
   await expect(page.getByRole('table')).toContainText('已启用');
   await page.getByRole('button', { name: '编辑策略：售前接待', exact: true }).click();
@@ -185,11 +187,13 @@ test('store scope can be limited to selected stores', async ({ page, application
   const card = page.getByRole('dialog', { name: '新建策略', exact: true });
   const save = card.getByRole('button', { name: '保存', exact: true });
   await expect(card.getByRole('radio', { name: '全部店铺', exact: true })).toBeChecked();
+  await expect(save).toBeDisabled();
+  await card.getByLabel('策略名称', { exact: true }).fill('仅指定店铺');
+  await expect(save).toBeEnabled();
   await card.getByRole('radio', { name: '指定店铺', exact: true }).check();
   await expect(save).toBeDisabled();
   await card.getByRole('checkbox', { name: '策略验证店', exact: true }).check();
   await expect(save).toBeEnabled();
-  await card.getByLabel('策略名称', { exact: true }).fill('仅指定店铺');
   await save.click();
   await expect(card).toHaveCount(0);
   const list = (await (
@@ -218,7 +222,7 @@ test('members cannot configure policies and losing access closes the card', asyn
   await page.getByRole('button', { name: '编辑策略：售前接待', exact: true }).click();
   const selected = new URL(page.url()).searchParams.get('policy');
   expect(selected).toBeTruthy();
-  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', { name: '编辑策略', exact: true }).getByRole('button', { name: '取消', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '编辑策略', exact: true })).toHaveCount(0);
   const member = await context.browser()!.newContext(),
     staff = await member.newPage();
