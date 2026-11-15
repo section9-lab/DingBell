@@ -6,13 +6,15 @@ import { encryptCredentials } from '../src/modules/stores/credentials.ts';
 import { applyMigrations } from './fixtures/migrations.ts';
 import { checkCursorProgress, historyCheckpoint, historyDueIn, retrySyncFailure, runSyncPage } from '../src/modules/sync/runner.ts';
 
-import { discoveryInterval } from '../src/modules/sync/runner.ts';
-test('discovery cadence respects the deployment override within safe bounds', () => {
-  assert.equal(discoveryInterval({}), 300_000, 'free-tier default is five minutes');
-  assert.equal(discoveryInterval({ SYNC_DISCOVERY_INTERVAL_MS: '600000' }), 600_000);
-  assert.equal(discoveryInterval({ SYNC_DISCOVERY_INTERVAL_MS: '1' }), 60_000, 'never faster than a minute');
+import { discoveryInterval, pollingEnabled } from '../src/modules/sync/runner.ts';
+test('timer discovery stays off unless the deployment opts in within safe bounds', () => {
+  assert.equal(pollingEnabled({}), false, 'webhook-only by default');
+  assert.equal(discoveryInterval({}), 86_400_000, 'a disabled discovery cursor is parked, never due');
+  assert.equal(pollingEnabled({ SYNC_DISCOVERY_INTERVAL_MS: '0' }), false);
+  assert.equal(pollingEnabled({ SYNC_DISCOVERY_INTERVAL_MS: '59999' }), false, 'faster than a minute is not a cadence');
+  assert.equal(pollingEnabled({ SYNC_DISCOVERY_INTERVAL_MS: 'not-a-number' }), false);
+  assert.equal(discoveryInterval({ SYNC_DISCOVERY_INTERVAL_MS: '900000' }), 900_000);
   assert.equal(discoveryInterval({ SYNC_DISCOVERY_INTERVAL_MS: '99999999' }), 3_600_000, 'never slower than an hour');
-  assert.equal(discoveryInterval({ SYNC_DISCOVERY_INTERVAL_MS: 'not-a-number' }), 300_000);
 });
 
 test('history cadence keeps unread chats warm and idle chats cheap', () => {

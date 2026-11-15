@@ -9,9 +9,11 @@
     // 本地默认 wrangler.jsonc 仍然保持 false，发布检查与本地 demo 不受影响。
     "OUTBOUND_ENABLED": "true",
     "AI_OUTBOUND_ENABLED": "true",
-    // Discovery walks every buyer chat, so the free D1 tier cannot afford one minute.
-    // Configure Ozon Push for real-time delivery, or raise this once D1 is on a paid plan.
-    "SYNC_DISCOVERY_INTERVAL_MS": "300000"
+    // Timer discovery is off: one pass re-reads every buyer chat (this store has 132), which
+    // exhausted the free D1 daily row-read limit even at five minutes.
+    // Configure Ozon Push on the store page for real-time delivery, or set this to e.g. "900000"
+    // once D1 is on a paid plan. Omitted = webhook-only.
+    "SYNC_DISCOVERY_INTERVAL_MS": "0"
   },
   "durable_objects": {
     "bindings": [

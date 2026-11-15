@@ -10,6 +10,7 @@ import {reconcileBudgetLedgers} from './modules/budget-audit/reconciliation.ts';
 import {runStartupBootstrap} from './modules/sync/bootstrap.ts';
 import {listStoresAwaitingDiscovery} from './modules/sync/storage.ts';
 import {wakeStoreSync} from './modules/sync/bindings.ts';
+import {pollingEnabled} from './modules/sync/runner.ts';
 
 
 type Bindings=SyncBindings&ControlBindings&SupportBindings;
@@ -27,7 +28,7 @@ async function repairOne(env:Bindings,scope:ControlScope) {
  * here and the coordinator also refuses to poll once an endpoint cuts over.
  */
 async function wakePollingStores(env:Bindings) {
-  if(!env.DB||!env.STORE_COORDINATOR)return;
+  if(!env.DB||!env.STORE_COORDINATOR||!pollingEnabled(env))return;
   const stores=(await listStoresAwaitingDiscovery(env.DB,50)).results;
   for(let index=0;index<stores.length;index+=5)
     await Promise.allSettled(stores.slice(index,index+5).map(scope=>wakeStoreSync(env,scope)));

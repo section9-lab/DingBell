@@ -16,13 +16,19 @@ import { isBuyerChatType, messageDirection } from '../ozon/chat-type.ts';
 // Preserve the existing public entry points for callers and tests.
 export { historyDueIn, retrySyncFailure } from './policy.ts';
 
-/**
- * One discovery pass touches every buyer chat in the store, so a free D1 plan cannot afford the
- * historical one-minute cadence. Clamp the deployment override to 1 minute .. 1 hour.
- */
-export function discoveryInterval(env: Pick<SyncBindings,'SYNC_DISCOVERY_INTERVAL_MS'>): number {
+/** Timer discovery is opt-in: one pass re-reads every buyer chat in the store. */
+export function pollingEnabled(env: Pick<SyncBindings,'SYNC_DISCOVERY_INTERVAL_MS'>): boolean {
   const configured = Number(env.SYNC_DISCOVERY_INTERVAL_MS);
-  return Number.isFinite(configured) && configured > 0 ? Math.min(3_600_000, Math.max(60_000, configured)) : 300_000;
+  return Number.isFinite(configured) && configured >= 60_000;
+}
+
+/**
+ * Clamp the deployment cadence to 1 minute .. 1 hour. When timer discovery is off the cursor is
+ * parked a day out instead of becoming due immediately, so nothing re-reads the chat list.
+ */
+export const DISCOVERY_DISABLED_MS = 86_400_000;
+export function discoveryInterval(env: Pick<SyncBindings,'SYNC_DISCOVERY_INTERVAL_MS'>): number {
+  return pollingEnabled(env) ? Math.min(3_600_000, Number(env.SYNC_DISCOVERY_INTERVAL_MS)) : DISCOVERY_DISABLED_MS;
 }
 
 export function checkCursorProgress(previous: string | null, next: string | null, recent: string[], hasNext: boolean): void {

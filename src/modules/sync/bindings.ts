@@ -6,7 +6,8 @@ import type { SyncScope } from './types.ts';
 export type SyncBucket = 'chat-list' | 'chat-history' | 'product-list' | 'product-details' | 'fbs-list' | 'fbs-detail' | 'fbo-list' | 'fbo-detail' | 'fbp-list' | 'fbp-detail' | 'chat-send';
 export interface SyncBindings extends CredentialBindings {
   OZON_PUSH_PUBLIC_BASE_URL?: string;
-  /** Discovery cadence for stores without a Push cutover. D1 free tiers cannot afford one minute. */
+  /** Timer discovery for stores without a Push cutover. Unset means webhook-only (the default).
+   *  Set a cadence in ms (>= 60000) only when the D1 plan can pay for a full chat sweep. */
   SYNC_DISCOVERY_INTERVAL_MS?: string;
   DB?: D1Database;
   STORE_COORDINATOR?: DurableObjectNamespace<StoreCoordinator>;
