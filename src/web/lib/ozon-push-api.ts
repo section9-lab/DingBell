@@ -5,6 +5,11 @@ const path=(companyId:string,storeId:string)=>`/api/companies/${encodeURICompone
 const receipt=(storeId:string)=>v.object({push:v.pipe(pushViewSchema,v.check(value=>value.storeId===storeId))});
 export function readPush(companyId:string,storeId:string,signal?:AbortSignal){return request(path(companyId,storeId),receipt(storeId),{signal});}
 export function changePush(companyId:string,storeId:string,command:PushCommand){return request(path(companyId,storeId),receipt(storeId),{method:'POST',body:JSON.stringify(command)});}
+const registration=v.object({registered:v.boolean(),updated:v.boolean(),isActive:v.boolean(),errors:v.array(v.string())});
+/** Registers the callback URL with the Ozon seller account and asks Ozon to verify it. */
+export function registerPush(companyId:string,storeId:string,expectedRevision:number){
+ return request(`${path(companyId,storeId)}/register`,v.object({push:receipt(storeId),registration}),{method:'POST',body:JSON.stringify({expectedRevision})});
+}
 /** Exercise the real receiver, locally and anonymously. The simulation flag can only suppress automation. */
 export async function simulatePush(callbackUrl:string,body:string){
  const url=new URL(callbackUrl);if(!/^\/api\/ozon\/push\/[a-f0-9-]{36}\/[A-Za-z0-9_-]{43}$/.test(url.pathname)||url.search||url.hash)throw new ApiError('INVALID_RESPONSE');

@@ -4,6 +4,9 @@ import {apiError,jsonResponse,type ApplicationEnv} from '../../http.ts';
 import {pushCommandSchema} from '../../shared/ozon-push.ts';
 import {configured,signedIn,limitedBody,companyFor} from '../identity/http.ts';
 import {findStore,type StoreActor} from '../stores/storage.ts';
+import {decryptCredentials} from '../stores/credentials.ts';
+import {registerOzonPushUrl} from '../ozon/notification.ts';
+import {OzonReadError} from '../ozon/read.ts';
 import {credentialConfig} from '../stores/credentials.ts';
 import {repairPushHistory,enqueueReconcile,retryPush,changePushMode,acceptPush,createEndpoint,endpointById,readEndpoint,pushView} from './storage.ts';
 import {normalizePush,parsePushJSON,pushDedupeKey,pushSeller,pushType} from './protocol.ts';
@@ -54,6 +57,35 @@ export function registerPushRoutes(app:Hono<ApplicationEnv>){
   if(view.revision!==expected||(await readEndpoint(db,scope))?.revision!==expected)return apiError(c,'OPERATION_UNCONFIRMED','Read Push status before another operation.',503);
   try{await db.prepare('INSERT INTO store_audit_event(id,request_id,organization_id,store_id,actor_user_id,action,outcome,from_revision,to_revision,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),c.get('requestId'),who.orgId,storeId,who.actorUserId,`store.push.${command.operation}`,'succeeded',command.expectedRevision,view.revision,Date.now()).run();}catch{return apiError(c,'OPERATION_UNCONFIRMED','Read Push status before trying another operation.',503);}
   return jsonResponse(c,{push:{...view,...(callbackUrl?{callbackUrl}:{})}});
+ });
+ const registerSchema=v.strictObject({expectedRevision:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1))});
+ /** Registers this store's callback with Ozon (Notification beta) and asks Ozon to verify it. */
+ app.post(`${base}/register`,configured,limitedBody,signedIn,async c=>{
+  const who=actor(c),storeId=c.req.param('storeId')!,company=await companyFor(c,who.orgId,who.actorUserId);if(!company)return notFound(c);
+  if(company.role!=='owner'&&company.role!=='admin')return apiError(c,'FORBIDDEN','Only managers may configure Push.',403);
+  const parsed=v.safeParse(registerSchema,await c.req.json().catch(()=>null));if(!parsed.success)return apiError(c,'INVALID_REQUEST','Provide the displayed Push revision.',400);
+  const db=c.env.DB!,store=await findStore(db,who,storeId,true);if(!store)return notFound(c);
+  if(!credentialConfig(c.env))return apiError(c,'CREDENTIALS_NOT_CONFIGURED','Configure credential encryption first.',503);
+  if(!store.credentialKeyVersion||!store.credentialNonce||!store.credentialCiphertext)return apiError(c,'CREDENTIALS_NOT_CONFIGURED','Store credentials are unavailable; check the store first.',503);
+  const scope={orgId:who.orgId,storeId},current=await readEndpoint(db,scope);
+  if(!current)return apiError(c,'INVALID_REQUEST','Prepare a callback address first.',400);
+  if(current.revision!==parsed.output.expectedRevision)return conflict(c);
+  let url:string,apiKey:string;
+  try{
+   url=pushCallbackUrl(c.env.OZON_PUSH_PUBLIC_BASE_URL??c.env.APP_BASE_URL,current.endpointId,await openPushSecret(c.env,current));
+   apiKey=(await decryptCredentials(c.env,{orgId:who.orgId,storeId,platformStoreId:store.platformStoreId,credentialVersion:store.credentialVersion},
+     {keyVersion:store.credentialKeyVersion,nonce:store.credentialNonce,ciphertext:store.credentialCiphertext})).apiKey;
+  }catch{return apiError(c,'PUSH_SECRET_UNAVAILABLE','Restore the original encryption key, or regenerate the callback address.',503);}
+  try{
+   const registration=await registerOzonPushUrl({clientId:store.platformStoreId,apiKey},url,fetch);
+   try{await db.prepare('INSERT INTO store_audit_event(id,request_id,organization_id,store_id,actor_user_id,action,outcome,from_revision,to_revision,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+     .bind(crypto.randomUUID(),c.get('requestId'),who.orgId,storeId,who.actorUserId,'store.push.register','succeeded',current.revision,current.revision,Date.now()).run();}catch{/* the Ozon subscription already exists; audit is best effort */ }
+   const view=await pushView(db,scope,localPushMode(c.env.APP_BASE_URL));
+   return jsonResponse(c,{push:{...view,callbackUrl:url},registration});
+  }catch(error){
+   if(error instanceof OzonReadError)return apiError(c,{invalid_credentials:'OZON_INVALID_CREDENTIALS',permission_denied:'OZON_PERMISSION_DENIED',rate_limited:'OZON_RATE_LIMITED',invalid_response:'OZON_INVALID_RESPONSE',timed_out:'OZON_TIMEOUT',network_error:'OZON_NETWORK_ERROR',aborted:'OZON_ABORTED',redirect_refused:'OZON_REDIRECT_REFUSED',provider_unavailable:'OZON_UNAVAILABLE',invalid_request:'INVALID_REQUEST'}[error.code],'Ozon refused the Push registration.',409);
+   throw error;
+  }
  });
  app.post('/api/ozon/push/:endpointId/:token',async c=>{
   if(!c.env.DB)return notFound(c);
