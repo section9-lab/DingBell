@@ -45,6 +45,19 @@ test('automatic dispatch classifies once and advances the persisted answer targe
  }};
  await m.dispatchAiReceptions(f.env(),deps);assert.equal(calls.length,2);assert.notEqual(calls[0],calls[1]);assert.equal((await f.call('read')).body.view.state.reception,'paused');await m.dispatchAiReceptions(f.env(),deps);assert.equal(calls.length,2);assert.equal((await m.claimAiDispatches(f.db,Date.now()+60001)).length,0);
 });
+test('one dispatch window covers both model calls instead of cutting at three seconds',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);await f.append();const calls:string[]=[];
+ const deps={reconcile:async()=>({status:'unavailable'}),execute:async(_env:any,scope:any,runId:string)=>{
+  calls.push(runId);
+  const run=(await f.call('ai-work-read',{runId},scope)).body;
+  if(run?.schemaVersion===2){await new Promise(done=>setTimeout(done,3200));assert.equal((await f.call('ai-classify',{runId,classification:{stage:'presale',language:'ru',customerRequestedHuman:false}},scope)).body.outcome,'accepted');}
+  else assert.equal((await f.call('ai-handoff',{runId,input:{reason:'missing_evidence',summary:'Synthetic missing evidence',neededInformation:[]}},scope)).body.outcome,'accepted');
+  return {status:'completed'};
+ }};
+ await m.dispatchAiReceptions(f.env(),deps,undefined,10_000);
+ assert.equal(calls.length,2,'a slow classification must not abandon the answer in the same window');
+ assert.equal(await f.db.prepare('SELECT due_at FROM ai_dispatch').first('due_at'),null,'the dispatch finished instead of retrying');
+});
 test('configuration or budget refusal returns to the human queue without replaying an admitted run',{timeout:30000},async t=>{
  const m=await api(),f=await fixture();t.after(f.close);const input=await f.append();let calls=0;
  await m.dispatchAiReceptions(f.env(),{reconcile:async()=>({status:'unavailable'}),execute:async()=>{calls++;return {status:'unavailable'};}});assert.equal(calls,1);

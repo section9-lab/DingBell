@@ -51,11 +51,20 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
  if(result.status==='pending'||result.status==='unconfirmed')return false;
  return stop(result.status==='unavailable'?'unavailable':'runtime_failure');
 }
-export async function dispatchAiReceptions(env:SupportBindings,deps:Dependencies={},scopeFilter?:SyncScope){
+/** One tick may finish classification and the answer together; a fixed 3s cut both model calls off. */
+export const DISPATCH_WINDOW_MS = 20_000;
+export async function dispatchAiReceptions(env:SupportBindings,deps:Dependencies={},scopeFilter?:SyncScope,windowMs=DISPATCH_WINDOW_MS){
  if(!env.DB||!env.CONVERSATION_CONTROLLER)return;const claims=await claimAiDispatches(env.DB,Date.now(),50,scopeFilter);
- for(let offset=0;offset<claims.length;offset+=5)await Promise.allSettled(claims.slice(offset,offset+5).map(async claim=>{
-  let timer:ReturnType<typeof setTimeout>|undefined;
-  try{await Promise.race([(async()=>{const done=await dispatchOne(env,claim,deps);await finishAiDispatch(env.DB!,claim,done,Date.now());})(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('AI_DISPATCH_TIMEOUT')),3000);})]);}
-  finally{clearTimeout(timer);}
- }));
+ // A timed-out dispatch keeps running; the next tick resumes from its persisted receipt instead of
+ // repeating the model call, so this window only decides how much completes inside one tick.
+ const deadline=Date.now()+windowMs;
+ for(let offset=0;offset<claims.length;offset+=5){
+  if(Date.now()>=deadline)break;
+  await Promise.allSettled(claims.slice(offset,offset+5).map(async claim=>{
+   const remaining=deadline-Date.now();if(remaining<=0)return;
+   let timer:ReturnType<typeof setTimeout>|undefined;
+   try{await Promise.race([(async()=>{const done=await dispatchOne(env,claim,deps);await finishAiDispatch(env.DB!,claim,done,Date.now());})(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('AI_DISPATCH_TIMEOUT')),remaining);})]);}
+   finally{clearTimeout(timer);}
+  }));
+ }
 }
