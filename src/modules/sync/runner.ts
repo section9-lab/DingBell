@@ -16,6 +16,15 @@ import { isBuyerChatType, messageDirection } from '../ozon/chat-type.ts';
 // Preserve the existing public entry points for callers and tests.
 export { historyDueIn, retrySyncFailure } from './policy.ts';
 
+/**
+ * One discovery pass touches every buyer chat in the store, so a free D1 plan cannot afford the
+ * historical one-minute cadence. Clamp the deployment override to 1 minute .. 1 hour.
+ */
+export function discoveryInterval(env: Pick<SyncBindings,'SYNC_DISCOVERY_INTERVAL_MS'>): number {
+  const configured = Number(env.SYNC_DISCOVERY_INTERVAL_MS);
+  return Number.isFinite(configured) && configured > 0 ? Math.min(3_600_000, Math.max(60_000, configured)) : 300_000;
+}
+
 export function checkCursorProgress(previous: string | null, next: string | null, recent: string[], hasNext: boolean): void {
   if (hasNext && (next === null || next === previous) || next !== null && next !== previous && recent.includes(next)) throw new Error('cursor_stalled');
 }
@@ -107,12 +116,12 @@ export async function runSyncPage(env: SyncBindings & { DB: D1Database }, scope:
         return validCursor(chat.lastMessageId) ? chat.lastMessageId : null;
       };
       await commitSyncPage(env.DB, lease, {
-        cursor, nextCursor: page.cursor, nextDueAt: now() + (page.hasNext ? 10_000 : 60_000), completed: false, continuing: page.hasNext,
+        cursor, nextCursor: page.cursor, nextDueAt: now() + (page.hasNext ? 10_000 : discoveryInterval(env)), completed: false, continuing: page.hasNext,
         chats: chats.map(chat => ({ platformThreadId: chat.id, type: chat.type, status: chat.status, createdAt: Date.parse(chat.createdAt), lastMessageId: chat.lastMessageId,
           firstUnreadMessageId: chat.firstUnreadMessageId, unreadCount: chat.unreadCount })),
         seeds: chats.flatMap(chat => [
           { threadId: chat.id, stream: 'backfill' as const, cursor: null, dueAt: now() },
-          { threadId: chat.id, stream: 'incremental' as const, cursor: incrementalCursor(chat), dueAt: now() + 60_000 },
+          { threadId: chat.id, stream: 'incremental' as const, cursor: incrementalCursor(chat), dueAt: now() + discoveryInterval(env) },
         ]),
       });
     } else {

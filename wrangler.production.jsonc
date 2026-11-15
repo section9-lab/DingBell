@@ -8,7 +8,10 @@
     // 这是本仓库的唯一生产部署配置（含真实 D1 ID）：对外发送与 AI 自动外发在此开启。
     // 本地默认 wrangler.jsonc 仍然保持 false，发布检查与本地 demo 不受影响。
     "OUTBOUND_ENABLED": "true",
-    "AI_OUTBOUND_ENABLED": "true"
+    "AI_OUTBOUND_ENABLED": "true",
+    // Discovery walks every buyer chat, so the free D1 tier cannot afford one minute.
+    // Configure Ozon Push for real-time delivery, or raise this once D1 is on a paid plan.
+    "SYNC_DISCOVERY_INTERVAL_MS": "300000"
   },
   "durable_objects": {
     "bindings": [
