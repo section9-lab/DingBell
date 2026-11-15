@@ -22,7 +22,7 @@ test('message synchronization persists its company-scoped entities and checkpoin
 
 import { Miniflare } from 'miniflare';
 import { applyMigrations } from './fixtures/migrations.ts';
-import { listStoresAwaitingDiscovery, getSyncSource, setSyncSourceEnabled, getStoreCoordinatorRuntime, releaseSyncLease, prepareSyncPageGate, syncPageCondition, prepareSyncPageFinish, claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getStoreSync, getSyncRuntime, setStoreSyncEnabled } from '../src/modules/sync/storage.ts';
+import { listStoresAwaitingDiscovery, getSyncSource, setSyncSourceEnabled, getStoreCoordinatorRuntime, releaseSyncLease, prepareSyncPageGate, syncPageCondition, prepareSyncPageFinish, claimSyncLease, commitSyncPage, finishSyncFailure, getDueSyncCursor, getStoreSync, getSyncRuntime, setStoreSyncEnabled, syncCursorSeedInsert } from '../src/modules/sync/storage.ts';
 import type { NormalizedMessage, SyncLease } from '../src/modules/sync/types.ts';
 
 test('real D1 synchronization commits an immutable page and its checkpoint under live fences', { timeout: 60_000 }, async context => {
@@ -391,6 +391,17 @@ test('outbound echoes merge with the platform copy instead of duplicating messag
     assert.ok(await commitSyncPage(db, claimed, { cursor, nextCursor: '901', nextDueAt: 1, completed: false, messages: [outbound] }));
   }
   assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM message WHERE store_id='echo'").first('n'), 2);
+});
+
+test('sync cursor seeding keeps json_each as the outer loop', () => {
+  const db = fixture();
+  try {
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${syncCursorSeedInsert('1')}`)
+      .all('org', 'store', '[]', 'store', 'org').map(row => String(row.detail));
+    assert.ok(plan.some(detail => detail.includes('SCAN item VIRTUAL TABLE')), plan.join('\n'));
+    assert.ok(plan.some(detail => detail.includes('conversation_store_thread_idx (store_id=? AND organization_id=? AND platform_thread_id=?)')),
+      `one indexed conversation lookup per chat is required:\n${plan.join('\n')}`);
+  } finally { db.close(); }
 });
 
 test('sync commit indexes keep the message projection from scanning a whole store', () => {

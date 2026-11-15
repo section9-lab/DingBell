@@ -177,6 +177,19 @@ export async function getDueSyncCursor(db:D1Database,lease:SyncLease):Promise<Sy
   return row?{...row,completed:!!row.completed,recentCursors:JSON.parse(row.recentCursors) as string[]}:null;
 }
 
+/**
+ * json_each must stay the outer loop. With `conversation` first, SQLite re-scans the
+ * whole chat list for every conversation instead of one index seek per chat.
+ */
+export function syncCursorSeedInsert(acceptedSql: string): string {
+  return `INSERT INTO sync_cursor (organization_id,store_id,thread_id,stream,conversation_id,cursor,revision,due_at,completed)
+      SELECT ?,?,json_extract(item.value,'$.threadId'),json_extract(item.value,'$.stream'),conversation.id,json_extract(item.value,'$.cursor'),0,
+        json_extract(item.value,'$.dueAt'),COALESCE(json_extract(item.value,'$.completed'),0)
+      FROM json_each(?) AS item CROSS JOIN conversation
+      WHERE conversation.store_id=? AND conversation.organization_id=?
+        AND conversation.platform_thread_id=json_extract(item.value,'$.threadId') AND ${acceptedSql} ON CONFLICT DO NOTHING`;
+}
+
 export async function commitSyncPage(db: D1Database, lease: SyncLease, page: SyncPage) {
   if(lease.source!=='chat')throw new Error('INVALID_SYNC_SOURCE');
   const chats = page.chats ?? [], messages = page.messages ?? [], seeds = page.seeds ?? [];
@@ -315,11 +328,7 @@ export async function commitSyncPage(db: D1Database, lease: SyncLease, page: Syn
     db.prepare(`UPDATE conversation SET last_message_at=(SELECT MAX(event_at) FROM message WHERE message.conversation_id=conversation.id)
       WHERE store_id=? AND id IN (SELECT conversation_id FROM message WHERE store_id=? AND platform_message_id IN (SELECT json_extract(value,'$.platformMessageId') FROM json_each(?)))
       AND ${accepted}`).bind(lease.storeId,lease.storeId,messageJSON,...acceptedValues),
-    db.prepare(`INSERT INTO sync_cursor (organization_id,store_id,thread_id,stream,conversation_id,cursor,revision,due_at,completed)
-      SELECT ?,?,json_extract(item.value,'$.threadId'),json_extract(item.value,'$.stream'),conversation.id,json_extract(item.value,'$.cursor'),0,
-        json_extract(item.value,'$.dueAt'),COALESCE(json_extract(item.value,'$.completed'),0)
-      FROM json_each(?) AS item JOIN conversation ON conversation.store_id=? AND conversation.organization_id=?
-        AND conversation.platform_thread_id=json_extract(item.value,'$.threadId') WHERE ${accepted} ON CONFLICT DO NOTHING`)
+    db.prepare(syncCursorSeedInsert(accepted))
       .bind(lease.orgId,lease.storeId,JSON.stringify(seeds),lease.storeId,lease.orgId,...acceptedValues),
     // The chat list states each chat's newest message id, so a chat whose newest id
     // differs from the incremental cursor has something unread: pull its next history

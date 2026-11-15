@@ -82,6 +82,26 @@ export async function commitProductList(db: D1Database, lease: SyncLease, work: 
   return !!results.at(-1)!.results.length;
 }
 
+/**
+ * json_each must stay the outer loop. If SQLite picks `product` as outer, it scans the
+ * whole JSON page once per product (417 products x 100 items = 41,669 rows read).
+ * CROSS JOIN pins the order so each item is one index seek on (store_id, organization_id, id).
+ */
+export function productSnapshotInsert(conditionSql: string): string {
+  return `INSERT INTO product_source_snapshot (id,organization_id,store_id,product_id,facts,observed_at)
+      SELECT json_extract(item.value,'$.snapshotId'),?,?,product.id,json_extract(item.value,'$.facts'),? FROM json_each(?) AS item
+      CROSS JOIN product
+      WHERE product.id=json_extract(item.value,'$.id') AND product.store_id=? AND product.organization_id=?
+        AND product.facts IS NOT json_extract(item.value,'$.facts') AND ${conditionSql}`;
+}
+
+/** Same outer-loop rule for the detail-page gate count. */
+export function productDetailGate(): string {
+  return `(SELECT COUNT(*) FROM json_each(?) AS task CROSS JOIN product
+      WHERE product.id=json_extract(task.value,'$.id') AND product.store_id=? AND product.organization_id=? AND product.detail_epoch=? AND product.detail_state='pending'
+        AND product.detail_generation=json_extract(task.value,'$.generation') AND product.detail_revision=json_extract(task.value,'$.revision'))=?`;
+}
+
 export async function commitProductDetails(db: D1Database, lease: SyncLease, work: ProductDetailsWork, page: { items: OzonProductDetails[] }, retryDueAt: number): Promise<boolean> {
   if (lease.source !== 'products' || work.kind !== 'details' || work.storeId !== lease.storeId || work.epoch !== lease.epoch) return false;
   if (!work.items.length || work.items.length > 100 || page.items.length > work.items.length || new Set(work.items.map(row=>row.id)).size !== work.items.length) throw new Error('INVALID_PRODUCT_PAGE');
@@ -91,14 +111,9 @@ export async function commitProductDetails(db: D1Database, lease: SyncLease, wor
   const token = crypto.randomUUID(), condition = syncPageCondition(lease,token), observedAt = Date.now(), next = future(retryDueAt);
   const workJSON = JSON.stringify(work.items), factsJSON = JSON.stringify(rows);
   const results = await db.batch([
-    prepareSyncPageGate(db,lease,token,{sql:`(SELECT COUNT(*) FROM product JOIN json_each(?) AS task ON product.id=json_extract(task.value,'$.id')
-      WHERE product.store_id=? AND product.organization_id=? AND product.detail_epoch=? AND product.detail_state='pending'
-        AND product.detail_generation=json_extract(task.value,'$.generation') AND product.detail_revision=json_extract(task.value,'$.revision'))=?`,
+    prepareSyncPageGate(db,lease,token,{sql:productDetailGate(),
       values:[workJSON,lease.storeId,lease.orgId,work.epoch,work.items.length]}),
-    db.prepare(`INSERT INTO product_source_snapshot (id,organization_id,store_id,product_id,facts,observed_at)
-      SELECT json_extract(item.value,'$.snapshotId'),?,?,product.id,json_extract(item.value,'$.facts'),? FROM json_each(?) AS item
-      JOIN product ON product.id=json_extract(item.value,'$.id') AND product.store_id=? AND product.organization_id=?
-      WHERE product.facts IS NOT json_extract(item.value,'$.facts') AND ${condition.sql}`)
+    db.prepare(productSnapshotInsert(condition.sql))
       .bind(lease.orgId,lease.storeId,observedAt,factsJSON,lease.storeId,lease.orgId,...condition.values),
     db.prepare(`UPDATE product SET facts=(SELECT json_extract(value,'$.facts') FROM json_each(?) WHERE json_extract(value,'$.id')=product.id),
       facts_observed_at=?,detail_revision=detail_revision+1,detail_state='complete',detail_attempt=0,detail_error=NULL

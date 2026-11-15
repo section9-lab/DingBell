@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { URL } from 'node:url';
-import { commitProductDetails, commitProductList, getDueProductWork, getProductCounts } from '../src/modules/products/storage.ts';
+import { commitProductDetails, commitProductList, getDueProductWork, getProductCounts, productDetailGate, productSnapshotInsert } from '../src/modules/products/storage.ts';
 import type { ProductDetailsWork, ProductListWork } from '../src/modules/products/types.ts';
 import type { OzonProductDetails, OzonProductListItem } from '../src/modules/products/ozon.ts';
 import * as synchronization from '../src/modules/sync/storage.ts';
@@ -20,6 +20,23 @@ test('product persistence separates catalog checkpoints, current facts and sourc
     for (const name of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) db.exec(readFileSync(new URL(name, folder), 'utf8'));
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name);
     for (const name of ['product_sync_cursor', 'product', 'product_source_snapshot']) assert.ok(tables.includes(name), `${name} must be persisted`);
+  } finally { db.close(); }
+});
+
+test('product snapshot and detail-gate joins keep json_each as the outer loop', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const folder = new URL('../migrations/', import.meta.url);
+    for (const name of readdirSync(folder).filter(name => name.endsWith('.sql')).sort()) db.exec(readFileSync(new URL(name, folder), 'utf8'));
+    const plan = (sql: string, parameters: number) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .all(...Array.from({ length: parameters }, () => 'x')).map(row => String(row.detail));
+    // One index seek per JSON item; a `product` outer loop would re-scan the whole page.
+    const snapshot = plan(productSnapshotInsert('1'), 6);
+    assert.ok(snapshot.some(detail => detail.includes('SCAN item VIRTUAL TABLE')), snapshot.join('\n'));
+    assert.ok(snapshot.some(detail => detail.includes('product_scope_unique (store_id=? AND organization_id=? AND id=?)')), snapshot.join('\n'));
+    const gate = plan(`SELECT ${productDetailGate()}`, 5);
+    assert.ok(gate.some(detail => detail.includes('SCAN task VIRTUAL TABLE')), gate.join('\n'));
+    assert.ok(gate.some(detail => detail.includes('product_scope_unique (store_id=? AND organization_id=? AND id=?)')), gate.join('\n'));
   } finally { db.close(); }
 });
 
