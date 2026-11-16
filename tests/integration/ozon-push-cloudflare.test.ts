@@ -45,7 +45,7 @@ test('compiled Cloudflare Push uses the real coordinator, preserves int64 and su
   ]);
   const url=`http://127.0.0.1/api/ozon/push/${endpoint}/${token}`;
   let response=await mf.dispatchFetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message_type:'TYPE_PING'})});
-  assert.equal(response.status,200);assert.equal((await response.json() as {version:string}).version,'1');
+  assert.equal(response.status,200);const handshake=await response.json() as {version:string;name:string;message_type:string;result:boolean;time:string};assert.equal(handshake.version,'1.0');assert.equal(handshake.name,'DingBell');assert.equal(handshake.message_type,'TYPE_PING');assert.equal(handshake.result,true);assert.match(handshake.time,/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   const body=JSON.stringify({message_type:'TYPE_NEW_MESSAGE',seller_id:'1',chat_id:thread,message_id:id,chat_type:'BUYER_SELLER',data:['Untrusted callback text']});
   const send=()=>mf.dispatchFetch(url,{method:'POST',headers:{'content-type':'application/json','X-DingBell-Local-Simulation':'1'},body});
   response=await send();assert.equal(response.status,200);
