@@ -166,12 +166,28 @@ test('the company default lets a paused conversation adopt AI on the next live m
 test('an AI handoff keeps the company default from reopening the conversation',{timeout:30000},async t=>{
  const m=await api(),f=await fixture();t.after(f.close);
  await f.db.prepare("INSERT INTO company_ai_reception_default(organization_id,enabled,updated_at,updated_by) VALUES('org',1,?,'owner')").bind(Date.now()).run();
+ const input=await f.append();
+ const [claim]=await m.claimAiDispatches(f.db,Date.now());
+ assert.ok(claim);
+ const admitted=await f.call('ai-dispatch-admit',{request:{eventId:claim.eventId,runId:claim.runId}});
+ assert.equal(admitted.body.outcome,'accepted');
+ // An unclassifiable message makes the intake hand off, which must park AI for good.
+ const classified=await f.call('ai-classify',{runId:claim.runId,classification:{stage:'unknown',language:'unknown',customerRequestedHuman:false}});
+ assert.equal(classified.body.outcome,'accepted');
+ const handoff=(await f.call('read')).body.view.state;
+ assert.equal(handoff.reception,'paused');
+ await f.append(false);
+ assert.equal((await f.call('read')).body.view.state.reception,'paused','a handed-off conversation must stay with humans');
+ assert.ok(input.eventId);
+});
+
+test('a stopped dispatch leaves the company default armed for the next message',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);
+ await f.db.prepare("INSERT INTO company_ai_reception_default(organization_id,enabled,updated_at,updated_by) VALUES('org',1,?,'owner')").bind(Date.now()).run();
  await f.append();
- const stop=await (async()=>{const [claim]=await m.claimAiDispatches(f.db,Date.now());return claim;})();
- assert.ok(stop);
- const stopped=await f.call('ai-dispatch-stop',{request:{eventId:stop.eventId,runId:stop.runId,targetRunId:stop.runId,reason:'unavailable'}});
+ const [claim]=await m.claimAiDispatches(f.db,Date.now());assert.ok(claim);
+ const stopped=await f.call('ai-dispatch-stop',{request:{eventId:claim.eventId,runId:claim.runId,targetRunId:claim.runId,reason:'unavailable'}});
  assert.equal(stopped.body.outcome,'accepted');
  await f.append(false);
- const state=(await f.call('read')).body.view.state;
- assert.equal(state.reception,'paused','a stopped or handed-off conversation must stay with humans');
+ assert.equal((await f.call('read')).body.view.state.reception,'ai','an infrastructure stop must not park the conversation');
 });

@@ -260,7 +260,9 @@ return class ConversationController extends Base {
       if(pendingNewer&&input.reason!=='disabled')return {outcome:'retry' as const,state};
       const appliedState:ControlState={...state,reception:'paused',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:state.controlEpoch+1,updatedAt:Math.max(Date.now(),state.updatedAt)};
       const receipt=checkedAiDispatchStopReceipt({action:'ai_dispatch_stop',origin:'system',commandId,expectedVersion:state.version,expectedEpoch:state.controlEpoch,actorUserId:null,actorMemberId:null,input,event,appliedState});
-      await transaction.delete(['aiPendingInput','aiListening','aiClassification','aiDeadline']);await transaction.put('aiDefaultHold',true);
+      // A stop is an infrastructure refusal, not a human handoff: keep the company default armed so
+      // the next customer message can retry instead of parking the conversation forever.
+      await transaction.delete(['aiPendingInput','aiListening','aiClassification','aiDeadline']);
       await this.persistCommand(transaction,{scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState};
     });
     if(result.outcome==='accepted')await this.flush(scope);return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
