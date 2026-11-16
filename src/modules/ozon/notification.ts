@@ -81,6 +81,14 @@ function checkResult(value: unknown): { isActive: boolean; errors: string[] } {
   return { isActive: item.is_active, errors };
 }
 
+/** A callback URL of this same deployment: rotating the secret changes only the endpoint id and token. */
+function sameEndpoint(left: string, right: string): boolean {
+  try {
+    const a = new URL(left), b = new URL(right);
+    return a.origin === b.origin && a.pathname.startsWith('/api/ozon/push/') && b.pathname.startsWith('/api/ozon/push/');
+  } catch { return false; }
+}
+
 /** A type can only belong to one URL, so Ozon answers 400 with this message. */
 function isTypeConflict(error: unknown): error is OzonReadError {
   return error instanceof OzonReadError && error.code === 'provider_unavailable'
@@ -133,7 +141,15 @@ export async function registerOzonPushUrl(
   let updated = false;
   const adopted: PushRegistration['adopted'] = [];
   if (!ours) {
-    const conflicts = first.filter(row => row.types.some(type => wanted.includes(type)));
+    // A rotated callback secret leaves our own previous endpoint holding the types; replace it silently.
+    for (const row of first.filter(row => row.url !== url && sameEndpoint(row.url, url) && row.types.some(type => wanted.includes(type)))) {
+      if (row.id === null) invalid();
+      const freed = row.types.filter(type => !wanted.includes(type));
+      if (freed.length) await call('/v1/notification/update', JSON.stringify({ id: row.id, types: freed, url: row.url }));
+      else await call('/v1/notification/delete', JSON.stringify({ id: row.id }));
+      adopted.push({ id: row.id, url: row.url, types: row.types.filter(type => wanted.includes(type)) });
+    }
+    const conflicts = first.filter(row => row.url !== url && !sameEndpoint(row.url, url) && row.types.some(type => wanted.includes(type)));
     if (conflicts.length) {
       if (!options.takeOver) throw new PushTypesInUse(conflicts);
       for (const row of conflicts) {

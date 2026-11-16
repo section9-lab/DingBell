@@ -84,6 +84,26 @@ test('another URL owning the chat types is reported as a conflict, not an outage
   assert.deepEqual(calls.map(call => call.path), ['/v1/notification/list']);
 });
 
+test('a rotated secret replaces this deployment\'s own previous subscription without asking', async () => {
+  const stale = 'https://platform.example.invalid/api/ozon/push/6f1d1f7c-3f5e-4c47-9d6f-4c6f7d8e9a01/oldTokenABCDEFGHIJKLMNOPQRSTUVWXYZ01234567';
+  let registered = false;
+  const { calls, fetcher } = provider({
+    'POST /v1/notification/list': () => ({
+      urls: registered
+        ? [{ id: 91, url: callback, enable: false, types: ozonTypes(chatPushTypes) }]
+        : [{ id: 90, url: stale, enable: true, types: ozonTypes(chatPushTypes) }],
+    }),
+    'POST /v1/notification/delete': () => { registered = true; return {}; },
+    'POST /v1/notification/set': () => ({}),
+    'POST /v1/notification/enable': () => ({}),
+    'POST /v1/notification/check': () => ({ is_active: true, errors: [] }),
+  });
+  const result = await registerOzonPushUrl(credentials, callback, fetcher);
+  assert.deepEqual(calls.find(call => call.path === '/v1/notification/delete')!.body, { id: 90 });
+  assert.deepEqual(result.adopted, [{ id: 90, url: stale, types: [...chatPushTypes] }]);
+  assert.equal(calls.some(call => call.path === '/v1/notification/update'), false);
+});
+
 test('takeover moves only the chat types and keeps the previous destination for the rest', async () => {
   let freed = false;
   const { calls, fetcher } = provider({
