@@ -200,7 +200,7 @@ R21-1 补充 AC-072/090—092 的本地降级矩阵：只读状态重新计算�
 
 R19-1 补充 AC-069/090/092 的查看口径：同一 analytics D1 快照并列五类持久 provider claim 技术台账和唯一 AI 外发意图业务台账。只有 schema 2 intent 的明确 sent attempt 计业务量；unknown 与人工分列，生成/草稿/HTTP 不算回复。token 缺失和未知费用不估算，供应商发票固定未核实。真实 Gateway/发票仍使 R19 依赖 R12，不整项放行。见架构 7.52、实施进度第 108 节。
 
-R20-1 为 AC-075/076/091 和 AC-066 建立失败关闭基线：治理接口不含正文，仅向 owner/admin 公开建议期限、内容日志边界和 12 类资源 readiness；所有期限待 D-06 批准且自动删除关闭，完整删除、访问禁用和业务完成均固定 false。源码扫描无 console 内容记录器/常见遥测 SDK，未知 query 诱饵不回显。真实 Gateway payload、外部日志、跨 D1/DO/Flue/Vectorize 删除、恢复抑制和备份生命周期未验证，因此 AC-066 和相关整项不放行。见架构 7.51、实施进度第 107 节。
+R20-1 为 AC-075/076/091 和 AC-066 建立失败关闭基线：治理接口不含正文，仅向 owner/admin 公开建议期限、内容日志边界和 12 类资源 readiness；所有期限待 D-06 批准且自动删除关闭，完整删除、访问禁用和业务完成均固定 false。源码扫描限制 console 只能经由 `src/platform/log.ts` 输出单行结构化标识日志（无客户正文/凭证），且无常见遥测 SDK；未知 query 诱饵不回显。真实 Gateway payload、外部日志、跨 D1/DO/Flue/Vectorize 删除、恢复抑制和备份生命周期未验证，因此 AC-066 和相关整项不放行。见架构 7.51、实施进度第 107 节。
 
 R18-1 已为 AC-067/068 建立交付骨架：贡献、自部署、升级回滚、故障排查和第三方 notices 已存在；lockfile 905 个 package entry 的版本/integrity/license metadata 完整，特殊许可证表达式明确待复核；默认配置不含 R2，六个外部功能开关显式 false，文档中没有 DingBell 商业账号、中心许可证或遥测依赖。D-04 尚未由用户确认，因此没有 LICENSE，release check 按设计阻塞；干净外部检出、确切发布 archive、许可证全文/NOTICE、素材发布范围和秘密扫描仍未放行 AC-067/068。见架构 7.50、实施进度第 106 节。
 

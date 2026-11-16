@@ -10,6 +10,7 @@ import type {SyncCursor,SyncLease,SyncScope,NormalizedMessage} from '../sync/typ
 import {duePostingHistory} from '../orders/history.ts';
 import {commitFbsList,commitFboList,commitFbpList} from '../orders/storage.ts';
 import {enqueuePushChildren,claimPushJob,finishPushJob,readEndpoint,type PushJob} from './storage.ts';
+import {logEvent,logFailure} from '../../platform/log.ts';
 
 function advance(job:PushJob,next:string|null,hasNext:boolean){const current=job.progress.cursor??null,recent=job.progress.recent??[];if(hasNext&&(!next||next===current||recent.includes(next)))throw new Error('cursor_stalled');return {...job.progress,cursor:next,recent:hasNext?[...recent,...(current?[current]:[])].slice(-8):[]};}
 async function cursor(db:D1Database,lease:SyncLease,threadId:string,stream:'incremental'|'discovery'|'backfill'){
@@ -114,6 +115,7 @@ export async function runPushPage(env:SyncBindings&{DB:D1Database},scope:SyncSco
   if(!saved)throw new Error('sync_authority_changed');
   if(hint.messageId&&!target){const progress=advance(job,page.messages.at(-1)?.id??null,page.hasNext);if(!page.hasNext)throw new Error('message_not_found');await finishPushJob(db,job,'pending',{progress,nextAt:Date.now()+1000});return;}
   await finishPushJob(db,job,'completed');
+  logEvent('push.processed',{orgId:scope.orgId,storeId:scope.storeId,source:job.source,kind:hint.kind,chatId:chatId??null,messageId:hint.messageId??null,live,simulated:job.simulated});
   if(live)try{options.onCommittedLive?.(scope);}catch{/* committed ingest outbox is independently repairable */}
  }catch(error){
   const code=error instanceof OzonReadError?error.code:error instanceof CredentialError?'credentials_unavailable':error instanceof Error&&['chat_not_found','message_not_found','cursor_stalled','sync_authority_changed','unsupported_work','sync_cursor_missing','product_identity_unresolved','product_details_missing','product_listing_missing'].includes(error.message)?error.message:error instanceof Error&&error.message.includes('MESSAGE_ID_CONFLICT')?'message_content_changed':'push_processing_failed';
@@ -123,5 +125,6 @@ export async function runPushPage(env:SyncBindings&{DB:D1Database},scope:SyncSco
   if(lease&&(['invalid_credentials','credentials_unavailable','permission_denied','rate_limited'].includes(code)))await finishSyncFailure(db,lease,{code,nextDueAt:nextAt,disable:['invalid_credentials','credentials_unavailable','permission_denied'].includes(code),disableAll:['invalid_credentials','credentials_unavailable'].includes(code),...(code==='rate_limited'?{blockedUntil:nextAt}:{})});
   else if(lease)await releaseSyncLease(db,lease,nextAt);
   await finishPushJob(db,job,fatal?'failed':'retry',{code,attempts,nextAt,progress:['chat_not_found','message_not_found'].includes(code)?{}:job.progress});
+  logFailure('push.failed',error,{orgId:scope.orgId,storeId:scope.storeId,source:job.source,kind:job.hint.kind,code,attempts,state:fatal?'failed':'retry'});
  }finally{if(lease)await releaseSyncLease(db,lease,Date.now()+1000);}
 }

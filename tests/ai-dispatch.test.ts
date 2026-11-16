@@ -147,3 +147,31 @@ test('a new input is queued for AI by the delivery consumer before any model run
  const env={...f.env(),NVAPI_KEY:undefined,AI_RECEPTION_CONFIG_JSON:undefined};await deliverInboundEvents(env);
  const state=(await f.call('read')).body.view.state;assert.equal(state.reception,'ai');assert.equal(state.workStatus,'needs_reply');assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);assert.equal((await m.claimAiDispatches(f.db,Date.now()+60001)).length,1);
 });
+
+test('the company default lets a paused conversation adopt AI on the next live message',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);
+ await f.db.prepare("INSERT INTO company_ai_reception_default(organization_id,enabled,updated_at,updated_by) VALUES('org',1,?,'owner')").bind(Date.now()).run();
+ const actor={...f.actor(),expectedMemberId:'owner-member'};
+ const listened=await f.call('ai-listen',{actor,request:{commandId:crypto.randomUUID(),expectedVersion:0,previousRunId:null}});
+ assert.equal(listened.body.outcome,'accepted');
+ // A human status change parks AI without a handoff, so the company default may take over again.
+ const parked=await f.call('execute',{actor,command:{commandId:crypto.randomUUID(),expectedVersion:1,action:'set_work_status',workStatus:'waiting_customer'}});
+ assert.equal(parked.body.outcome,'accepted');assert.equal((await f.call('read')).body.view.state.reception,'paused');
+ await f.append(false);
+ const state=(await f.call('read')).body.view.state;
+ assert.equal(state.reception,'ai','an unassigned paused conversation must let AI take the next live message');
+ assert.equal(state.workStatus,'needs_reply');
+});
+
+test('an AI handoff keeps the company default from reopening the conversation',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);
+ await f.db.prepare("INSERT INTO company_ai_reception_default(organization_id,enabled,updated_at,updated_by) VALUES('org',1,?,'owner')").bind(Date.now()).run();
+ await f.append();
+ const stop=await (async()=>{const [claim]=await m.claimAiDispatches(f.db,Date.now());return claim;})();
+ assert.ok(stop);
+ const stopped=await f.call('ai-dispatch-stop',{request:{eventId:stop.eventId,runId:stop.runId,targetRunId:stop.runId,reason:'unavailable'}});
+ assert.equal(stopped.body.outcome,'accepted');
+ await f.append(false);
+ const state=(await f.call('read')).body.view.state;
+ assert.equal(state.reception,'paused','a stopped or handed-off conversation must stay with humans');
+});

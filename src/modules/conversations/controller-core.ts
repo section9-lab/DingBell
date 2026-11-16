@@ -21,6 +21,8 @@ import {checkedAiSendReceipt,type AiSendReceipt} from './ai-reply-receipt.ts';
 import type {SupportBindings} from '../ai-runs/execution.ts';
 import {selectReplyPolicy} from '../reply-policies/matching.ts';
 import {aiReceptionCommandSchema} from '../../shared/ai-reception.ts';
+import {logEvent} from '../../platform/log.ts';
+import {readDefaultAiReception} from '../ai-runs/default-reception.ts';
 import {aiListeningRequestSchema,aiListeningSchema,checkedAiListeningReceipt,readAiListeningBoundary,isNewAiInput,type AiListening} from './ai-listening.ts';
 import {aiPendingInputSchema,checkedInboundReceipt,readInboundEvent,type AiPendingInput} from './inbound.ts';
 import {aiWorkSchema,aiIntakeRunSchema,aiIntakeRequestSchema,aiClassificationSchema,checkedAiIntakeReceipt,readAiIntakeAdmission,classifyDecision,aiDispatchAdmissionSchema,aiDispatchStopRequestSchema,checkedAiDispatchStopReceipt,type AiIntakeRun,type AiClassification,type AiIntakeDecision,type AiWork} from './ai-intake.ts';
@@ -94,6 +96,17 @@ return class ConversationController extends Base {
     return access?.directory?{outcome:'found',view:await this.view(access.directory,access.memberId)}:{outcome:'not_found'};
   }
   protected aiTimeoutMs(){return 60_000;}
+  /** Company default, cached per instance: a paused conversation adopts AI on the next live message. */
+  private defaultAiCache:{organizationId:string;enabled:boolean;at:number}|null=null;
+  private async defaultAiReception(organizationId:string){
+    const cached=this.defaultAiCache;
+    if(cached&&cached.organizationId===organizationId&&Date.now()-cached.at<30_000)return cached.enabled;
+    if(!this.env.DB)return false;
+    let enabled=false;
+    try{enabled=await readDefaultAiReception(this.env.DB,organizationId);}catch{enabled=false;}
+    this.defaultAiCache={organizationId,enabled,at:Date.now()};
+    return enabled;
+  }
   /** Member-bound read of current reception and an optional historical recovery receipt. */
   async readAiReception(scope:ControlScope,actor:ControlActor,commandId?:string){
     if(commandId!==undefined)v.parse(v.pipe(v.string(),v.uuid()),commandId);
@@ -125,6 +138,8 @@ return class ConversationController extends Base {
     if(!this.env.DB||!this.routed(scope)||!identifier(eventId))return {outcome:'unavailable' as const};
     const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
     const commandId=`inbound:${eventId}`,event=await readInboundEvent(this.env.DB,scope,eventId);
+    // Read before the transaction: storage transactions must not await external IO.
+    const defaultAi=await this.defaultAiReception(scope.organizationId);
     const result=await this.ctx.storage.transaction(async transaction=>{
       const state=await this.state(transaction,directory),saved=await transaction.get(`receipt:${commandId}`);
       if(saved){const receipt=checkedInboundReceipt(saved);return sameScope(receipt.event.scope,scope)?{outcome:'accepted' as const,receipt,state}:{outcome:'unavailable' as const};}
@@ -136,10 +151,14 @@ return class ConversationController extends Base {
         await transaction.put('inboundSequence',event.sequence);return {outcome:'ignored' as const,state};
       }
       if([state.version,state.controlEpoch,state.sequence].some(n=>n>=Number.MAX_SAFE_INTEGER-1))return {outcome:'unavailable' as const};
-      const appliedState:ControlState={...state,lifecycle:'open',workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,
-        controlEpoch:state.controlEpoch+(state.reception==='ai'||state.lifecycle==='resolved'?1:0),updatedAt:Math.max(Date.now(),state.updatedAt)};
+      // Company default: an unassigned paused conversation lets AI take the message. A prior AI
+      // handoff, a stop or a human reply sets aiDefaultHold so the default never overrides it.
+      const adopt=defaultAi&&state.reception==='paused'&&state.lifecycle==='open'
+        &&state.assignedMemberId===null&&!(await transaction.get('aiDefaultHold'));
+      const appliedState:ControlState={...state,lifecycle:'open',workStatus:'needs_reply',reception:adopt?'ai':state.reception,version:state.version+1,sequence:state.sequence+1,
+        controlEpoch:state.controlEpoch+(state.reception==='ai'||adopt||state.lifecycle==='resolved'?1:0),updatedAt:Math.max(Date.now(),state.updatedAt)};
       const receipt=checkedInboundReceipt({action:'customer_message',origin:'system',commandId,expectedVersion:state.version,actorUserId:null,actorMemberId:null,appliedState,event});
-      if(state.reception==='ai'){
+      if(appliedState.reception==='ai'){
         await transaction.put('aiPendingInput',v.parse(aiPendingInputSchema,{schemaVersion:1,event,controlEpoch:appliedState.controlEpoch}));
         await transaction.delete('aiListening');await transaction.delete('aiDeadline');await transaction.delete('aiClassification');
       }
@@ -235,7 +254,8 @@ return class ConversationController extends Base {
       if(pendingNewer&&input.reason!=='disabled')return {outcome:'retry' as const,state};
       const appliedState:ControlState={...state,reception:'paused',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:state.controlEpoch+1,updatedAt:Math.max(Date.now(),state.updatedAt)};
       const receipt=checkedAiDispatchStopReceipt({action:'ai_dispatch_stop',origin:'system',commandId,expectedVersion:state.version,expectedEpoch:state.controlEpoch,actorUserId:null,actorMemberId:null,input,event,appliedState});
-      await transaction.delete(['aiPendingInput','aiListening','aiClassification','aiDeadline']);await this.persistCommand(transaction,{scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState};
+      await transaction.delete(['aiPendingInput','aiListening','aiClassification','aiDeadline']);await transaction.put('aiDefaultHold',true);
+      await this.persistCommand(transaction,{scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState};
     });
     if(result.outcome==='accepted')await this.flush(scope);return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
   }
@@ -250,6 +270,7 @@ return class ConversationController extends Base {
       const receipt=checkedAiIntakeReceipt({action:'ai_classification',origin,commandId,expectedVersion:state.version,actorUserId:null,actorMemberId:null,run,classification,decision,appliedState});
       await transaction.delete(['aiDeadline','aiListening','aiPendingInput','aiClassification']);
       if(decision.kind==='ready'){await transaction.put('aiPendingInput',{schemaVersion:1,event:run.admission.event,controlEpoch:appliedState.controlEpoch});await transaction.put('aiClassification',commandId);}
+      else await transaction.put('aiDefaultHold',true);
       await this.persistCommand(transaction,{scope:directory.scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState};
     });
   }
@@ -304,7 +325,8 @@ return class ConversationController extends Base {
       const now=Math.max(Date.now(),state.updatedAt),listening=v.parse(aiListeningSchema,{schemaVersion:1,scope,request,afterSequence:boundary,createdAt:now,controlEpoch:state.controlEpoch+1});
       const appliedState:ControlState={...state,reception:'ai',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:listening.controlEpoch,updatedAt:now};
       const receipt=checkedAiListeningReceipt({action:'ai_listen',origin:'human',commandId,expectedVersion:state.version,actorUserId:actor.actorUserId,actorMemberId:access.memberId,appliedState,listening});
-      await transaction.put('aiListening',listening);await transaction.delete('aiDeadline');await this.persistCommand(transaction,{scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState,canSend:false as const};
+      await transaction.put('aiListening',listening);await transaction.delete('aiDeadline');await transaction.delete('aiDefaultHold');
+      await this.persistCommand(transaction,{scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState,canSend:false as const};
     });
     if(result.outcome==='accepted')await this.flush(scope);return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
   }
@@ -398,7 +420,7 @@ return class ConversationController extends Base {
       if([state.version,state.controlEpoch,state.sequence].some(n=>n>=Number.MAX_SAFE_INTEGER))return {outcome:'conflict' as const};
       const appliedState:ControlState={...state,reception:'paused',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:state.controlEpoch+1,updatedAt:Math.max(Date.now(),state.updatedAt)};
       const receipt=checkedAiReceipt({action:'request_handoff',origin,commandId,expectedVersion:state.version,actorUserId:null,actorMemberId:null,appliedState,run,input});
-      await transaction.delete('aiDeadline');await this.persistCommand(transaction,{scope:directory.scope,receipt});return this.aiResult(receipt,appliedState);
+      await transaction.delete('aiDeadline');await transaction.put('aiDefaultHold',true);await this.persistCommand(transaction,{scope:directory.scope,receipt});return this.aiResult(receipt,appliedState);
     });
   }
   async requestHandoff(scope:ControlScope,runId:string,value:unknown){
@@ -762,6 +784,7 @@ return class ConversationController extends Base {
   }
   private async settleReply(scope:ControlScope,id:string,revision:number,result:OzonSendResult) {
     const code=result.errorCode?.toUpperCase()??null;
+    logEvent('reply.settled',{orgId:scope.organizationId,storeId:scope.storeId,conversationId:scope.conversationId,intentId:id,outcome:result.outcome,httpStatus:result.httpStatus,code});
     await this.ctx.storage.transaction(async transaction=>{
       const current=await this.storedReply(transaction,id);if(!current||current.intent.revision!==revision)return;
       const now=Math.max(Date.now(),current.intent.updatedAt);
@@ -832,7 +855,10 @@ return class ConversationController extends Base {
     if(context.platformThreadId!==intent.platformThreadId){await this.skipReply(snapshot,'THREAD_CHANGED');return;}
     const localState=normalizeControlState(await this.ctx.storage.get('state'));
     const blocked=this.replyControlGate(context,localState,intent);
-    if(blocked){await this.skipReply(snapshot,blocked);return;}
+    if(blocked){
+      logEvent('reply.blocked',{orgId:scope.organizationId,storeId:scope.storeId,conversationId:scope.conversationId,intentId:intent.id,reason:blocked,origin:intent.schemaVersion===2?'ai':'human'});
+      await this.skipReply(snapshot,blocked);return;
+    }
     if(intent.dueAt!>Date.now())return;
     const pendingRate=await this.ctx.storage.get<{until:number}>('replyRateLimit');
     if(pendingRate){await this.deferReply(snapshot,Math.max(Date.now()+60_000,pendingRate.until));return;}

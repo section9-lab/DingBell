@@ -11,6 +11,7 @@ import {runStartupBootstrap} from './modules/sync/bootstrap.ts';
 import {listStoresAwaitingDiscovery} from './modules/sync/storage.ts';
 import {wakeStoreSync} from './modules/sync/bindings.ts';
 import {pollingEnabled} from './modules/sync/runner.ts';
+import {renewExpiringStoreChecks} from './modules/stores/checks.ts';
 
 
 type Bindings=SyncBindings&ControlBindings&SupportBindings;
@@ -44,5 +45,5 @@ export async function runScheduled(env:Bindings) {
     const reception=async()=>{try{await deliverInboundEvents(env);}finally{await dispatchAiReceptions(env);}};
     // One-time startup bootstrap starts the initial full read; after that, Ozon data is webhook-only.
     const bootstrap=async()=>{try{await runStartupBootstrap(env);}catch{/* The durable marker retries on the next tick. */}};
-    await Promise.allSettled([bootstrap(),reception(),wakePollingStores(env),repairControls(env),repairAiExecutions(env),reconcileBudgetLedgers(env)]);
+    await Promise.allSettled([bootstrap(),reception(),wakePollingStores(env),repairControls(env),repairAiExecutions(env),reconcileBudgetLedgers(env),renewExpiringStoreChecks(env)]);
 }

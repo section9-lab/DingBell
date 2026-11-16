@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { apiError, type ApplicationEnv } from './http.ts';
+import { logFailure } from './platform/log.ts';
 import { identityConfig } from './modules/identity/config.ts';
 import { registerIdentityRoutes } from './modules/identity/http.ts';
 import { registerProfileRoutes } from './modules/profile/http.ts';
@@ -13,6 +14,7 @@ import { registerMembershipRoutes } from './modules/membership/http.ts';
 import { registerStoreRoutes } from './modules/stores/http.ts';
 import { registerSyncRoutes } from './modules/sync/http.ts';
 import {registerPushRoutes} from './modules/ozon-push/http.ts';
+import {registerDefaultAiReceptionRoutes} from './modules/ai-runs/default-reception-http.ts';
 import {registerRealtimeRoutes} from './modules/realtime/http.ts';
 import { registerReadinessRoutes } from './modules/readiness/http.ts';
 import { registerConversationRoutes } from './modules/conversations/http.ts';
@@ -76,10 +78,13 @@ export function createApp(deps: IdentityDependencies & StoreDependencies & Compa
   registerDataGovernanceRoutes(app);
   registerDegradationRoutes(app);
   registerAiReceptionRoutes(app);
+  registerDefaultAiReceptionRoutes(app);
   app.notFound(c => apiError(c, 'NOT_FOUND', 'The resource is not available.', 404));
   app.onError((error, c) => {
     if (error instanceof AuditUnavailable) return apiError(c, 'AUDIT_UNAVAILABLE', 'Audit storage is temporarily unavailable.', 503);
     if (error instanceof OperationUnconfirmed) return apiError(c, 'OPERATION_UNCONFIRMED', 'Refresh the session to confirm the operation state.', 503);
+    // The response stays generic, but the request id in the UI must be traceable in Cloudflare logs.
+    logFailure('http.unhandled', error, { requestId: c.get('requestId'), path: new URL(c.req.url).pathname, method: c.req.method });
     return apiError(c, 'IDENTITY_UNAVAILABLE', 'The service is temporarily unavailable.', 503);
   });
   return app;

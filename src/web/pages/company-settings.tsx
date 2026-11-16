@@ -18,6 +18,7 @@ import { Spinner } from '../components/ui/spinner';
 import { DataGovernancePanel } from '../components/data-governance-panel';
 import { DegradationPanel } from '../components/degradation-panel';
 import { CompanyModelPanel } from '../components/company-model-panel';
+import { AiDefaultCard } from '../components/ai-default-card';
 import { ProfileSettingsCard } from '../components/profile-settings';
 import { CapabilitiesPage } from './capabilities';
 import { workspaceRoutes } from '../lib/routes';
@@ -110,6 +111,7 @@ export function CompanySettingsPage({ identity, company, refresh }: { identity: 
         {section === 'general' && <>
           <div className="settings-section-head"><h2 className="page-title">常规</h2><p className="page-subtitle">个人资料、公司时区与界面语言。</p></div>
           <ProfileSettingsCard key={identity.session?.user.id} identity={identity} />
+          <AiDefaultCard companyId={company.id} />
           <Card>
             <CardHeader><CardTitle>时间与时区</CardTitle><CardDescription>所有成员使用同一时区，应用于消息、备注与发送记录。</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-5">

@@ -4,6 +4,8 @@
   "main": "src/platform/cloudflare/worker.ts",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Structured capture so the dashboard "Logs" tab and `wrangler tail` show every operation.
+  "observability": { "enabled": true },
   "vars": {
     "OUTBOUND_ENABLED": "false",
     "AI_OUTBOUND_ENABLED": "false"

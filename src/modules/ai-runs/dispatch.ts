@@ -3,6 +3,7 @@ import type {SyncScope} from '../sync/types.ts';
 import {aiScopeSchema} from '../conversations/ai-state.ts';
 import {getConversationController} from '../conversations/control-bindings.ts';
 import {executeAiRun,reconcileConversationAi,type SupportBindings} from './execution.ts';
+import {logEvent} from '../../platform/log.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256)),uuid=v.pipe(v.string(),v.uuid());
 const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8640000000000000-300000));
 const claimSchema=v.strictObject({scope:aiScopeSchema,eventId:id,runId:uuid,token:uuid,inputSequence:v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(Number.MAX_SAFE_INTEGER)),createdAt:time});
@@ -25,17 +26,24 @@ type Dependencies={execute?:(env:SupportBindings,scope:AiDispatchClaim['scope'],
 /** The queue addresses original work only; every model call still needs live controller and financial authority. */
 async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependencies){
  const controller=getConversationController(env,c.scope.controllerId),execute=deps.execute??executeAiRun,reconcile=deps.reconcile??reconcileConversationAi;
- const stop=async(reason:'disabled'|'timeout'|'unavailable'|'runtime_failure',targetRunId:string|null=c.runId)=>{const r=await controller.stopAiDispatch(c.scope,{eventId:c.eventId,runId:c.runId,targetRunId,reason});if(r.outcome==='unavailable'||r.outcome==='retry')return false;await reconcile(env,c.scope);return true;};
+ const stop=async(reason:'disabled'|'timeout'|'unavailable'|'runtime_failure',targetRunId:string|null=c.runId)=>{
+  const r=await controller.stopAiDispatch(c.scope,{eventId:c.eventId,runId:c.runId,targetRunId,reason});
+  logEvent('ai.dispatch.stop',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,reason,targetRunId,outcome:r.outcome});
+  if(r.outcome==='unavailable'||r.outcome==='retry')return false;
+  await reconcile(env,c.scope);return true;};
  const finishAnswer=async(result:Result,id:string)=>{
   if(result.status==='pending'||result.status==='unconfirmed')return false;
   if(result.status==='completed'&&env.AI_OUTBOUND_ENABLED==='true'&&env.OUTBOUND_ENABLED==='true'){
-   const queued=await controller.enqueueAiReply(c.scope,id);if(queued.outcome==='accepted')return true;
+   const queued=await controller.enqueueAiReply(c.scope,id);
+   logEvent('ai.dispatch.answer',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:id,queued:queued.outcome});
+   if(queued.outcome==='accepted')return true;
   }
   return stop(result.status==='unavailable'?'unavailable':'runtime_failure',id);
  };
  if(Date.now()-c.createdAt>=300000)return stop('timeout',null);
  const repaired=await reconcile(env,c.scope);if(repaired.status==='unconfirmed')return false;
  const admitted=await controller.admitAiDispatch(c.scope,{eventId:c.eventId,runId:c.runId});
+ logEvent('ai.dispatch.admit',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,eventId:c.eventId,outcome:admitted.outcome});
  if(admitted.outcome==='conflict')return true;
  if(admitted.outcome!=='accepted')return stop('unavailable');
  const result=await execute(env,c.scope,c.runId),next=await controller.readClassifiedInput(c.scope);

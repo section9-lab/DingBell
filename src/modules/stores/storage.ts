@@ -83,10 +83,15 @@ export function beginStoreCheck(db: D1Database, actor: StoreActor, id: string, r
     .bind(token, id, actor.orgId, revision, ...actorParameters(actor)).first<StoreRecord>();
 }
 
-export function finishStoreCheck(db: D1Database, actor: StoreActor, input: { id: string; revision: number; credentialVersion: number; token: string }, capabilities: StoreCapability[]) {
-  const reads = capabilities.filter(item=>['auth','products_read','chats_read','orders_fbs_read','orders_fbo_read','orders_fbp_read'].includes(item.code));
-  const status = reads.every(item => item.status === 'available') ? 'verified'
+const readCapabilities = ['auth','products_read','chats_read','orders_fbs_read','orders_fbo_read','orders_fbp_read'];
+export function capabilityStatus(capabilities: StoreCapability[]) {
+  const reads = capabilities.filter(item=>readCapabilities.includes(item.code));
+  return reads.every(item => item.status === 'available') ? 'verified'
     : reads[0]?.status === 'available' ? 'partial' : 'attention';
+}
+
+export function finishStoreCheck(db: D1Database, actor: StoreActor, input: { id: string; revision: number; credentialVersion: number; token: string }, capabilities: StoreCapability[]) {
+  const status = capabilityStatus(capabilities);
   return db.prepare(`UPDATE store SET capabilities=?,status=?,checked_at=${nowSQL},expires_at=${nowSQL}+86400000,
       revision=revision+1,check_token=NULL,check_until=NULL,updated_at=${nowSQL}
     WHERE id=? AND organization_id=? AND revision=? AND credential_version=? AND check_token=?

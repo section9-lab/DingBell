@@ -1840,7 +1840,7 @@ AI 用量按接待生成/嵌入、翻译预览、问答测试生成/嵌入五类
 
 资源矩阵逐项列出 D1 身份、会话、知识、AI 执行、财务、导出，控制 DO、Flue DO、Vectorize、可选 R2、未实现 SEARCH_DB 和备份。每项只公开是否含客户内容、当前 readiness 和必须取得的证据。完整公司删除固定 `available=false`、`accessDisablementImplemented=false`、`businessActionCompleted=false`；不能以 D1 部分 cascade、同步 CSV 不留服端文件、默认没有 R2，或某个 DO 的删除接口冒充全链路删除。
 
-内容边界固定声明应用内容 tracing 关闭、运维日志不保存客户正文、真实 AI Gateway payload 关闭状态仍为 `external_configuration_unverified`，且 `supplierInvoiceVerified=false`。新增源码门禁扫描全部生产 TS/TSX，拒绝 console 内容记录器和 Sentry/OpenTelemetry/New Relic/Datadog/Application Insights 依赖；HTTP 诱饵验证未知 query 值不会回显。该检查证明当前应用代码边界，不证明 Cloudflare 账号、Gateway、边缘日志或外部备份配置。
+内容边界固定声明应用内容 tracing 关闭、运维日志不保存客户正文、真实 AI Gateway payload 关闭状态仍为 `external_configuration_unverified`，且 `supplierInvoiceVerified=false`。新增源码门禁扫描全部生产 TS/TSX：`console` 只允许出现在 `src/platform/log.ts`，且只能输出单行 JSON 的标识类字段（事件名、店铺/会话/运行 ID、状态码与原因枚举），不得写入消息正文、回调密钥或凭证；其余生产源码仍拒绝 console 与 Sentry/OpenTelemetry/New Relic/Datadog/Application Insights 依赖。HTTP 诱饵验证未知 query 值不会回显。该检查证明当前应用代码边界，不证明 Cloudflare 账号、Gateway、边缘日志或外部备份配置。
 
 删除编排尚未实现，因此没有新增危险的删除 API、没有停止公司访问、没有清理业务数据，也没有创建“完成凭据”。后续必须先实现跨资源不可逆状态机和访问禁用，再逐项验证恢复中断、后台任务不再生成数据以及备份到期。
 

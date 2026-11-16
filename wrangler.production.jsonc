@@ -4,6 +4,8 @@
   "main": "src/platform/cloudflare/worker.ts",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Structured capture so the dashboard "Logs" tab and `wrangler tail` show every operation.
+  "observability": { "enabled": true },
   "vars": {
     // 这是本仓库的唯一生产部署配置（含真实 D1 ID）：对外发送与 AI 自动外发在此开启。
     // 本地默认 wrangler.jsonc 仍然保持 false，发布检查与本地 demo 不受影响。
