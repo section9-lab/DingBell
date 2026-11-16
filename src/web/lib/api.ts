@@ -40,6 +40,8 @@ const workspaceBootstrapSchema = v.pipe(v.object({ setup: setupSchema, session: 
     : value.session === null && value.companies === null));
 const errorSchema = v.object({
   error: v.object({ code: v.string(), row: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(20)))) }),
+  // Optional, server-defined context (for example which Ozon URL owns a notification type).
+  detail: v.optional(v.unknown()),
   requestId: v.optional(v.string()),
 });
 
@@ -53,6 +55,17 @@ const messages: Record<string, string> = {
   PUSH_PUBLIC_URL_INVALID: '请配置不含路径的 HTTPS 公网源地址；本地调试可使用环回 HTTP 地址。',
   PUSH_SECRET_UNAVAILABLE: '旧回调密钥无法解密。请恢复原凭证加密密钥，或重新生成回调地址并更新平台订阅。',
   PUSH_RECOVERY_NOT_READY: '请先切换为 Push，并在下方开启对应来源，再执行一次回补。',
+  // Ozon 通知（beta）注册失败：把平台侧的失败原因说清楚，不落回「服务暂时不可用」。
+  PUSH_TYPES_IN_USE: '这些通知类型已被店铺里的另一个回调地址占用。确认接管后，聊天类型会改由 DingBell 接收。',
+  OZON_INVALID_CREDENTIALS: 'Ozon 拒绝了店铺凭证（401）。请更新 API Key 后重试。',
+  OZON_PERMISSION_DENIED: 'Ozon 拒绝本次注册（403）：当前 API Key 没有通知（Notification）权限。请重新下发密钥并勾选通知权限。',
+  OZON_RATE_LIMITED: 'Ozon 限制了调用频率（429），请稍后再试。',
+  OZON_INVALID_RESPONSE: 'Ozon 返回的响应未通过校验（注册接口为 beta）。请稍后重试；若持续出现，请核对回调地址是否可从公网访问。',
+  OZON_TIMEOUT: 'Ozon 在 8 秒内没有响应，本次注册结果未知，请稍后重试。',
+  OZON_NETWORK_ERROR: '无法连接 Ozon，本次注册结果未知，请稍后重试。',
+  OZON_ABORTED: '请求已取消，Ozon 未完成本次注册。',
+  OZON_REDIRECT_REFUSED: 'Ozon 返回了重定向，已拒绝跟随。请联系部署管理员核对出口网络。',
+  OZON_UNAVAILABLE: 'Ozon 服务暂时不可用或拒绝了该请求，请稍后重试。',
   AI_DRAFT_UNAVAILABLE: '暂时无法核对 AI 草稿。请刷新后再采纳，当前输入不会改变。',
   REPLY_TEST_DISABLED: 'AI 回复测试尚未启用，请联系部署管理员配置模型和预算。',
   AI_DISABLED: 'AI 接待尚未启用，请先在「公司设置 > AI 模型」保存连接并完成测试。',
@@ -186,10 +199,12 @@ const messages: Record<string, string> = {
 export class ApiError extends Error {
   code: string;
   requestId?: string;
-  constructor(code: string, requestId?: string, row?: number | null) {
+  detail?: unknown;
+  constructor(code: string, requestId?: string, row?: number | null, detail?: unknown) {
     super((row && code.startsWith('KNOWLEDGE_FILE_') ? `第 ${row} 条：` : '') + (messages[code] ?? '服务暂时不可用，请稍后重试。'));
     this.code = code;
     this.requestId = requestId;
+    this.detail = detail;
   }
 }
 
@@ -226,6 +241,7 @@ export async function request<
           : 'IDENTITY_UNAVAILABLE',
       parsed.success ? parsed.output.requestId : undefined,
       parsed.success ? parsed.output.error.row : undefined,
+      parsed.success ? parsed.output.detail : undefined,
     );
   }
   const parsed = v.safeParse(schema, data);

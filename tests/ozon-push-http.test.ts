@@ -6,7 +6,7 @@ test('a manager can prepare a private callback and Ozon can validate it without 
  const f=await fixture();t.after(f.close);
  const prepared=await f.manage({operation:'prepare',expectedRevision:0});assert.equal(prepared.status,200,await prepared.clone().text());
  const result=await prepared.json() as {push:{revision:number;mode:string;callbackUrl:string}};assert.equal(result.push.mode,'prepared');assert.equal(result.push.revision,1);assert.ok(result.push.callbackUrl.startsWith(f.env.APP_BASE_URL+'/api/ozon/push/'));
- const ping=await f.callback(result.push.callbackUrl,{message_type:'TYPE_PING',time:new Date().toISOString()});assert.equal(ping.status,200);const ack=await ping.json() as {name:string;version:string;time:string};assert.equal(ack.name,'DingBell');assert.equal(ack.version,'1');assert.ok(Number.isFinite(Date.parse(ack.time)));
+ const ping=await f.callback(result.push.callbackUrl,{message_type:'TYPE_PING',time:new Date().toISOString()});assert.equal(ping.status,200);const ack=await ping.json() as {name:string;version:string;time:string;result:boolean;message_type:string};assert.equal(ack.name,'DingBell');assert.equal(ack.version,'1.0');assert.equal(ack.result,true);assert.equal(ack.message_type,'TYPE_PING');assert.match(ack.time,/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);assert.ok(Number.isFinite(Date.parse(ack.time)));
  const state=await(await f.manage()).json() as {push:{lastPingAt:string;callbackUrl?:string}};assert.ok(state.push.lastPingAt);assert.equal(state.push.callbackUrl,undefined,'ordinary status reads must not disclose a callback credential');
 });
 

@@ -128,3 +128,18 @@ test('safe API errors retain a request ID without exposing backend text', async 
     },
   );
 });
+
+test('a refused Ozon Push registration names the platform cause instead of the generic outage text', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      { error: { code: 'OZON_PERMISSION_DENIED', message: 'Ozon refused the Push registration.' }, requestId: 'request-ozon' },
+      { status: 409 },
+    ),
+  );
+  await assert.rejects(signIn('test@example.invalid', 'synthetic-password'), (error: any) => {
+    assert.equal(error.code, 'OZON_PERMISSION_DENIED');
+    assert.equal(error.message.includes('服务暂时不可用'), false);
+    assert.equal(error.message.includes('Notification'), true);
+    return true;
+  });
+});

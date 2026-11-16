@@ -8,6 +8,7 @@ import {Copy,RefreshCw} from 'lucide-react';
 import {pushSources,type PushCommand} from '../../shared/ozon-push';
 import {changePush,readPush,registerPush,simulatePush} from '../lib/ozon-push-api';
 import {ErrorNotice} from './identity-shared';
+import {ApiError} from '../lib/api';
 import {useCompanySettings} from './company-settings-provider';
 import {Button} from './ui/button';
 import {Badge} from './ui/badge';
@@ -27,6 +28,17 @@ const eventNames:Record<string,string>={TYPE_NEW_MESSAGE:'新消息',TYPE_UPDATE
 const reasons:Record<string,string>={rate_limited:'平台限流，按许可时间重试',network_error:'网络异常，已安排重试',timed_out:'读取超时，已安排重试',invalid_credentials:'平台凭证失效，请更新并检查',credentials_unavailable:'凭证无法解密，请检查加密密钥',permission_denied:'平台读取权限不足',invalid_response:'平台响应未通过校验',chat_not_found:'尚未在平台聊天列表中找到该会话',message_not_found:'平台历史中尚未找到该消息',message_content_changed:'平台编辑与不可变消息冲突，保留原记录，需人工核对',cursor_stalled:'平台分页未推进，需检查',product_identity_unresolved:'SKU 无法唯一匹配商品，请先回补目录',product_details_missing:'平台未返回全部商品详情',product_listing_missing:'平台未返回全部商品库存标记',sync_authority_changed:'处理期间店铺授权或配置改变，资料未提交',push_processing_failed:'处理未完成，请核查后重试'};
 const prepareSchema=v.object({sellerId:v.pipe(v.string(),v.trim(),v.regex(/^(?:|0|[1-9][0-9]{0,39})$/,'请填写通知中的数字 seller_id，或暂留空'))});
 const simulationSchema=v.object({body:v.pipe(v.string(),v.minLength(2),v.maxLength(65536),v.check(text=>{try{const value:unknown=JSON.parse(text);return !!value&&typeof value==='object'&&!Array.isArray(value);}catch{return false;}},'请输入有效的 JSON 对象'))});
+type Conflict={id:number|null;host:string;types:string[]};
+/** The server only echoes hosts, never the other subscription's full URL. */
+function readConflicts(detail:unknown):Conflict[]{
+ if(!detail||typeof detail!=='object'||Array.isArray(detail))return [];
+ const rows=(detail as {conflicts?:unknown}).conflicts;if(!Array.isArray(rows))return [];
+ return rows.flatMap(row=>{
+  if(!row||typeof row!=='object'||Array.isArray(row))return [];
+  const item=row as Record<string,unknown>;if(typeof item.host!=='string')return [];
+  return [{id:typeof item.id==='number'?item.id:null,host:item.host,types:Array.isArray(item.types)?item.types.filter((type):type is string=>typeof type==='string'):[]}];
+ });
+}
 
 export function StorePushPanel({companyId,storeId,management,configured}:{companyId:string;storeId:string;management:boolean;configured:boolean}){
  const client=useQueryClient(),{date}=useCompanySettings(),key=['store-push',companyId,storeId];
@@ -34,6 +46,7 @@ export function StorePushPanel({companyId,storeId,management,configured}:{compan
  const [pending,setPending]=useState(false),busy=useRef(false),[error,setError]=useState<unknown>(null),[notice,setNotice]=useState(''),[callback,setCallback]=useState(''),[visible,setVisible]=useState(false);
  const mounted=useRef(true);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  const [confirm,setConfirm]=useState<PushCommand|null>(null),[source,setSource]=useState<(typeof pushSources)[number]>('chat');
+ const [conflict,setConflict]=useState<{id:number|null;host:string;types:string[]}[]|null>(null);
  const prepare=useForm({resolver:valibotResolver(prepareSchema),defaultValues:{sellerId:''}}),simulation=useForm({resolver:valibotResolver(simulationSchema),defaultValues:{body:'{\n  "message_type": "TYPE_PING",\n  "time": "'+new Date().toISOString()+'"\n}'}});
  useEffect(()=>{if(!management){setCallback('');setVisible(false);}},[management]);
  async function run(command:PushCommand){
@@ -47,7 +60,10 @@ export function StorePushPanel({companyId,storeId,management,configured}:{compan
  if(query.isError||!query.data)return <div><ErrorNotice error={query.error}/><Button variant="outline" onClick={()=>void query.refetch()}>重新读取 Push 状态</Button></div>;
  const view=query.data.push,revision=view.revision,active=view.mode==='active';
  async function copy(){try{const url=callback||await run({operation:'reveal',expectedRevision:revision});if(url){await navigator.clipboard.writeText(url);setNotice('回调地址已复制。地址含密钥，请仅填入 Ozon 通知配置。');}}catch{setNotice('浏览器未允许复制。请点击「显示地址」后手动复制。');}}
- async function register(){if(busy.current)return;busy.current=true;setPending(true);setError(null);setNotice('');try{const result=await registerPush(companyId,storeId,revision);if(!mounted.current)return;setNotice(result.registration.isActive?'Ozon 已确认该地址可用（is_active: true）。下一步点「切换为 Push」开始接收事件。':`Ozon 已登记地址，但校验未通过：${result.registration.errors.join('；')||'未返回原因'}。请确认地址可从公网访问后再试。`);await query.refetch();}catch(cause){setError(cause);}finally{busy.current=false;setPending(false);}}
+ async function register(takeOver=false){if(busy.current)return;busy.current=true;setPending(true);setError(null);setNotice('');try{const result=await registerPush(companyId,storeId,revision,takeOver);if(!mounted.current)return;setConflict(null);const registration=result.registration,detail=registration.errors.length?`自检反馈：${registration.errors.join('；')}。`:'';
+   setNotice(!registration.enabled?'Ozon 已登记地址，但没有返回订阅标识，无法开启投递。请重新生成地址后再试。':registration.isActive?`Ozon 已登记该地址并开启投递，自检通过。${detail}下一步点「切换为 Push」开始接收事件。`:`Ozon 已登记该地址并开启投递。Ozon 的 check 只做响应模板自检，对正常服务也可能误报，请以「最近协议握手」是否有时间为准。${detail}`);
+   await query.refetch();
+  }catch(cause){if(cause instanceof ApiError&&cause.code==='PUSH_TYPES_IN_USE'){setConflict(readConflicts(cause.detail));}else setError(cause);}finally{busy.current=false;setPending(false);}}
  async function simulate(body:string){const url=callback||await run({operation:'reveal',expectedRevision:revision});if(!url)return;busy.current=true;setPending(true);setError(null);try{await simulatePush(url,body);setNotice('本地模拟回调已接收。后台仍从 Ozon 核对资料，不会触发 AI 自动回复。');await query.refetch();}catch(cause){setError(cause);}finally{busy.current=false;setPending(false);}}
  return <Card role="region" aria-labelledby="store-push-title">
   <CardHeader><CardTitle><h3 id="store-push-title">Ozon Push 同步</h3></CardTitle><CardAction><Badge variant="outline">{labels[view.mode]}</Badge></CardAction><CardDescription>通知先持久化，再按变更对象读取平台事实。明确切换后停止周期扫描；页面通过实时连接刷新。</CardDescription></CardHeader>
@@ -66,7 +82,7 @@ export function StorePushPanel({companyId,storeId,management,configured}:{compan
      <Field className="min-w-52 flex-1"><FieldLabel htmlFor="push-seller-id">通知 seller_id（可选）</FieldLabel><Input id="push-seller-id" inputMode="numeric" autoComplete="off" {...prepare.register('sellerId')} aria-invalid={!!prepare.formState.errors.sellerId}/><FieldDescription>确认实际通知标识后填写；留空时仍使用每店铺独立的地址密钥隔离。</FieldDescription>{prepare.formState.errors.sellerId&&<FieldError>{prepare.formState.errors.sellerId.message}</FieldError>}</Field>
      <Button type="submit" variant="outline" disabled={pending||!configured}>{view.mode==='unconfigured'?'生成回调地址':'重新生成地址'}</Button>
     </form>
-    {view.mode!=='unconfigured'&&<div className="flex flex-col gap-3"><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={pending} onClick={()=>void copy()}><Copy data-icon="inline-start"/>复制回调地址</Button><Button variant="ghost" disabled={pending} onClick={async()=>{if(!callback)await run({operation:'reveal',expectedRevision:revision});setVisible(value=>!value);}}>{visible?'隐藏地址':'显示地址'}</Button><Button disabled={pending||!configured} onClick={()=>void register()}>在 Ozon 注册地址</Button></div>{visible&&callback&&<Field><FieldLabel htmlFor="push-callback-url">回调地址（含密钥）</FieldLabel><Input id="push-callback-url" readOnly value={callback} onFocus={event=>event.currentTarget.select()}/></Field>}
+    {view.mode!=='unconfigured'&&<div className="flex flex-col gap-3"><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={pending} onClick={()=>void copy()}><Copy data-icon="inline-start"/>复制回调地址</Button><Button variant="ghost" disabled={pending} onClick={async()=>{if(!callback)await run({operation:'reveal',expectedRevision:revision});setVisible(value=>!value);}}>{visible?'隐藏地址':'显示地址'}</Button><Button disabled={pending||!configured} onClick={()=>void register(false)}>在 Ozon 注册地址</Button></div>{visible&&callback&&<Field><FieldLabel htmlFor="push-callback-url">回调地址（含密钥）</FieldLabel><Input id="push-callback-url" readOnly value={callback} onFocus={event=>event.currentTarget.select()}/></Field>}
      <div className="flex flex-wrap gap-2">{!active?<Button disabled={pending||!view.lastPingAt||!configured} onClick={()=>setConfirm({operation:'activate',expectedRevision:revision})}>{view.cutoverAt?'恢复 Push':'切换为 Push'}</Button>:<Button variant="outline" disabled={pending} onClick={()=>setConfirm({operation:'pause',expectedRevision:revision})}>暂停 Push 处理</Button>}{view.cutoverAt&&<Button variant="ghost" disabled={pending} onClick={()=>setConfirm({operation:'rollback',expectedRevision:revision})}>迁移回滚</Button>}</div>
     </div>}
     {view.localSimulationAllowed&&view.mode!=='unconfigured'&&<form className="flex flex-col gap-3 rounded-lg border p-4" onSubmit={simulation.handleSubmit(({body})=>void simulate(body))}><h4 className="text-sm font-medium">本地 Push 模拟器</h4><Field><FieldLabel htmlFor="push-simulation-json">模拟通知 JSON</FieldLabel><Textarea id="push-simulation-json" className="min-h-36 font-mono text-xs" spellCheck={false} {...simulation.register('body')} aria-invalid={!!simulation.formState.errors.body}/>{simulation.formState.errors.body&&<FieldError>{simulation.formState.errors.body.message}</FieldError>}<FieldDescription>先发送 TYPE_PING 完成握手。测试业务事件时填写真实平台 ID；回调正文不会被当作买家消息。</FieldDescription></Field><Button className="w-fit" type="submit" variant="outline" disabled={pending}>发送本地模拟回调</Button></form>}
@@ -77,5 +93,6 @@ export function StorePushPanel({companyId,storeId,management,configured}:{compan
    <Button className="w-fit" variant="ghost" disabled={pending||query.isFetching} onClick={()=>void query.refetch()}><RefreshCw data-icon="inline-start"/>刷新 Push 状态</Button>
   </CardContent>
   <Dialog open={confirm!==null} onOpenChange={open=>{if(!open&&!pending)setConfirm(null);}}><DialogContent><DialogHeader><DialogTitle>{confirm?.operation==='activate'?'切换为 Push 驱动':confirm?.operation==='pause'?'暂停 Push 处理':confirm?.operation==='rollback'?'迁移回滚':confirm?.operation==='reconcile'?'执行一次人工回补':'重新生成回调地址'}</DialogTitle><DialogDescription>{confirm?.operation==='activate'?'切换后停止聊天、商品和包裹的周期扫描。只有收到通知或明确执行人工回补才会读取平台。本地未连接公网通知时，不会自动获知真实店铺变化。已有资料与旧断点保留。':confirm?.operation==='pause'?'停止队列处理，但继续持久化有效通知，已有资料不删除。不会自动恢复旧轮询。':confirm?.operation==='rollback'?'仅作为迁移故障回退：暂停 Push 处理并恢复旧扫描。不会删除通知或已有资料；重新验证后可再次切换。':confirm?.operation==='reconcile'?'执行一轮有限的读取与详情补充，完成后停止，不开启周期扫描。历史数据不会自动触发 AI 回复。':'旧地址将立即失效。已切换的店铺会暂停 Push，不会自动恢复轮询；需更新 Ozon 回调地址并重新完成握手。已经持久化的通知仍保留，恢复后继续处理。'}</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" disabled={pending} onClick={()=>setConfirm(null)}>取消</Button><Button disabled={pending||!confirm} onClick={()=>confirm&&void run(confirm)}>{pending&&<Spinner/>}确认{confirm?.operation==='activate'?'切换':confirm?.operation==='reconcile'?'回补':''}</Button></DialogFooter></DialogContent></Dialog>
+  <Dialog open={conflict!==null} onOpenChange={open=>{if(!open&&!pending)setConflict(null);}}><DialogContent><DialogHeader><DialogTitle>接管这些通知类型？</DialogTitle><DialogDescription>Ozon 同一通知类型只能绑定一个地址。该店铺的聊天类型现在绑定在 {conflict?.map(row=>row.host).join('、')}。接管会把聊天类型改到 DingBell，其余类型留在原地址；原服务将不再收到买家消息。</DialogDescription></DialogHeader><ul className="text-xs text-muted-foreground">{conflict?.map(row=><li key={`${row.host}-${row.id??'x'}`}>{row.host}（id {row.id??'未知'}）：{row.types.map(type=>eventNames[type]??type).join('、')}</li>)}</ul><DialogFooter><Button variant="outline" disabled={pending} onClick={()=>setConflict(null)}>取消</Button><Button disabled={pending} onClick={()=>void register(true)}>{pending&&<Spinner/>}接管并注册</Button></DialogFooter></DialogContent></Dialog>
  </Card>;
 }

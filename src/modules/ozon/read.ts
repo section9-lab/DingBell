@@ -2,7 +2,18 @@ export type OzonReadCode = 'invalid_request' | 'invalid_response' | 'invalid_cre
 export class OzonReadError extends Error {
   readonly code: OzonReadCode;
   readonly retryAfterMs?: number;
-  constructor(code: OzonReadCode, retryAfterMs?: number) { super(code); this.name = 'OzonReadError'; this.code = code; this.retryAfterMs = retryAfterMs; }
+  /** Provider HTTP status, when the failure came from an HTTP response. */
+  readonly status?: number;
+  /** Provider `message` from its error body, bounded and already trimmed. */
+  readonly providerMessage?: string;
+  constructor(code: OzonReadCode, retryAfterMs?: number, status?: number, providerMessage?: string) {
+    super(code);
+    this.name = 'OzonReadError';
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+    this.status = status;
+    this.providerMessage = providerMessage;
+  }
 }
 export type Credentials = { clientId: string; apiKey: string };
 const decimal = /^(0|[1-9][0-9]{0,39})$/;
@@ -15,6 +26,35 @@ function retryAfter(value: string | null): number | undefined {
   if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(value)) return undefined;
   const date = Date.parse(value);
   return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
+const providerMessageLimit = 8_192;
+/** Best-effort read of the provider's own error message; never throws. */
+async function providerMessage(response: Response, aborted: Promise<never>): Promise<string | undefined> {
+  try {
+    if (!response.body) return undefined;
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    while (length < providerMessageLimit) {
+      const part = await Promise.race([reader.read(), aborted]);
+      if (part.done) break;
+      chunks.push(part.value);
+      length += part.value.byteLength;
+    }
+    void reader.cancel().catch(() => {});
+    const bytes = new Uint8Array(Math.min(length, providerMessageLimit));
+    let offset = 0;
+    for (const chunk of chunks) {
+      const take = Math.min(chunk.length, bytes.length - offset);
+      if (take <= 0) break;
+      bytes.set(chunk.subarray(0, take), offset);
+      offset += take;
+    }
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: false, ignoreBOM: false }).decode(bytes));
+    const message = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).message : undefined;
+    return typeof message === 'string' && message.length > 0 ? message.slice(0, 300) : undefined;
+  } catch { return undefined; }
 }
 
 async function boundedJSON(response: Response, aborted: Promise<never>): Promise<Record<string, unknown>> {
@@ -44,16 +84,16 @@ async function boundedJSON(response: Response, aborted: Promise<never>): Promise
 
 export const ozonReadPaths = ['/v3/chat/list', '/v3/chat/history', '/v3/product/list', '/v3/product/info/list', '/v4/posting/fbs/list', '/v3/posting/fbs/get', '/v3/posting/fbo/list', '/v2/posting/fbo/get', '/v1/posting/fbp/list', '/v1/posting/fbp/get'] as const;
 /** Seller-cabinet configuration writes. They share the read transport but never return entity ids. */
-export const ozonWritePaths = ['/v1/notification/list', '/v1/notification/set', '/v1/notification/update', '/v1/notification/check'] as const;
+export const ozonWritePaths = ['/v1/notification/list', '/v1/notification/set', '/v1/notification/update', '/v1/notification/delete', '/v1/notification/enable', '/v1/notification/check'] as const;
 export type OzonReadPath = (typeof ozonReadPaths)[number];
 export type OzonWritePath = (typeof ozonWritePaths)[number];
 export function readOzonJSON(credentials: Credentials, path: OzonReadPath, body: string, fetcher: typeof fetch, signal?: AbortSignal) {
   return ozonJSON(ozonReadPaths, credentials, path, body, fetcher, signal);
 }
-export function writeOzonJSON(credentials: Credentials, path: OzonWritePath, body: string, fetcher: typeof fetch, signal?: AbortSignal) {
-  return ozonJSON(ozonWritePaths, credentials, path, body, fetcher, signal);
+export function writeOzonJSON(credentials: Credentials, path: OzonWritePath, body: string, fetcher: typeof fetch, signal?: AbortSignal, options?: { errorDetail?: boolean }) {
+  return ozonJSON(ozonWritePaths, credentials, path, body, fetcher, signal, options);
 }
-async function ozonJSON(allowed: readonly string[], credentials: Credentials, path: string, body: string, fetcher: typeof fetch, signal?: AbortSignal): Promise<Record<string, unknown>> {
+async function ozonJSON(allowed: readonly string[], credentials: Credentials, path: string, body: string, fetcher: typeof fetch, signal?: AbortSignal, options?: { errorDetail?: boolean }): Promise<Record<string, unknown>> {
   if (!allowed.includes(path)) throw new OzonReadError('invalid_request');
   if (!/^[0-9]{1,32}$/.test(credentials.clientId) || !/^[\x21-\x7e]{1,4096}$/.test(credentials.apiKey)) throw new OzonReadError('invalid_request');
   if (signal?.aborted) throw new OzonReadError('aborted');
@@ -69,9 +109,11 @@ async function ozonJSON(allowed: readonly string[], credentials: Credentials, pa
       headers: { 'Client-Id': credentials.clientId, 'Api-Key': credentials.apiKey, 'Content-Type': 'application/json' }, body,
     }), aborted]);
     if (!response.ok) {
-      void response.body?.cancel().catch(() => {});
       const code = response.status === 401 ? 'invalid_credentials' : response.status === 403 ? 'permission_denied' : response.status === 429 ? 'rate_limited' : response.status >= 300 && response.status < 400 ? 'redirect_refused' : 'provider_unavailable';
-      throw new OzonReadError(code, code === 'rate_limited' ? retryAfter(response.headers.get('retry-after')) : undefined);
+      // Keep the seller-facing reason (for example "Type already in use") when the caller asks for it.
+      const detail = options?.errorDetail ? await providerMessage(response, aborted) : undefined;
+      if (!options?.errorDetail) void response.body?.cancel().catch(() => {});
+      throw new OzonReadError(code, code === 'rate_limited' ? retryAfter(response.headers.get('retry-after')) : undefined, response.status, detail);
     }
     failure = 'invalid_response';
     return await boundedJSON(response, aborted);

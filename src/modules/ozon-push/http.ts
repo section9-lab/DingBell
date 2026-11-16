@@ -5,7 +5,7 @@ import {pushCommandSchema} from '../../shared/ozon-push.ts';
 import {configured,signedIn,limitedBody,companyFor} from '../identity/http.ts';
 import {findStore,type StoreActor} from '../stores/storage.ts';
 import {decryptCredentials} from '../stores/credentials.ts';
-import {registerOzonPushUrl} from '../ozon/notification.ts';
+import {registerOzonPushUrl,PushTypesInUse} from '../ozon/notification.ts';
 import {OzonReadError} from '../ozon/read.ts';
 import {credentialConfig} from '../stores/credentials.ts';
 import {repairPushHistory,enqueueReconcile,retryPush,changePushMode,acceptPush,createEndpoint,endpointById,readEndpoint,pushView} from './storage.ts';
@@ -16,6 +16,8 @@ const base='/api/companies/:companyId/stores/:storeId/push';
 function actor(c:Context<ApplicationEnv>):StoreActor{const session=c.get('identitySession');return {orgId:c.req.param('companyId')!,actorUserId:session.user.id,sessionId:session.session.id};}
 const notFound=(c:Context<ApplicationEnv>)=>apiError(c,'NOT_FOUND','The store or callback is unavailable.',404);
 const conflict=(c:Context<ApplicationEnv>)=>apiError(c,'PUSH_CHANGED','Read the current Push configuration before continuing.',409);
+/** Only the origin is safe to echo; stored provider URLs may carry their own secrets. */
+function hostOf(url:string){try{return new URL(url).host;}catch{return 'unknown';}}
 async function bodyText(request:Request){if(!request.body)return '';const reader=request.body.getReader(),parts:Uint8Array[]=[];let length=0;try{for(;;){const item=await reader.read();if(item.done)break;length+=item.value.byteLength;if(length>1_048_576)throw new RangeError('PUSH_TOO_LARGE');parts.push(item.value);}const all=new Uint8Array(length);let offset=0;for(const part of parts){all.set(part,offset);offset+=part.length;}return new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(all);}finally{await reader.cancel().catch(()=>{});}}
 export function registerPushRoutes(app:Hono<ApplicationEnv>){
  app.get(base,configured,signedIn,async c=>{
@@ -58,7 +60,7 @@ export function registerPushRoutes(app:Hono<ApplicationEnv>){
   try{await db.prepare('INSERT INTO store_audit_event(id,request_id,organization_id,store_id,actor_user_id,action,outcome,from_revision,to_revision,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),c.get('requestId'),who.orgId,storeId,who.actorUserId,`store.push.${command.operation}`,'succeeded',command.expectedRevision,view.revision,Date.now()).run();}catch{return apiError(c,'OPERATION_UNCONFIRMED','Read Push status before trying another operation.',503);}
   return jsonResponse(c,{push:{...view,...(callbackUrl?{callbackUrl}:{})}});
  });
- const registerSchema=v.strictObject({expectedRevision:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1))});
+ const registerSchema=v.strictObject({expectedRevision:v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(Number.MAX_SAFE_INTEGER-1)),takeOver:v.optional(v.boolean())});
  /** Registers this store's callback with Ozon (Notification beta) and asks Ozon to verify it. */
  app.post(`${base}/register`,configured,limitedBody,signedIn,async c=>{
   const who=actor(c),storeId=c.req.param('storeId')!,company=await companyFor(c,who.orgId,who.actorUserId);if(!company)return notFound(c);
@@ -77,13 +79,17 @@ export function registerPushRoutes(app:Hono<ApplicationEnv>){
      {keyVersion:store.credentialKeyVersion,nonce:store.credentialNonce,ciphertext:store.credentialCiphertext})).apiKey;
   }catch{return apiError(c,'PUSH_SECRET_UNAVAILABLE','Restore the original encryption key, or regenerate the callback address.',503);}
   try{
-   const registration=await registerOzonPushUrl({clientId:store.platformStoreId,apiKey},url,fetch);
+   const registration=await registerOzonPushUrl({clientId:store.platformStoreId,apiKey},url,fetch,{takeOver:parsed.output.takeOver===true});
    try{await db.prepare('INSERT INTO store_audit_event(id,request_id,organization_id,store_id,actor_user_id,action,outcome,from_revision,to_revision,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
      .bind(crypto.randomUUID(),c.get('requestId'),who.orgId,storeId,who.actorUserId,'store.push.register','succeeded',current.revision,current.revision,Date.now()).run();}catch{/* the Ozon subscription already exists; audit is best effort */ }
    const view=await pushView(db,scope,localPushMode(c.env.APP_BASE_URL));
    return jsonResponse(c,{push:{...view,callbackUrl:url},registration});
   }catch(error){
-   if(error instanceof OzonReadError)return apiError(c,{invalid_credentials:'OZON_INVALID_CREDENTIALS',permission_denied:'OZON_PERMISSION_DENIED',rate_limited:'OZON_RATE_LIMITED',invalid_response:'OZON_INVALID_RESPONSE',timed_out:'OZON_TIMEOUT',network_error:'OZON_NETWORK_ERROR',aborted:'OZON_ABORTED',redirect_refused:'OZON_REDIRECT_REFUSED',provider_unavailable:'OZON_UNAVAILABLE',invalid_request:'INVALID_REQUEST'}[error.code],'Ozon refused the Push registration.',409);
+   if(error instanceof PushTypesInUse){
+    const conflicts=error.conflicts.map(row=>({id:row.id,host:hostOf(row.url),types:row.types}));
+    return apiError(c,'PUSH_TYPES_IN_USE',`These notification types are already bound to another URL: ${conflicts.map(row=>`${row.host} (id ${row.id??'?'})`).join(', ')}.`,409,undefined,{conflicts});
+   }
+   if(error instanceof OzonReadError)return apiError(c,{invalid_credentials:'OZON_INVALID_CREDENTIALS',permission_denied:'OZON_PERMISSION_DENIED',rate_limited:'OZON_RATE_LIMITED',invalid_response:'OZON_INVALID_RESPONSE',timed_out:'OZON_TIMEOUT',network_error:'OZON_NETWORK_ERROR',aborted:'OZON_ABORTED',redirect_refused:'OZON_REDIRECT_REFUSED',provider_unavailable:'OZON_UNAVAILABLE',invalid_request:'INVALID_REQUEST'}[error.code],'Ozon refused the Push registration.',409,undefined,error.providerMessage?{providerMessage:error.providerMessage,status:error.status??null}:undefined);
    throw error;
   }
  });
@@ -95,7 +101,7 @@ export function registerPushRoutes(app:Hono<ApplicationEnv>){
   let body:Record<string,unknown>,text:string;try{text=await bodyText(c.req.raw);body=parsePushJSON(text);}catch(error){const tooLarge=error instanceof RangeError&&error.message==='PUSH_TOO_LARGE';return apiError(c,tooLarge?'REQUEST_TOO_LARGE':'INVALID_REQUEST','Invalid callback body.',tooLarge?413:400);}
   if(body.message_type==='TYPE_PING'){
    const row=await c.env.DB.prepare('UPDATE store_push_endpoint SET last_ping_at=?,last_simulation_at=CASE WHEN ? THEN ? ELSE last_simulation_at END,updated_at=? WHERE endpoint_id=? AND generation=? AND secret_hash=? RETURNING store_id').bind(Date.now(),simulated?1:0,Date.now(),Date.now(),endpoint.endpointId,endpoint.generation,endpoint.secretHash).first();if(!row)return notFound(c);
-   return jsonResponse(c,{version:'1',name:'DingBell',time:new Date().toISOString()});
+   return jsonResponse(c,{version:'1.0',name:'DingBell',message_type:'TYPE_PING',time:new Date(Math.floor(Date.now()/1000)*1000).toISOString().replace(/\.000Z$/,'Z'),result:true});
   }
   let sellerId:string,type:string,hint:ReturnType<typeof normalizePush>;
   try{sellerId=pushSeller(body);type=pushType(body);hint=normalizePush(body);}catch{return apiError(c,'INVALID_REQUEST','Invalid callback identifiers.',400);}

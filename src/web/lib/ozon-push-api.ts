@@ -5,10 +5,10 @@ const path=(companyId:string,storeId:string)=>`/api/companies/${encodeURICompone
 const receipt=(storeId:string)=>v.object({push:v.pipe(pushViewSchema,v.check(value=>value.storeId===storeId))});
 export function readPush(companyId:string,storeId:string,signal?:AbortSignal){return request(path(companyId,storeId),receipt(storeId),{signal});}
 export function changePush(companyId:string,storeId:string,command:PushCommand){return request(path(companyId,storeId),receipt(storeId),{method:'POST',body:JSON.stringify(command)});}
-const registration=v.object({registered:v.boolean(),updated:v.boolean(),isActive:v.boolean(),errors:v.array(v.string())});
-/** Registers the callback URL with the Ozon seller account and asks Ozon to verify it. */
-export function registerPush(companyId:string,storeId:string,expectedRevision:number){
- return request(`${path(companyId,storeId)}/register`,v.object({push:receipt(storeId),registration}),{method:'POST',body:JSON.stringify({expectedRevision})});
+const registration=v.object({registered:v.boolean(),updated:v.boolean(),enabled:v.boolean(),isActive:v.boolean(),errors:v.array(v.string()),adopted:v.array(v.object({id:v.nullable(v.number()),url:v.string(),types:v.array(v.string())}))});
+/** Registers the callback URL with the Ozon seller account, enables delivery and asks Ozon to verify it. */
+export function registerPush(companyId:string,storeId:string,expectedRevision:number,takeOver=false){
+ return request(`${path(companyId,storeId)}/register`,v.object({push:receipt(storeId),registration}),{method:'POST',body:JSON.stringify({expectedRevision,...(takeOver?{takeOver:true}:{})})});
 }
 /** Exercise the real receiver, locally and anonymously. The simulation flag can only suppress automation. */
 export async function simulatePush(callbackUrl:string,body:string){

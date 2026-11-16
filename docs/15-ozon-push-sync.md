@@ -58,7 +58,7 @@ Webhook 的 `data`、商品名称、状态、价格、用户类型等**不作为
 
 | 通知 | 处理 |
 | --- | --- |
-| `TYPE_PING` | 返回 `version` / `name` / UTC `time`，记录协议握手 |
+| `TYPE_PING` | 返回 `result: true` / `version: "1.0"` / `name` / `message_type` / 秒级 UTC `time`，并记录协议握手 |
 | `TYPE_NEW_MESSAGE` / `TYPE_UPDATE_MESSAGE` | 读取对应聊天历史；未知聊天先有限分页核对 `BUYER_SELLER` 元数据 |
 | `TYPE_MESSAGE_READ` | 刷新聊天已拉取窗口内的权威已读标记，不根据提示猜测整段历史已读 |
 | `TYPE_CHAT_CLOSED` | 核对平台聊天列表并更新状态 |
@@ -103,10 +103,19 @@ FBO / FBP 不假定存在覆盖完整生命周期的通知：本版保留各自�
 1. 用项目既有 Wrangler 发布流程应用迁移并配置协调器；保留原凭证加密密钥版本。迁移已有数据库时，还需制定数据和运行中任务的迁移方案，不能只复制 URL。
 2. `APP_BASE_URL` 为正确站点 HTTPS origin；有独立公开回调域名时，可设置 `OZON_PUSH_PUBLIC_BASE_URL`（只接受 origin，不含路径/凭证/查询串）。
 3. 回调地址是独立随机 bearer capability，不是 Ozon 官方 HMAC 签名。必须使用 TLS，并对网关/访问日志中的回调路径脱敏；不能公开截图或粘贴。可在边缘额外设置适合业务流量的限流。
-4. 先检查该卖家/密钥实际可用的 Push 类型及**已有订阅**，再配置 URL。不要覆盖其他系统的订阅；同一种通知可能只能指向一个地址。
+4. 先检查该卖家/密钥实际可用的 Push 类型及**已有订阅**，再配置 URL。Ozon 同一通知类型只能绑定一个地址，`set` 在类型已被占用时返回 400 `Type already in use: <TYPE>`；本应用把这种情况作为可确认的冲突返回（`PUSH_TYPES_IN_USE`），只有在管理员明确点「接管并注册」后才会调用 `update` / `delete` 让旧订阅释放聊天类型，旧地址的其它类型保持不变。
 5. 通过 Ozon 实际握手、真实变更、事实入库、失败恢复和页面更新逐项验证，再确认正式切换。协议握手成功本身不证明公网真实事件覆盖。
 
-本版不调用请求契约尚未核实的通知管理 API，也不虚构回调签名、`auth_header` 或订阅成功状态。官方资料优先：
+### 注册序列（`POST …/push/register`）
+
+1. `POST /v1/notification/list`：读取已有订阅，`types` 在真实响应里是 `{type, description}` 对象，`enable` 表示是否投递。
+2. 本店铺地址已登记 → 补齐缺失类型（`update`）并重新 `enable`。
+3. 未登记 → `set`；若类型被别的地址占用，返回冲突（不静默覆盖）。
+4. 确认接管 → 先用 `update`（保留其余类型）或 `delete`（旧订阅已无其它类型）释放聊天类型，再 `set`。
+5. `POST /v1/notification/enable`：登记后默认不投递，必须显式开启，否则永远收不到事件。
+6. `POST /v1/notification/check`：只做响应模板自检。实测它对正常工作的第三方接收端同样报 `WRONG_RESULT_FIELD` / `STATUS_CODE_NOT_OK`，因此只作为提示，不阻断切换；地址是否可达以实际握手（`last_ping_at`）为准。
+
+本版不虚构回调签名、`auth_header` 或订阅成功状态；`check` 的误报不代表注册失败。官方资料优先：
 
 - <https://docs.ozon.ru/api/seller/>
 - <https://dev.ozon.ru/start/489-Gaid-po-nastroike-i-upravleniiu-Push-uvedomleniiami-cherez-Seller-API/>

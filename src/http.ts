@@ -27,8 +27,8 @@ export function jsonResponse(c: Context<ApplicationEnv>, body: unknown, status =
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-export function apiError(c: Context<ApplicationEnv>, code: string, message: string, status: number, original?: Response) {
-  return jsonResponse(c, { error: { code, message }, requestId: c.get('requestId') }, status, original);
+export function apiError(c: Context<ApplicationEnv>, code: string, message: string, status: number, original?: Response, detail?: Record<string, unknown>) {
+  return jsonResponse(c, { error: { code, message }, ...(detail ? { detail } : {}), requestId: c.get('requestId') }, status, original);
 }
 
 export function authError(c: Context<ApplicationEnv>, response: Response, mutating = false) {
