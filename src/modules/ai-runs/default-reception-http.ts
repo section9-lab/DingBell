@@ -21,7 +21,7 @@ export function registerDefaultAiReceptionRoutes(app: Hono<ApplicationEnv>) {
     if (method === 'get') {
       const row = await c.env.DB!.prepare('SELECT enabled,updated_at AS updatedAt FROM company_ai_reception_default WHERE organization_id=?')
         .bind(actor.orgId).first<{ enabled: number; updatedAt: number }>();
-      return jsonResponse(c, dto(row?.enabled === 1, row?.updatedAt ?? null));
+      return jsonResponse(c, dto(row === null || row.enabled === 1, row?.updatedAt ?? null));
     }
     if (!canManageCompany(company.role)) return apiError(c, 'FORBIDDEN', 'Only company owners and administrators can change AI reception defaults.', 403);
     const parsed = v.safeParse(bodySchema, await c.req.json().catch(() => null));

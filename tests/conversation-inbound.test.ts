@@ -72,8 +72,11 @@ test('input received before explicit resumption cannot become its pending AI tar
  assert.equal((await receive(f,id)).outcome,'ignored');assert.equal((await f.call('ai-pending-input')).body,null);assert.ok((await f.call('ai-listening')).body);
  await command(f,1,'resolve');await f.restart();assert.equal((await receive(f,id)).outcome,'ignored');assert.equal((await f.call('read')).body.view.state.version,2);
 });
-test('new input on a paused conversation keeps initial admission available without granting AI authority',{timeout:30000},async t=>{
- const f=await conversationControlFixture();t.after(f.close);const result=await receive(f,await append(f));assert.equal(result.state.controlEpoch,0);assert.equal(result.state.reception,'paused');assert.equal((await f.call('ai-pending-input')).body,null);
+test('a live input makes AI the owner by default, while an explicit opt-out keeps the human queue',{timeout:30000},async t=>{
+ const f=await conversationControlFixture();t.after(f.close);const result=await receive(f,await append(f));assert.equal(result.state.controlEpoch,1);assert.equal(result.state.reception,'ai');assert.ok((await f.call('ai-pending-input')).body);
+ const g=await conversationControlFixture();t.after(g.close);
+ await g.db.prepare("INSERT INTO company_ai_reception_default(organization_id,enabled,updated_at,updated_by) VALUES('org',0,?,'owner')").bind(Date.now()).run();
+ const opted=await receive(g,await append(g));assert.equal(opted.state.controlEpoch,0);assert.equal(opted.state.reception,'paused');assert.equal((await g.call('ai-pending-input')).body,null);
 });
 test('late delivery of an input already admitted to the active AI run does not restart that run',{timeout:30000},async t=>{
  const f=await conversationControlFixture(undefined,{});t.after(f.close);const policyId=await policy(f),messageId=await append(f),runId=crypto.randomUUID();

@@ -120,9 +120,13 @@ test('AI resumption requires current membership, an open human-controlled versio
  assert.equal((await resume({...request,controlEpoch:999} as any)).status,500);assert.equal((await f.f.call('read')).body.view.state.version,2);
  await f.f.call('execute',{command:{commandId:crypto.randomUUID(),action:'resolve',expectedVersion:2}});assert.equal((await resume({...request,expectedVersion:3})).body.outcome,'conflict');
  await f.f.call('execute',{command:{commandId:crypto.randomUUID(),action:'reopen',expectedVersion:3}});
- const requests=[{...request,expectedVersion:4},{...request,expectedVersion:4,runId:crypto.randomUUID()}],results=await Promise.all(requests.map(r=>resume(r)));
+ // Reopening hands the conversation back to AI, so a run cannot be resumed before a fresh human takeover.
+ const blocked=await Promise.all([{...request,expectedVersion:4},{...request,expectedVersion:4,runId:crypto.randomUUID()}].map(r=>resume(r)));
+ assert.deepEqual(blocked.map(r=>r.body.outcome),['conflict','conflict']);
+ assert.equal((await f.f.call('execute',{command:{commandId:crypto.randomUUID(),action:'takeover',expectedVersion:4}})).body.outcome,'accepted');
+ const requests=[{...request,expectedVersion:5},{...request,expectedVersion:5,runId:crypto.randomUUID()}],results=await Promise.all(requests.map(r=>resume(r)));
  assert.equal(results.filter(r=>r.body.outcome==='accepted').length,1);assert.equal(results.filter(r=>r.body.outcome==='conflict').length,1);
- const index=results.findIndex(r=>r.body.outcome==='accepted'),winner=requests[index];assert.equal((await f.reader(run.scope,winner.runId))!.controlEpoch,5);
+ const index=results.findIndex(r=>r.body.outcome==='accepted'),winner=requests[index];assert.equal((await f.reader(run.scope,winner.runId))!.controlEpoch,6);
  assert.equal((await resume(winner,{...f.f.actor('staff'),expectedMemberId:'staff-member'})).body.outcome,'conflict');
  await f.f.db.prepare("UPDATE session SET expires_at=0 WHERE id='owner-session'").run();assert.equal((await resume(winner)).body.outcome,'not_found');
 });

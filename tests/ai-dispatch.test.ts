@@ -163,7 +163,7 @@ test('the company default lets a paused conversation adopt AI on the next live m
  assert.equal(state.workStatus,'needs_reply');
 });
 
-test('an AI handoff keeps the company default from reopening the conversation',{timeout:30000},async t=>{
+test('a handoff lets the next customer message return to AI unless a human took over',{timeout:30000},async t=>{
  const m=await api(),f=await fixture();t.after(f.close);
  await f.db.prepare("INSERT INTO company_ai_reception_default(organization_id,enabled,updated_at,updated_by) VALUES('org',1,?,'owner')").bind(Date.now()).run();
  const input=await f.append();
@@ -177,7 +177,8 @@ test('an AI handoff keeps the company default from reopening the conversation',{
  const handoff=(await f.call('read')).body.view.state;
  assert.equal(handoff.reception,'paused');
  await f.append(false);
- assert.equal((await f.call('read')).body.view.state.reception,'paused','a handed-off conversation must stay with humans');
+ // AI stays the default owner: the next live message retries instead of parking the conversation.
+ assert.equal((await f.call('read')).body.view.state.reception,'ai');
  assert.ok(input.eventId);
 });
 

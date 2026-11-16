@@ -40,15 +40,17 @@ test('only a newly appended incremental customer input can consume listening aut
  assert.deepEqual((await f.db.prepare('SELECT action FROM conversation_control_event ORDER BY sequence').all()).results.map(r=>r.action),['ai_listen','ai_start']);
  const delayed=await fixture();t.after(delayed.close);assert.equal((await delayed.listen()).body.outcome,'accepted');await delayed.message('late-old',2);assert.equal((await delayed.start('late-old')).body.outcome,'unavailable');
 });
-test('takeover, resolve and reopen revoke future reception; replay never restores revoked authority',{timeout:30000},async t=>{
+test('a human takeover stops AI and reopening a finished conversation hands it back to AI',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);assert.equal((await f.listen()).body.outcome,'accepted');
  assert.equal((await f.call('execute',{command:{commandId:crypto.randomUUID(),expectedVersion:1,action:'takeover'}})).body.outcome,'accepted');
  assert.equal((await f.call('ai-listening')).body,null);const replay=await f.listen();assert.equal(replay.body.state.reception,'human');assert.equal(replay.body.state.version,2);
  await f.message('new',Date.now()+1);assert.equal((await f.start('new',2)).body.outcome,'conflict');
  assert.equal((await f.call('execute',{command:{commandId:crypto.randomUUID(),expectedVersion:2,action:'resolve'}})).body.outcome,'accepted');
  assert.equal((await f.listen({...f.request,commandId:crypto.randomUUID(),expectedVersion:3})).body.outcome,'conflict');
- assert.equal((await f.call('execute',{command:{commandId:crypto.randomUUID(),expectedVersion:3,action:'reopen'}})).body.outcome,'accepted');assert.equal((await f.call('read')).body.view.state.reception,'human');
- const fresh=await f.listen({...f.request,commandId:crypto.randomUUID(),expectedVersion:4});assert.equal(fresh.body.outcome,'accepted');assert.equal(fresh.body.receipt.listening.afterSequence,2);assert.equal((await f.start('new',5)).body.outcome,'unavailable');
+ assert.equal((await f.call('execute',{command:{commandId:crypto.randomUUID(),expectedVersion:3,action:'reopen'}})).body.outcome,'accepted');
+ // Reopening means "the human is done here": AI takes the conversation back, so a manual listen is redundant.
+ assert.equal((await f.call('read')).body.view.state.reception,'ai');
+ const fresh=await f.listen({...f.request,commandId:crypto.randomUUID(),expectedVersion:4});assert.equal(fresh.body.outcome,'conflict');
 });
 test('listening rejects missing policy, channel, identity and caller-supplied input boundaries',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);
@@ -59,10 +61,10 @@ test('listening rejects missing policy, channel, identity and caller-supplied in
  assert.ok(await changePolicy(f.db,f.actor,f.policyId,3,{action:'pause'},crypto.randomUUID()));assert.equal((await f.listen()).body.outcome,'unavailable');
  assert.equal((await f.call('read')).body.view.state.version,0);
 });
-test('resolving a waiting conversation cannot re-enable AI through the first-run path after reopening',{timeout:30000},async t=>{
+test('reopening a resolved conversation leaves AI in charge for the next message',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);assert.equal((await f.listen()).body.outcome,'accepted');
  for(const [action,expectedVersion]of [['resolve',1],['reopen',2]])assert.equal((await f.call('execute',{command:{commandId:crypto.randomUUID(),expectedVersion,action}})).body.outcome,'accepted');
- await f.message('later',Date.now()+1);assert.equal((await f.start('later',3)).body.outcome,'conflict');assert.equal((await f.call('read')).body.view.state.reception,'paused');
+ await f.message('later',Date.now()+1);assert.equal((await f.start('later',3)).body.outcome,'conflict');assert.equal((await f.call('read')).body.view.state.reception,'ai');
 });
 test('competing resume commands and human command collisions cannot replace the accepted boundary',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);

@@ -1,10 +1,10 @@
 export type DefaultReceptionActor = { orgId: string; actorUserId: string };
 
-/** Read once per inbound message; a missing row keeps the historic paused default. */
+/** AI reception is the product default; only a stored opt-out turns it off. */
 export async function readDefaultAiReception(db: D1Database, organizationId: string): Promise<boolean> {
   const row = await db.prepare('SELECT enabled FROM company_ai_reception_default WHERE organization_id=?')
     .bind(organizationId).first<{ enabled: number }>();
-  return row?.enabled === 1;
+  return row === null || row.enabled === 1;
 }
 
 export function writeDefaultAiReception(db: D1Database, actor: DefaultReceptionActor, enabled: boolean) {

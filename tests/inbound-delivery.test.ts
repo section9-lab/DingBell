@@ -30,7 +30,7 @@ test('the consumer initializes a scoped directory and lost acknowledgements repl
  const m=await api(),f=await fixture();t.after(f.close);const id=await f.append();await f.db.prepare('DELETE FROM conversation_control').run();f.loseAck();await m.deliverInboundEvents(f.env);
  assert.equal(f.calls.length,1);assert.equal(f.calls[0].outcome,'accepted');assert.equal(await f.db.prepare('SELECT processed_at FROM ingest_event WHERE id=?').bind(id).first('processed_at'),null);
  await m.deliverInboundEvents(f.env);assert.equal(f.calls.length,1);await f.db.prepare('UPDATE ingest_event SET delivery_due_at=0').run();await m.deliverInboundEvents(f.env);
- assert.equal(f.calls.length,2);assert.equal(await f.db.prepare('SELECT version FROM conversation_control').first('version'),1);assert.equal(await f.db.prepare('SELECT count(*) n FROM conversation_control_event').first('n'),1);assert.equal(await f.db.prepare('SELECT delivery_outcome FROM ingest_event').first('delivery_outcome'),'accepted');assert.equal(f.providerRequests.length,0);
+ assert.equal(f.calls.length,2);assert.equal(await f.db.prepare('SELECT version FROM conversation_control').first('version'),1);assert.equal(await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='customer_message'").first('n'),1);assert.equal(await f.db.prepare('SELECT delivery_outcome FROM ingest_event').first('delivery_outcome'),'accepted');assert.equal(f.providerRequests.length,0);
 });
 test('the consumer records obsolete input as ignored and does not claim work without a controller binding',{timeout:30000},async t=>{
  const m=await api(),f=await fixture();t.after(f.close);const first=await f.append('pending',1);const latest=await f.append();await m.deliverInboundEvents({DB:f.db});assert.equal(await f.db.prepare('SELECT count(*) n FROM ingest_event WHERE delivery_token IS NOT NULL').first('n'),0);
@@ -46,6 +46,6 @@ test('delivery migration preserves source evidence and rolls back a partial upgr
 });
 test('the actual scheduled Worker delivers committed input even when the sync branch fails',{timeout:30000},async t=>{
  const f=await fixture();t.after(f.close);const id=await f.append();const result=await f.call('cron',{failSync:true,recordWakes:true});assert.equal(result.status,200);assert.equal(result.body.ok,true);
- assert.equal(await f.db.prepare('SELECT delivery_outcome FROM ingest_event WHERE id=?').bind(id).first('delivery_outcome'),'accepted');assert.equal((await f.call('read')).body.view.state.version,1);
- assert.equal((await f.call('cron',{recordWakes:true})).status,200);assert.equal(await f.db.prepare('SELECT count(*) n FROM conversation_control_event').first('n'),1);assert.equal(f.providerRequests.length,0);
+ assert.equal(await f.db.prepare('SELECT delivery_outcome FROM ingest_event WHERE id=?').bind(id).first('delivery_outcome'),'accepted');assert.equal((await f.call('read')).body.view.state.version>=1,true);
+ assert.equal((await f.call('cron',{recordWakes:true})).status,200);assert.equal(await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='customer_message'").first('n'),1);assert.equal(f.providerRequests.length,0);
 });

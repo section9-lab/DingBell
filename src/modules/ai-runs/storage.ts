@@ -58,7 +58,7 @@ export const currentPayload=`EXISTS (SELECT 1 FROM conversation_control cc JOIN 
     JOIN policy_version pv ON pv.organization_id=frozen.organization_id AND pv.policy_id=frozen.id AND pv.revision=frozen.published_revision AND pv.schema_version=1
     WHERE frozen.enabled=1 AND frozen.kind='automatic' AND frozen.published_revision=json_extract(candidate.value,'$.policyRevision')
      AND json_extract(candidate.value,'$.mode')='automatic' AND json_extract(pv.config,'$.mode')='automatic'
-     AND EXISTS(SELECT 1 FROM json_each(pv.config,'$.storeIds') WHERE value=c.store_id)
+     AND (json_array_length(pv.config,'$.storeIds')=0 OR EXISTS(SELECT 1 FROM json_each(pv.config,'$.storeIds') WHERE value=c.store_id))
      AND json_extract(pv.config,'$.stage')=json_extract(candidate.value,'$.stage'))
    AND EXISTS (SELECT 1 FROM ingest_event e JOIN message m ON m.id=e.message_id AND m.organization_id=e.organization_id AND m.store_id=e.store_id AND m.conversation_id=e.conversation_id
     WHERE e.id=json_extract(plan.value,'$.run.admission.event.eventId') AND e.message_id=json_extract(plan.value,'$.run.request.messageId')

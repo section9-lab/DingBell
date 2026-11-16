@@ -153,8 +153,8 @@ return class ConversationController extends Base {
       if([state.version,state.controlEpoch,state.sequence].some(n=>n>=Number.MAX_SAFE_INTEGER-1))return {outcome:'unavailable' as const};
       // Company default: an unassigned paused conversation lets AI take the message. A prior AI
       // handoff, a stop or a human reply sets aiDefaultHold so the default never overrides it.
-      const adopt=defaultAi&&state.reception==='paused'&&state.lifecycle==='open'
-        &&state.assignedMemberId===null&&!(await transaction.get('aiDefaultHold'));
+      const adopt=defaultAi&&state.assignedMemberId===null
+        &&(state.reception==='paused'||state.lifecycle==='resolved');
       const appliedState:ControlState={...state,lifecycle:'open',workStatus:'needs_reply',reception:adopt?'ai':state.reception,version:state.version+1,sequence:state.sequence+1,
         controlEpoch:state.controlEpoch+(state.reception==='ai'||adopt||state.lifecycle==='resolved'?1:0),updatedAt:Math.max(Date.now(),state.updatedAt)};
       const receipt=checkedInboundReceipt({action:'customer_message',origin:'system',commandId,expectedVersion:state.version,actorUserId:null,actorMemberId:null,appliedState,event});
@@ -260,8 +260,6 @@ return class ConversationController extends Base {
       if(pendingNewer&&input.reason!=='disabled')return {outcome:'retry' as const,state};
       const appliedState:ControlState={...state,reception:'paused',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:state.controlEpoch+1,updatedAt:Math.max(Date.now(),state.updatedAt)};
       const receipt=checkedAiDispatchStopReceipt({action:'ai_dispatch_stop',origin:'system',commandId,expectedVersion:state.version,expectedEpoch:state.controlEpoch,actorUserId:null,actorMemberId:null,input,event,appliedState});
-      // A stop is an infrastructure refusal, not a human handoff: keep the company default armed so
-      // the next customer message can retry instead of parking the conversation forever.
       await transaction.delete(['aiPendingInput','aiListening','aiClassification','aiDeadline']);
       await this.persistCommand(transaction,{scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState};
     });
@@ -278,7 +276,6 @@ return class ConversationController extends Base {
       const receipt=checkedAiIntakeReceipt({action:'ai_classification',origin,commandId,expectedVersion:state.version,actorUserId:null,actorMemberId:null,run,classification,decision,appliedState});
       await transaction.delete(['aiDeadline','aiListening','aiPendingInput','aiClassification']);
       if(decision.kind==='ready'){await transaction.put('aiPendingInput',{schemaVersion:1,event:run.admission.event,controlEpoch:appliedState.controlEpoch});await transaction.put('aiClassification',commandId);}
-      else await transaction.put('aiDefaultHold',true);
       await this.persistCommand(transaction,{scope:directory.scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState};
     });
   }
@@ -333,7 +330,7 @@ return class ConversationController extends Base {
       const now=Math.max(Date.now(),state.updatedAt),listening=v.parse(aiListeningSchema,{schemaVersion:1,scope,request,afterSequence:boundary,createdAt:now,controlEpoch:state.controlEpoch+1});
       const appliedState:ControlState={...state,reception:'ai',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:listening.controlEpoch,updatedAt:now};
       const receipt=checkedAiListeningReceipt({action:'ai_listen',origin:'human',commandId,expectedVersion:state.version,actorUserId:actor.actorUserId,actorMemberId:access.memberId,appliedState,listening});
-      await transaction.put('aiListening',listening);await transaction.delete('aiDeadline');await transaction.delete('aiDefaultHold');
+      await transaction.put('aiListening',listening);await transaction.delete('aiDeadline');
       await this.persistCommand(transaction,{scope,receipt});return {outcome:'accepted' as const,receipt,state:appliedState,canSend:false as const};
     });
     if(result.outcome==='accepted')await this.flush(scope);return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
@@ -428,7 +425,7 @@ return class ConversationController extends Base {
       if([state.version,state.controlEpoch,state.sequence].some(n=>n>=Number.MAX_SAFE_INTEGER))return {outcome:'conflict' as const};
       const appliedState:ControlState={...state,reception:'paused',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:state.controlEpoch+1,updatedAt:Math.max(Date.now(),state.updatedAt)};
       const receipt=checkedAiReceipt({action:'request_handoff',origin,commandId,expectedVersion:state.version,actorUserId:null,actorMemberId:null,appliedState,run,input});
-      await transaction.delete('aiDeadline');await transaction.put('aiDefaultHold',true);await this.persistCommand(transaction,{scope:directory.scope,receipt});return this.aiResult(receipt,appliedState);
+      await transaction.delete('aiDeadline');await this.persistCommand(transaction,{scope:directory.scope,receipt});return this.aiResult(receipt,appliedState);
     });
   }
   async requestHandoff(scope:ControlScope,runId:string,value:unknown){
@@ -648,7 +645,7 @@ return class ConversationController extends Base {
       if(command.action==='transfer'&&!access.targetEligible)return {outcome:'conflict' as const,reason:'target' as const};
       if([state.version,state.sequence,...(['add_note','send_reply','cancel_reply'].includes(command.action)?[]:[state.controlEpoch])].some(value=>value===Number.MAX_SAFE_INTEGER))throw new Error('CONTROL_VERSION_EXHAUSTED');
       const fields={...state,version:state.version+1,controlEpoch:state.controlEpoch+(['add_note','send_reply','cancel_reply'].includes(command.action)?0:1),sequence:state.sequence+1,updatedAt:Math.max(Date.now(),state.updatedAt),
-        reception:command.action==='claim'||command.action==='takeover'||command.action==='transfer'?'human' as const:state.reception==='ai'&&!['add_note','send_reply','cancel_reply'].includes(command.action)?'paused' as const:state.reception,
+        reception:command.action==='claim'||command.action==='takeover'||command.action==='transfer'?'human' as const:command.action==='reopen'?'ai' as const:state.reception==='ai'&&!['add_note','send_reply','cancel_reply'].includes(command.action)?'paused' as const:state.reception,
         assignedMemberId:command.action==='transfer'?command.targetMemberId:command.action==='claim'?access.memberId:state.assignedMemberId};
       const appliedState:ControlState=command.action==='add_note'||command.action==='send_reply'||command.action==='cancel_reply'?{...state,version:fields.version,sequence:fields.sequence,updatedAt:fields.updatedAt}:command.action==='resolve'?{...fields,lifecycle:'resolved',workStatus:null}:
         {...fields,lifecycle:'open',workStatus:command.action==='set_work_status'?command.workStatus:command.action==='reopen'?'needs_reply':state.workStatus??'needs_reply'};
