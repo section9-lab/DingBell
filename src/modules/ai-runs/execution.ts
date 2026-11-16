@@ -3,6 +3,7 @@ import {getConversationController,type ControlBindings} from '../conversations/c
 import type {AiReceipt} from './finance.ts';
 import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGeneration,freezeAiConfig,type AiExecution,type AiRunReader} from './storage.ts';
 import {selectAiBudget} from './budget.ts';
+import {logEvent} from '../../platform/log.ts';
 import {isOutboundPromptVersion} from '../../shared/ai-versions.ts';
 import type {SupportInspection} from './ledger.ts';
 import type {AiKnowledgeBindings} from './knowledge.ts';
@@ -37,22 +38,24 @@ async function observe(env:SupportBindings,run:AiExecution,runtime:SupportRuntim
 }
 /** Internal orchestration only; no user/session impersonation or public native Agent endpoint. */
 export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:string,deps:Dependencies={}){
+ /** One identifier-only line per refusal so Cloudflare logs explain why no model ran. */
+ const refuse=(branch:string,extra:Record<string,string|number|null>={})=>{logEvent('ai.execute.unavailable',{orgId:scope.organizationId,storeId:scope.storeId,conversationId:scope.conversationId,runId:id,branch,...extra});return view('unavailable');};
  if(!env.DB)return view('unavailable');let run=await readAiExecution(env.DB,scope,id);
  if(!run){
-  if(!env.AGENT_RUNTIME||!env.CONVERSATION_CONTROLLER)return view('unavailable');
+  if(!env.AGENT_RUNTIME||!env.CONVERSATION_CONTROLLER)return refuse('runtime_missing');
   let cost: Awaited<ReturnType<typeof import('../company-model/runtime.ts')['resolveSupportConfiguration']>>;
   try{
    cost=await (await import('../company-model/runtime.ts')).resolveSupportConfiguration(env,scope.organizationId);
-   if(!cost)return view('unavailable');
-  }catch{return view('unavailable');}
-  if(isOutboundPromptVersion(cost.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
-  const work=await aiRunReader(env)(scope,id);if(!work)return view('unavailable');
+   if(!cost)return refuse('model_configuration');
+  }catch{return refuse('model_configuration_error');}
+  if(isOutboundPromptVersion(cost.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return refuse('outbound_disabled');
+  const work=await aiRunReader(env)(scope,id);if(!work)return refuse('work_unreadable');
   if(work.schemaVersion===2)cost=freezeAiConfig({maxGenerations:1,model:{...cost.config.model,promptVersion:'intake-v1'}});
-  const budget=await selectAiBudget(env.DB,scope,cost.total);if(!budget)return view('unavailable');
+  const budget=await selectAiBudget(env.DB,scope,cost.total);if(!budget)return refuse('budget_missing');
   const reserved=await reserveAiExecution(env.DB,aiRunReader(env),scope,id,budget,cost.config);
-  if(!reserved.run)return view('unavailable');run=reserved.run;
+  if(!reserved.run)return refuse('reserve',{outcome:reserved.outcome});run=reserved.run;
  }
- if(isOutboundPromptVersion(run.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return view('unavailable');
+ if(isOutboundPromptVersion(run.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return refuse('outbound_disabled');
  const runtime=await native(env,deps);if(run.receipt||run.closure)return observe(env,run,runtime);
  try{
   const instance=await runtime.lookup(run),state=await runtime.inspect(run);

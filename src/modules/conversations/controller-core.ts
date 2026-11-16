@@ -180,7 +180,13 @@ return class ConversationController extends Base {
     const directory=await readControlDirectory(this.env.DB,scope),value=await this.ctx.storage.get('aiRun');if(!directory||!value)return null;
     const run=v.parse(aiWorkSchema,value);if(run.schemaVersion===1)return this.readAiRun(scope,runId);
     if(run.request.runId!==runId||!sameScope(run.scope,scope)||Date.now()>=run.deadlineAt)return null;
-    if(JSON.stringify(await readAiIntakeAdmission(this.env.DB,scope,run.request.messageId))!==JSON.stringify(run.admission))return null;
+    const admission=await readAiIntakeAdmission(this.env.DB,scope,run.request.messageId);
+    if(JSON.stringify(admission)!==JSON.stringify(run.admission)){
+      // Field names only: the question text must never reach the logs.
+      const fields=admission?Object.keys(run.admission).filter(key=>JSON.stringify((admission as Record<string,unknown>)[key])!==JSON.stringify((run.admission as Record<string,unknown>)[key])):['admission_null'];
+      logEvent('ai.work.admission_changed',{orgId:scope.organizationId,storeId:scope.storeId,conversationId:scope.conversationId,runId,fields:fields.join(',')});
+      return null;
+    }
     return this.ctx.storage.transaction(async transaction=>{const state=await this.state(transaction,directory);return state.lifecycle==='open'&&state.reception==='ai'&&state.controlEpoch===run.controlEpoch&&Date.now()<run.deadlineAt&&JSON.stringify(await transaction.get('aiRun'))===JSON.stringify(run)?run:null;});
   }
   async startAiIntake(scope:ControlScope,value:unknown){
