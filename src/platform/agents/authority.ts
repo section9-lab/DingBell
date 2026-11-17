@@ -124,12 +124,35 @@ export class BusinessAgentAuthority implements AgentAuthority {
     return tools;
   }
   async tool(uid: string, name: string, value: unknown, taskId: string, signal?: AbortSignal) {
-    const row = this.row(uid); if (row.kind !== 'support') throw new Error('AGENT_TOOL_UNAVAILABLE');
-    const state = this.support(row.run_id).inspect(); if (!state || state.closed || state.cancellation || Date.now() >= state.run.payload.run.deadlineAt) throw new Error('AGENT_AUTHORITY_REVOKED');
-    const tool = this.tools(row.run_id).find(tool => tool.name === name); if (!tool) throw new Error('AGENT_TOOL_UNAVAILABLE');
-    const result = await tool.run({ data: v.parse(tool.input,value) as never, signal, toolCallId: taskId,
-      log: { info() {}, warn() {}, error() {} }, step: { do: async (_name, action) => action() } });
-    return { ...result, output: v.parse(tool.output,result.output) };
+    try {
+      const row = this.row(uid); if (row.kind !== 'support') throw new Error('AGENT_TOOL_UNAVAILABLE');
+      const state = this.support(row.run_id).inspect();
+      if (!state) throw new Error('AGENT_LEDGER_MISSING');
+      if (state.closed) throw new Error('AGENT_AUTHORITY_REVOKED:closed');
+      if (state.cancellation) throw new Error('AGENT_AUTHORITY_REVOKED:cancelled');
+      if (Date.now() >= state.run.payload.run.deadlineAt) throw new Error('AGENT_AUTHORITY_REVOKED:deadline');
+      const tool = this.tools(row.run_id).find(tool => tool.name === name); if (!tool) throw new Error(`AGENT_TOOL_UNAVAILABLE:${name}`);
+      const result = await tool.run({ data: v.parse(tool.input,value) as never, signal, toolCallId: taskId,
+        log: { info() {}, warn() {}, error() {} }, step: { do: async (_name, action) => action() } });
+      const output = v.parse(tool.output,result.output);
+      // Durable, content-free tool outcome: the only place a refused tool call is visible in D1.
+      await this.auditTool(row.run_id, `${name}:${String((output as {status?:unknown}).status ?? 'ok')}`);
+      return { ...result, output };
+    } catch (error) {
+      await this.auditTool(await this.runId(uid), `${name}:failed:${error instanceof Error ? error.message : 'unknown'}`);
+      throw error;
+    }
+  }
+  private async runId(uid: string) { try { const row = this.state.prepare('SELECT run_id FROM runtime_agent_binding WHERE uid=?').get(uid); return row ? String(row.run_id) : null; } catch { return null; } }
+  private async auditTool(runId: string | null, outcome: string) {
+    try {
+      if (!runId) return;
+      const support = this.support(runId).inspect();
+      const scope = support?.run.payload.run.scope as ControlScope | undefined;
+      if (!scope) return;
+      await this.database.prepare(`INSERT INTO store_audit_event(id,request_id,organization_id,store_id,actor_user_id,action,outcome,created_at)
+        VALUES(?,?,?,?,NULL,'ai.tool',?,?)`).bind(crypto.randomUUID(), runId, scope.organizationId, scope.storeId, outcome.slice(0, 120), Date.now()).run();
+    } catch { /* diagnostics are best effort */ }
   }
   async provider(uid: string, input: string, init: { body: string; headers: Record<string,string> }, signal?: AbortSignal): Promise<Response> {
     const row = this.row(uid), definition = await this.describe(uid), body = JSON.parse(init.body) as Record<string,unknown>;
