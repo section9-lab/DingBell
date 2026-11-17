@@ -46,7 +46,16 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
  logEvent('ai.dispatch.admit',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,eventId:c.eventId,outcome:admitted.outcome});
  if(admitted.outcome==='conflict')return true;
  if(admitted.outcome!=='accepted')return stop('unavailable');
- const result=await execute(env,c.scope,c.runId),next=await controller.readClassifiedInput(c.scope);
+ const result=await execute(env,c.scope,c.runId);
+ let next=await controller.readClassifiedInput(c.scope);
+ if(!next&&result.status==='completed'){
+  // The classifier finished without submitting its tool; keep the buyer from waiting for a human.
+  const fallback=typeof controller.recordFallbackClassification==='function'
+   ?await controller.recordFallbackClassification(c.scope,c.runId).catch(()=>({outcome:'unavailable' as const}))
+   :{outcome:'unavailable' as const};
+  logEvent('ai.dispatch.fallback',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,outcome:fallback.outcome});
+  if(fallback.outcome==='accepted')next=await controller.readClassifiedInput(c.scope);
+ }
  if(next&&next.intakeRunId===c.runId){
   const answer=await controller.startAi(c.scope,next.request);
   if(answer.outcome==='unavailable'){if(result.status==='pending'||result.status==='unconfirmed')return false;return stop('unavailable',next.request.runId);}

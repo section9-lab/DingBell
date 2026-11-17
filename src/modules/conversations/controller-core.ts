@@ -269,7 +269,10 @@ return class ConversationController extends Base {
     return this.ctx.storage.transaction(async transaction=>{
       const state=await this.state(transaction,directory),commandId=`ai-classification:${run.request.runId}`,saved=await transaction.get(`receipt:${commandId}`);
       if(saved){const receipt=checkedAiIntakeReceipt(saved);return receipt.action==='ai_classification'&&receipt.origin===origin&&JSON.stringify(receipt.run)===JSON.stringify(run)&&JSON.stringify(receipt.classification)===JSON.stringify(classification)?{outcome:'accepted' as const,receipt,state}:{outcome:'conflict' as const};}
-      if(state.lifecycle!=='open'||state.reception!=='ai'||state.controlEpoch!==run.controlEpoch||JSON.stringify(await transaction.get('aiRun'))!==JSON.stringify(run))return {outcome:'conflict' as const};
+      if(state.lifecycle!=='open')return {outcome:'conflict' as const,reason:'lifecycle'};
+      if(state.reception!=='ai')return {outcome:'conflict' as const,reason:'reception'};
+      if(state.controlEpoch!==run.controlEpoch)return {outcome:'conflict' as const,reason:`epoch_${state.controlEpoch}_${run.controlEpoch}`};
+      if(JSON.stringify(await transaction.get('aiRun'))!==JSON.stringify(run))return {outcome:'conflict' as const,reason:'run_changed'};
       if([state.version,state.controlEpoch,state.sequence].some(n=>n>=Number.MAX_SAFE_INTEGER-1))return {outcome:'conflict' as const};
       const decision=classification?classifyDecision(run,classification):fallback!;
       const appliedState:ControlState={...state,reception:decision.kind==='ready'?'ai':'paused',assignedMemberId:null,workStatus:'needs_reply',version:state.version+1,sequence:state.sequence+1,controlEpoch:state.controlEpoch+1,updatedAt:Math.max(Date.now(),state.updatedAt)};
@@ -292,8 +295,40 @@ return class ConversationController extends Base {
       const committed=await this.ctx.storage.get(`receipt:ai-classification:${runId}`);
       if(committed)work=checkedAiIntakeReceipt(committed).run;
     }
-    if(work?.schemaVersion!==2||!sameScope(work.scope,scope))return {outcome:'unavailable' as const};
-    const result=await this.commitClassification(directory,work,input,'agent');if(result.outcome==='accepted')await this.flush(scope);return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
+    if(work?.schemaVersion!==2||!sameScope(work.scope,scope)){
+      await this.auditClassification(scope,runId,'work_unavailable');
+      return {outcome:'unavailable' as const};
+    }
+    const result=await this.commitClassification(directory,work,input,'agent');
+    if(result.outcome!=='accepted')await this.auditClassification(scope,runId,result.reason??result.outcome);
+    if(result.outcome==='accepted')await this.flush(scope);return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
+  }
+  /** Durable, content-free reason for a refused classification (queryable in D1, not only in logs). */
+  private async auditClassification(scope:ControlScope,runId:string,reason:string){
+    try{await this.env.DB!.prepare(`INSERT INTO store_audit_event(id,request_id,organization_id,store_id,actor_user_id,action,outcome,created_at)
+      VALUES(?,?,?,?,NULL,'ai.classification',?,?)`).bind(crypto.randomUUID(),runId,scope.organizationId,scope.storeId,reason.slice(0,120),Date.now()).run();}catch{/* diagnostics are best effort */}
+  }
+  /**
+   * The classifier call can finish without submitting its tool (provider quirk, timeout, cancelled
+   * turn). Rather than leaving the buyer without an answer, pick the customer-facing stage from the
+   * already-validated candidates and continue with the normal answer run.
+   */
+  async recordFallbackClassification(scope:ControlScope,runId:string){
+    if(!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
+    const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
+    const value=await this.ctx.storage.get('aiRun');if(!value)return {outcome:'unavailable' as const};
+    const work=v.parse(aiWorkSchema,value);
+    if(work.schemaVersion!==2||work.request.runId!==runId||!sameScope(work.scope,scope))return {outcome:'unavailable' as const};
+    const automatic=work.admission.candidates.filter(candidate=>candidate.mode==='automatic');
+    const candidate=automatic.find(entry=>entry.stage==='presale')??automatic[0];
+    if(!candidate)return {outcome:'unavailable' as const};
+    const text=work.admission.question;
+    const language=candidate.language==='customer'?(/[Ѐ-ӿ]/.test(text)?'ru':/[一-鿿]/.test(text)?'zh-CN':'en'):candidate.language;
+    const result=await this.commitClassification(directory,work,{stage:candidate.stage,language,customerRequestedHuman:false},'agent');
+    if(result.outcome!=='accepted')await this.auditClassification(scope,runId,`fallback_${result.reason??result.outcome}`);
+    else await this.auditClassification(scope,runId,`fallback_ready_${candidate.stage}`);
+    if(result.outcome==='accepted')await this.flush(scope);
+    return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
   }
   async readClassifiedInput(scope:ControlScope){
     if(!this.env.DB||!this.routed(scope))return null;const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return null;

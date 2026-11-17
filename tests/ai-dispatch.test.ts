@@ -20,6 +20,7 @@ async function fixture(){
   };
   const controller={receiveInbound:async(scope:any,eventId:string)=>(await f.call('inbound',{eventId},scope)).body,admitAiDispatch:async(scope:any,request:any)=>(await f.call('ai-dispatch-admit',{request},scope)).body,
    stopAiDispatch:async(scope:any,request:any)=>(await f.call('ai-dispatch-stop',{request},scope)).body,
+   recordFallbackClassification:async(scope:any,runId:string)=>(await f.call('ai-fallback-classification',{runId},scope)).body,
    readClassifiedInput:async(scope:any)=>(await f.call('ai-classified-input',{},scope)).body,
    startAi:async(scope:any,request:any)=>(await f.call('ai-start',{request},scope)).body,
    readAiWork:async(scope:any,runId:string)=>(await f.call('ai-work-read',{runId},scope)).body};
@@ -191,4 +192,19 @@ test('a stopped dispatch leaves the company default armed for the next message',
  assert.equal(stopped.body.outcome,'accepted');
  await f.append(false);
  assert.equal((await f.call('read')).body.view.state.reception,'ai','an infrastructure stop must not park the conversation');
+});
+
+test('a classifier that never submits its tool still starts an answer with the published stage',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);await f.append();
+ const kinds:number[]=[];
+ const deps={reconcile:async()=>({status:'pending'}),execute:async(_env:any,scope:any,runId:string)=>{
+  const run=(await f.call('ai-work-read',{runId},scope)).body;
+  kinds.push(run.schemaVersion);
+  return {status:'completed'};
+ }};
+ await m.dispatchAiReceptions(f.env(),deps);
+ assert.deepEqual(kinds,[2,1],'the intake fallback must be followed by the answer run');
+ const events=await f.db.prepare("SELECT action FROM conversation_control_event ORDER BY sequence").all();
+ assert.deepEqual(events.results.map((row:any)=>row.action).slice(0,4),['customer_message','ai_intake_start','ai_classification','ai_start']);
+ assert.equal(await f.db.prepare("SELECT outcome FROM store_audit_event WHERE action='ai.classification'").first('outcome'),'fallback_ready_presale');
 });
