@@ -128,7 +128,7 @@ function ModelForm({data,providers,providersLoading,providersError,fetching,refr
       ...(isCustom?{baseUrl:baseUrl.trim()}:{}),
       ...(effectiveAuthMode==='api_key'&&apiKey.trim()?{apiKey:apiKey.trim()}:{}),execution:data.execution};
     setBusy(true);setError(undefined);setMessage('');setApiKey('');setReplacingKey(false);
-    try{const saved=await saveCompanyModel(data.companyId,command);client.setQueryData(['company-model',data.companyId],saved);void client.invalidateQueries({queryKey:['ai-budgets']});}
+    try{const saved=await saveCompanyModel(data.companyId,command);client.setQueryData(['company-model',data.companyId],saved);}
     catch(cause){setError(cause);setUncertain(true);}finally{setBusy(false);}
   }
   async function test(){

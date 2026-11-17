@@ -23,9 +23,7 @@ import { AuditUnavailable, OperationUnconfirmed } from './modules/audit/operatio
 import { mailConfigured } from './modules/mail/config.ts';
 import type { IdentityDependencies } from './modules/mail/types.ts';
 import type { StoreDependencies } from './modules/stores/bindings.ts';
-import { registerAiBudgetRoutes } from './modules/ai-runs/budget-http.ts';
 import { registerAiReceptionRoutes } from './modules/conversations/ai-http.ts';
-import { registerBudgetAuditRoutes } from './modules/budget-audit/http.ts';
 import {registerExportRoutes} from './modules/exports/http.ts';
 import {registerAnalyticsRoutes} from './modules/analytics/http.ts';
 import {registerDataGovernanceRoutes} from './modules/data-governance/http.ts';
@@ -70,8 +68,6 @@ export function createApp(deps: IdentityDependencies & StoreDependencies & Compa
   registerCommerceRoutes(app);
   registerConversationRoutes(app, deps);
   registerConversationControlRoutes(app);
-  registerAiBudgetRoutes(app);
-  registerBudgetAuditRoutes(app);
   registerExportRoutes(app);
   registerAnalyticsRoutes(app);
   registerAccountingRoutes(app);

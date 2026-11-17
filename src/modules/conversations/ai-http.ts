@@ -5,7 +5,6 @@ import {configured,limitedBody,signedIn} from '../identity/http.ts';
 import {diagnoseAiReceptionBlocker} from './ai-listening.ts';
 import {aiReceptionCommandSchema,aiReceptionSchema} from '../../shared/ai-reception.ts';
 import {companySupportConfigurationView} from '../company-model/runtime.ts';
-import {selectAiBudget} from '../ai-runs/budget.ts';
 import {readAiExecution} from '../ai-runs/storage.ts';
 import {aiActivitySchema} from '../../shared/ai-activity.ts';
 import {getConversationController} from './control-bindings.ts';
@@ -54,7 +53,6 @@ export function registerAiReceptionRoutes(app:Hono<ApplicationEnv>){
      const config=await companySupportConfigurationView(c.env,actor.orgId);
      if(!config.enabled)return apiError(c,'AI_DISABLED','Automatic reception is disabled for this deployment.',403);
      if(!config.modelConfigured||!config.pricesConfigured||config.runReservationMicros===null)return apiError(c,'AI_NOT_CONFIGURED','A reviewed model, pricing configuration and runtime are required.',503);
-     if(!await selectAiBudget(c.env.DB!,scope,config.runReservationMicros))return apiError(c,'AI_BUDGET_UNAVAILABLE','An enabled production budget with sufficient full-run allowance is required.',412);
      const result=await controller.resumeAiReception(scope,actor,parsed.output);
      if(result.outcome==='not_found')return missing();
      if(result.outcome==='conflict')return apiError(c,'CONVERSATION_CHANGED','Refresh the conversation before choosing another operation.',409);

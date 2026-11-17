@@ -5,7 +5,7 @@ import {URL} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {conversationControlFixture} from './fixtures/conversation-control.ts';
 import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.ts';
-import {changeAiBudget,reserveAiExecution,readAiExecution,bindAiExecutionReceipt,claimAiGeneration,settleAiGeneration,closeAiExecution} from '../src/modules/ai-runs/storage.ts';
+import {reserveAiExecution,readAiExecution,bindAiExecutionReceipt,claimAiGeneration,settleAiGeneration,closeAiExecution} from '../src/modules/ai-runs/storage.ts';
 const intakeConfig={maxGenerations:1,model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'intake-v1',maxInputTokens:100,maxOutputTokens:100,
  pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}}};
 async function fixture(through?:string,aiTimeoutMs=60000){
@@ -56,8 +56,8 @@ test('classification timeout enters the human queue and projection retries retai
 });
 test('0039 preserves old financial and audit records, rolls back failure and keeps immutable guards',{timeout:30000},async t=>{
  const f=await fixture('0038');t.after(f.close);const request={...f.request,policyId:f.policyId,stage:'order',language:'ru'};assert.equal((await f.call('ai-start',{request})).body.outcome,'accepted');
- const budgetId=await budget(f),config={...intakeConfig,maxGenerations:2,model:{...intakeConfig.model,promptVersion:'support-v1'}},read=async(scope:any,id:string)=>(await f.call('ai-work-read',{runId:id},scope)).body;
- assert.equal((await reserveAiExecution(f.db,read,f.scope,request.runId,budgetId,config)).outcome,'reserved');
+ const config={...intakeConfig,maxGenerations:2,model:{...intakeConfig.model,promptVersion:'support-v1'}},read=async(scope:any,id:string)=>(await f.call('ai-work-read',{runId:id},scope)).body;
+ assert.equal((await reserveAiExecution(f.db,read,f.scope,request.runId,config)).outcome,'reserved');
  const snapshot=async()=>({events:(await f.db.prepare('SELECT * FROM conversation_control_event').all()).results,run:await readAiExecution(f.db,f.scope,request.runId)}),before=await snapshot();
  const statements=(await readFile(new URL('../migrations/0039_ai_intake.sql',import.meta.url),'utf8')).split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean);
  const guards=(await f.db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name").all()).results;
@@ -110,21 +110,17 @@ test('new input and human takeover revoke classification; forged model authority
  assert.equal((await f.classify({...f.classification,policyId:f.policyId})).status,500);const id=await f.append();assert.equal((await f.call('inbound',{eventId:id})).body.outcome,'accepted');assert.equal((await f.call('ai-work-read',{runId:f.request.runId})).body,null);assert.notEqual((await f.classify()).body.outcome,'accepted');
  assert.equal((await f.call('execute',{command:{commandId:crypto.randomUUID(),expectedVersion:2,action:'takeover'}})).body.outcome,'accepted');assert.equal((await f.start({...f.request,runId:crypto.randomUUID(),expectedVersion:3,messageId:id})).body.outcome,'conflict');
 });
-async function budget(f:Awaited<ReturnType<typeof fixture>>){
- const actor={...f.actor(),expectedMemberId:'owner-member'},id=crypto.randomUUID(),startsAt=Math.floor(Date.now()/86400000)*86400000;
- assert.equal((await changeAiBudget(f.db,actor,{id,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:1000000,maxRuns:5})).outcome,'applied');assert.equal((await changeAiBudget(f.db,actor,{id:crypto.randomUUID(),action:'set_enabled',budgetId:id,expectedRevision:0,enabled:true})).outcome,'applied');return id;
-}
 test('classification reuses the production financial ledger and closes before the answer run can start',{timeout:30000},async t=>{
- const f=await fixture();t.after(f.close);assert.equal((await f.start()).body.outcome,'accepted');const budgetId=await budget(f),read=async(scope:any,id:string)=>(await f.call('ai-work-read',{runId:id},scope)).body;
- const reserved=await reserveAiExecution(f.db,read,f.scope,f.request.runId,budgetId,intakeConfig);assert.equal(reserved.outcome,'reserved');assert.equal(reserved.run!.config.maxGenerations,1);assert.equal((reserved.run!.modelInput as any).task,'classify');assert.equal(await f.db.prepare('SELECT admitted_runs FROM ai_budget WHERE id=?').bind(budgetId).first('admitted_runs'),1);
+ const f=await fixture();t.after(f.close);assert.equal((await f.start()).body.outcome,'accepted');const read=async(scope:any,id:string)=>(await f.call('ai-work-read',{runId:id},scope)).body;
+ const reserved=await reserveAiExecution(f.db,read,f.scope,f.request.runId,intakeConfig);assert.equal(reserved.outcome,'reserved');assert.equal(reserved.run!.config.maxGenerations,1);assert.equal((reserved.run!.modelInput as any).task,'classify');
  const receipt={submissionId:'synthetic',uid:'synthetic-intake',acceptedAt:new Date().toISOString()};await bindAiExecutionReceipt(f.db,f.scope,f.request.runId,receipt);assert.equal(await claimAiGeneration(f.db,read,f.scope,f.request.runId,1),true);assert.equal(await claimAiGeneration(f.db,read,f.scope,f.request.runId,2),false);
  assert.equal((await f.classify()).body.outcome,'accepted');const next=(await f.call('ai-classified-input')).body;assert.equal((await f.call('ai-start',{request:next.request})).body.outcome,'unavailable');
  await settleAiGeneration(f.db,f.scope,f.request.runId,1,receipt,{input:1,output:1,cacheRead:0,cacheWrite:0});await closeAiExecution(f.db,f.scope,f.request.runId,{kind:'runtime_closed',providerPermits:1,receipt,outcome:'completed',evidenceId:crypto.randomUUID(),instanceId:`ai-support:${f.request.runId}`,executionClosed:true,verifiedAt:Date.now()});
  assert.equal((await f.call('ai-start',{request:next.request})).body.outcome,'accepted');const supportConfig={...intakeConfig,maxGenerations:2,model:{...intakeConfig.model,promptVersion:'support-v1'}};
- assert.equal((await reserveAiExecution(f.db,read,f.scope,next.request.runId,budgetId,supportConfig)).outcome,'reserved');assert.equal(await f.db.prepare('SELECT admitted_runs FROM ai_budget WHERE id=?').bind(budgetId).first('admitted_runs'),2);
+ assert.equal((await reserveAiExecution(f.db,read,f.scope,next.request.runId,supportConfig)).outcome,'reserved');
 });
 test('intake cannot use an answer prompt or multiple generations, and a disabled candidate cannot grant financial admission',{timeout:30000},async t=>{
- const f=await fixture();t.after(f.close);const started=await f.start(),run=started.body.receipt.run,budgetId=await budget(f),read=async()=>run;
- for(const config of [{...intakeConfig,maxGenerations:2},{...intakeConfig,model:{...intakeConfig.model,promptVersion:'support-v1'}}])assert.equal((await reserveAiExecution(f.db,read,f.scope,f.request.runId,budgetId,config)).outcome,'pricing_unavailable');
- await f.db.prepare('UPDATE reply_policy SET enabled=0 WHERE id=?').bind(f.policyId).run();assert.equal((await reserveAiExecution(f.db,read,f.scope,f.request.runId,budgetId,intakeConfig)).outcome,'budget_unavailable');assert.equal(await f.db.prepare('SELECT admitted_runs FROM ai_budget WHERE id=?').bind(budgetId).first('admitted_runs'),0);
+ const f=await fixture();t.after(f.close);const started=await f.start(),run=started.body.receipt.run,read=async()=>run;
+ for(const config of [{...intakeConfig,maxGenerations:2},{...intakeConfig,model:{...intakeConfig.model,promptVersion:'support-v1'}}])assert.equal((await reserveAiExecution(f.db,read,f.scope,f.request.runId,config)).outcome,'pricing_unavailable');
+ await f.db.prepare('UPDATE reply_policy SET enabled=0 WHERE id=?').bind(f.policyId).run();assert.equal((await reserveAiExecution(f.db,read,f.scope,f.request.runId,intakeConfig)).outcome,'unavailable');
 });

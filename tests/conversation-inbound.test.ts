@@ -5,7 +5,7 @@ import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.t
 import {readFile} from 'node:fs/promises';
 import {URL} from 'node:url';
 import {projectControlEvents} from '../src/modules/conversations/control-storage.ts';
-import {changeAiBudget,reserveAiExecution,closeAiExecution} from '../src/modules/ai-runs/storage.ts';
+import {reserveAiExecution,closeAiExecution} from '../src/modules/ai-runs/storage.ts';
 type Fixture=Awaited<ReturnType<typeof conversationControlFixture>>;
 async function append(f:Fixture,options:{mode?:string;direction?:string;state?:string;live?:boolean;at?:number}={}){
  const id=crypto.randomUUID(),at=options.at??Date.now();
@@ -93,12 +93,9 @@ test('inbound receipt survives projection failure and restart, and its transacti
 test('replacement input cannot rotate an unclosed execution ledger or reuse an unrelated message',{timeout:30000},async t=>{
  const f=await conversationControlFixture(undefined,{});t.after(f.close);const policyId=await policy(f),messageId=await append(f),runId=crypto.randomUUID();
  assert.equal((await f.call('ai-start',{request:{runId,expectedVersion:0,messageId,policyId,stage:'presale',language:'ru'}})).body.outcome,'accepted');
- const budgetId=crypto.randomUUID(),startsAt=Math.floor(Date.now()/86400000)*86400000;
- assert.equal((await changeAiBudget(f.db,{...f.actor(),expectedMemberId:'owner-member'},{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:2000000,maxRuns:10})).outcome,'applied');
- assert.equal((await changeAiBudget(f.db,{...f.actor(),expectedMemberId:'owner-member'},{id:crypto.randomUUID(),action:'set_enabled',budgetId,expectedRevision:0,enabled:true})).outcome,'applied');
  const config={maxGenerations:2,model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'synthetic',promptVersion:'synthetic',maxInputTokens:262144,maxOutputTokens:2048,
   pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}}};
- assert.equal((await reserveAiExecution(f.db,async(scope,id)=>(await f.call('ai-read',{runId:id},scope)).body,f.scope,runId,budgetId,config)).outcome,'reserved');
+ assert.equal((await reserveAiExecution(f.db,async(scope,id)=>(await f.call('ai-read',{runId:id},scope)).body,f.scope,runId,config)).outcome,'reserved');
  const nextId=await append(f);assert.equal((await receive(f,nextId)).state.version,2);const request={runId:crypto.randomUUID(),expectedVersion:2,messageId:nextId,policyId,stage:'presale',language:'ru'};
  assert.equal((await f.call('ai-start',{request})).body.outcome,'unavailable');assert.equal((await f.call('ai-pending-input')).body.event.messageId,nextId);
  await closeAiExecution(f.db,f.scope,runId,{kind:'unstarted_closed',providerPermits:0,evidenceId:crypto.randomUUID(),instanceId:`ai-support:${runId}`,executionClosed:true,verifiedAt:Date.now()});

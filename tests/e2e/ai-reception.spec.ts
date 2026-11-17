@@ -1,7 +1,6 @@
 import {test,expect} from '@playwright/test';
 import * as v from 'valibot';
 import {aiReceptionSchema} from '../../src/shared/ai-reception.ts';
-import {aiBudgetWorkspaceSchema} from '../../src/shared/ai-budget.ts';
 import {startLocalApplication} from '../fixtures/web-identity/local-app.ts';
 
 const aiConfiguration=JSON.stringify({maxGenerations:2,model:{provider:'nvidia',model:'nvidia/nemotron-3-super-120b-a12b',modelConfigVersion:'support-v1',promptVersion:'support-v1',maxInputTokens:262144,maxOutputTokens:2048,
@@ -32,7 +31,6 @@ test('authenticated Worker HTTP resumes only waiting and retains original receip
   await post(`${path}/commands`,{commandId:crypto.randomUUID(),expectedVersion:1,action:'takeover'});
   const response=await page.request.get(`${base}${path}/ai-resumptions/${command.commandId}`,{headers});expect(response.status(),await response.text()).toBe(200);
   const recovered=v.parse(aiReceptionSchema,await response.json());expect(recovered.waiting).toBeNull();expect(recovered.control.reception).toBe('human');expect(recovered.control.version).toBe(2);expect(recovered.resumption).toEqual(result.resumption);
-  const budgetResponse=await page.request.get(`${base}/ai-budgets`,{headers});expect(budgetResponse.status()).toBe(200);
-  const budgets=v.parse(aiBudgetWorkspaceSchema,await budgetResponse.json());expect(budgets.currentBudget?.reservedMicros).toBe(0);expect(budgets.currentBudget?.admittedRuns).toBe(0);expect(app.replyRequests).toHaveLength(0);
+  expect(app.replyRequests).toHaveLength(0);
  }finally{await app.close();}
 });

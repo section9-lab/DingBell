@@ -8,7 +8,7 @@ import {createNodeApplication as createSourceApplication} from '../src/platform/
 const createNodeApplication:typeof createSourceApplication=process.env.DINGBELL_TEST_COMPILED==='true'?(await import(new URL('../dist/node/server/application.mjs',import.meta.url).href)).createNodeApplication:createSourceApplication;
 import {createPolicy,changePolicy} from '../src/modules/reply-policies/storage.ts';
 import {ensureControlDirectory} from '../src/modules/conversations/control-storage.ts';
-import {changeAiBudget,reserveAiExecution,readAiExecution} from '../src/modules/ai-runs/storage.ts';
+import {reserveAiExecution,readAiExecution} from '../src/modules/ai-runs/storage.ts';
 import {executeAiRun,reconcileAiExecution,aiRunReader} from '../src/modules/ai-runs/execution.ts';
 import {insertCompanyModel} from '../src/modules/company-model/storage.ts';
 import {sealModelKey} from '../src/modules/company-model/security.ts';
@@ -34,11 +34,9 @@ for(const mode of ['handoff','cancel-before-dispatch','company-model'] as const)
  INSERT INTO store(id,organization_id,name,platform_store_id,status,created_at,updated_at) VALUES('store','org','Store','1','verified',1,1);
  INSERT INTO conversation(id,organization_id,store_id,platform_thread_id,platform_type,platform_status,platform_created_at,imported_at) VALUES('conv','org','store','thread','BUYER_SELLER','Opened',1,1);
  INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('message','org','store','conv','message','Customer','inbound','["Мне нужен человек."]',0,0,1,1,'incremental');`);
- const actor={orgId:'org',actorUserId:'owner',sessionId:'owner-session',expectedMemberId:'owner-member'},policyId=crypto.randomUUID(),budgetId=crypto.randomUUID();
+ const actor={orgId:'org',actorUserId:'owner',sessionId:'owner-session',expectedMemberId:'owner-member'},policyId=crypto.randomUUID();
  const policy={kind:'automatic' as const,name:'Support',storeIds:['store'],priority:50,stage:'presale' as const,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
  assert.ok(await createPolicy(db,actor,policyId,policy));assert.ok(await changePolicy(db,actor,policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(db,actor,policyId,2,{action:'publish'},crypto.randomUUID()));
- assert.equal((await changeAiBudget(db,actor,{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:1000000,maxRuns:10})).outcome,'applied');
- assert.equal((await changeAiBudget(db,actor,{id:crypto.randomUUID(),action:'set_enabled',budgetId,expectedRevision:0,enabled:true})).outcome,'applied');
  const scope=(await ensureControlDirectory(db,actor,'conv',now))!.scope,controller=app.env.CONVERSATION_CONTROLLER!.getByName(scope.controllerId),id=crypto.randomUUID();
  if(company){
   const base='https://api.openai.com/v1',model='synthetic-customer-model',execution={maxInputTokens:32768,maxOutputTokens:512,...config.model.pricing};
@@ -47,13 +45,13 @@ for(const mode of ['handoff','cancel-before-dispatch','company-model'] as const)
  }
  const started=await controller.startAi(scope,{runId:id,expectedVersion:0,messageId:'message',policyId,stage:'presale',language:'ru'});assert.equal(started.outcome,'accepted',JSON.stringify(started));
  if(mode==='cancel-before-dispatch'){
-  const reserved=await reserveAiExecution(db,aiRunReader(app.env),scope,id,budgetId,config);assert.ok(reserved.run);await app.env.AGENT_RUNTIME!.support.prepare(reserved.run);
+  const reserved=await reserveAiExecution(db,aiRunReader(app.env),scope,id,config);assert.ok(reserved.run);await app.env.AGENT_RUNTIME!.support.prepare(reserved.run);
   assert.equal(await app.env.AGENT_RUNTIME!.support.lookup(reserved.run),null,'Preparation must not pretend that a submission was admitted');
   const takeover=await controller.execute(scope,actor,{commandId:crypto.randomUUID(),action:'takeover',expectedVersion:1});assert.equal(takeover.outcome,'accepted',JSON.stringify(takeover));
   await reconcileAiExecution(app.env,scope,id);const run=await readAiExecution(db,scope,id);assert.equal(run?.closure?.kind,'unstarted_closed',JSON.stringify(run));assert.equal(calls,0);
  }else{
   if(company){
-   const cost=await resolveSupportConfiguration(app.env,'org');assert.ok(cost);assert.equal((await reserveAiExecution(db,aiRunReader(app.env),scope,id,budgetId,cost.config)).outcome,'reserved');
+   const cost=await resolveSupportConfiguration(app.env,'org');assert.ok(cost);assert.equal((await reserveAiExecution(db,aiRunReader(app.env),scope,id,cost.config)).outcome,'reserved');
    if(mode==='company-model'){
     const base='https://api.deepseek.com/v1',model='synthetic-next-model';
     assert.ok(await insertCompanyModel(db,actor,1,'custom','openai-completions',base,model,await sealModelKey(app.env,'org',2,base,model,'synthetic-next-key'),{maxInputTokens:32768,maxOutputTokens:512,inputMicrosPerMillion:100,outputMicrosPerMillion:200,cacheReadMicrosPerMillion:50,cacheWriteMicrosPerMillion:100}));

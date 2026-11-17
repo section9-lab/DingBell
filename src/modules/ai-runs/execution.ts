@@ -2,7 +2,6 @@ import type {ControlScope} from '../conversations/control-types.ts';
 import {getConversationController,type ControlBindings} from '../conversations/control-bindings.ts';
 import type {AiReceipt} from './finance.ts';
 import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGeneration,freezeAiConfig,type AiExecution,type AiRunReader} from './storage.ts';
-import {selectAiBudget} from './budget.ts';
 import {logEvent} from '../../platform/log.ts';
 import {isOutboundPromptVersion} from '../../shared/ai-versions.ts';
 import type {SupportInspection} from './ledger.ts';
@@ -51,8 +50,7 @@ export async function executeAiRun(env:SupportBindings,scope:ControlScope,id:str
   if(isOutboundPromptVersion(cost.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return refuse('outbound_disabled');
   const work=await aiRunReader(env)(scope,id);if(!work)return refuse('work_unreadable');
   if(work.schemaVersion===2)cost=freezeAiConfig({maxGenerations:1,model:{...cost.config.model,promptVersion:'intake-v1'}});
-  const budget=await selectAiBudget(env.DB,scope,cost.total);if(!budget)return refuse('budget_missing');
-  const reserved=await reserveAiExecution(env.DB,aiRunReader(env),scope,id,budget,cost.config);
+  const reserved=await reserveAiExecution(env.DB,aiRunReader(env),scope,id,cost.config);
   if(!reserved.run)return refuse('reserve',{outcome:reserved.outcome});run=reserved.run;
  }
  if(isOutboundPromptVersion(run.config.model.promptVersion)&&(env.AI_OUTBOUND_ENABLED!=='true'||env.OUTBOUND_ENABLED!=='true'))return refuse('outbound_disabled');

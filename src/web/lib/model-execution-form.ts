@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 import { defaultModelGenerations, modelExecutionSchema, type ModelExecution } from '../../shared/company-model.ts';
-import { usdToMicros } from './budget-api.ts';
+
 
 export const modelExecutionFields = [
   { name: 'maxInputTokens', label: '输入 token 上限', price: false },
@@ -12,6 +12,12 @@ export const modelExecutionFields = [
   { name: 'cacheWriteMicrosPerMillion', label: '缓存写入价格（USD / 百万 token）', price: true },
 ] as const;
 type Field = typeof modelExecutionFields[number]['name'];
+/** "1.25" → 1_250_000 micros. Kept here now that the budget client is gone. */
+function usdToMicros(value: string): number | null {
+  if (!/^\d{1,10}(?:\.\d{1,6})?$/.test(value)) return null;
+  const [whole, fraction = ''] = value.split('.'), micros = BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
+  return micros <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(micros) : null;
+}
 export type ModelExecutionDraft = Record<Field, string>;
 
 function decimalMicros(value: number): string {

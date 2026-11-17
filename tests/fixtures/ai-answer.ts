@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {conversationControlFixture} from './conversation-control.ts';
 import {createPolicy,changePolicy} from '../../src/modules/reply-policies/storage.ts';
 import {ensureControlDirectory} from '../../src/modules/conversations/control-storage.ts';
-import {changeAiBudget,reserveAiExecution} from '../../src/modules/ai-runs/storage.ts';
+import {reserveAiExecution} from '../../src/modules/ai-runs/storage.ts';
 import {prepareKnowledge} from '../../src/modules/knowledge/content.ts';
 import {writeKnowledge} from '../../src/modules/knowledge/storage.ts';
 import {approveTextKnowledge} from '../../src/modules/knowledge/text-profile.ts';
@@ -16,12 +16,10 @@ export async function aiAnswerFixture(promptVersion='support-reply-v2',config:{o
   const scope=(await ensureControlDirectory(f.db,actor,'conv',Date.now()))!.scope;
   await f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES('question','org','store','conv','question','Customer','inbound','[\"Какая ширина?\"]',0,0,1,1,'incremental')").run();
   const request={runId:crypto.randomUUID(),expectedVersion:0,messageId:'question',policyId,stage:'presale',language:'ru'},started=await f.call('ai-start',{request},scope);assert.equal(started.body.outcome,'accepted');const run=started.body.receipt.run;
-  const read:AiRunReader=async(s,id)=>(await f.call('ai-read',{runId:id},s)).body,budgetId=crypto.randomUUID(),startsAt=Math.floor(Date.now()/86400000)*86400000;
-  assert.equal((await changeAiBudget(f.db,actor,{id:budgetId,action:'create',startsAt,endsAt:startsAt+86400000,limitMicros:1000000,maxRuns:10})).outcome,'applied');
-  assert.equal((await changeAiBudget(f.db,actor,{id:crypto.randomUUID(),action:'set_enabled',budgetId,expectedRevision:0,enabled:true})).outcome,'applied');
+  const read:AiRunReader=async(s,id)=>(await f.call('ai-read',{runId:id},s)).body,startsAt=Math.floor(Date.now()/86400000)*86400000;
   const config={model:{provider:'nvidia',model:'nvidia/nemotron-3.5-super-vl-120b-a12b',modelConfigVersion:'support-v1',promptVersion,maxInputTokens:100,maxOutputTokens:10,
    pricing:{version:'synthetic',currency:'USD',inputMicrosPerMillion:1000000,outputMicrosPerMillion:1000000,cacheReadMicrosPerMillion:1000000,cacheWriteMicrosPerMillion:1000000}},maxGenerations:3};
-  assert.equal((await reserveAiExecution(f.db,read,scope,request.runId,budgetId,config)).outcome,'reserved');
+  assert.equal((await reserveAiExecution(f.db,read,scope,request.runId,config)).outcome,'reserved');
   const documentId=crypto.randomUUID(),ks={kind:'guide' as const,storeId:'store',productRef:null,language:'ru' as const},prepared=await prepareKnowledge('org',documentId,1,ks,{title:'Width',source:{format:'text',content:'Ширина — 26 см.'}});
   assert.ok(await writeKnowledge(f.db,actor,documentId,ks,prepared,0,crypto.randomUUID()));
   assert.ok(await approveTextKnowledge(f.db,actor,documentId,1));

@@ -2,7 +2,7 @@ import {nvidiaProvider} from './nvidia.ts';
 import {freezeAiConfig} from './storage.ts';
 import {SUPPORT_BASE_URL,SUPPORT_MODEL_TEMPLATE_ID,validateSupportModel} from './policy.ts';
 import type {SupportBindings} from './execution.ts';
-import type {AiBudgetWorkspace} from '../../shared/ai-budget.ts';
+import type {AiConfiguration} from '../../shared/ai-configuration.ts';
 import {isOutboundPromptVersion} from '../../shared/ai-versions.ts';
 
 const model=nvidiaProvider().getModels().find(m=>m.id===SUPPORT_MODEL_TEMPLATE_ID);
@@ -11,7 +11,7 @@ export function parseSupportConfiguration(value:unknown){
  const cost=freezeAiConfig(value);validateSupportModel(cost.config.model,model.contextWindow);return cost;
 }
 /** Deployment metadata only: inspecting configuration grants no execution or spending permission. */
-export function supportConfigurationView(env:SupportBindings):AiBudgetWorkspace['configuration']{
+export function supportConfigurationView(env:SupportBindings):AiConfiguration{
  const base={modelConfigured:!!env.NVAPI_KEY?.trim()&&!!env.AGENT_RUNTIME&&!!env.CONVERSATION_CONTROLLER};
  try{
   const raw=env.AI_RECEPTION_CONFIG_JSON;if(!raw||raw.length>32768)throw new Error('SUPPORT_CONFIG_MISSING');
