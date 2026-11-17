@@ -94,3 +94,11 @@ test('concurrent execution admission consumes one server-selected budget reserva
  const results=await Promise.all(Array.from({length:4},()=>executeAiRun(f.env,f.scope,request.runId,{runtime})));assert.ok(results.some(r=>r.status==='unconfirmed'));
  assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),1);const budget=await f.db.prepare('SELECT admitted_runs AS runs,reserved_micros AS reserved FROM ai_budget WHERE id=?').bind(id).first<any>();assert.deepEqual(budget,{runs:1,reserved:528384});
 });
+
+test('a store-wide policy (empty storeIds) admits the answer run', { timeout: 30_000 }, async t => {
+  const f = await fixture(); t.after(f.close);
+  const p = await f.policy(50, 'automatic', 'presale', []);
+  await f.budget();
+  const request = f.request(p.id);
+  assert.equal((await f.call('ai-start', { request })).body.outcome, 'accepted');
+});
