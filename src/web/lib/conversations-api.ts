@@ -77,6 +77,7 @@ const stateFilterSchema = v.picklist([
 const workflowSchema = v.pipe(
   v.object({
     version: count,
+    reception: v.picklist(['ai', 'human', 'paused']),
     lifecycle: v.picklist(['open', 'resolved']),
     workStatus: v.nullable(v.picklist(['needs_reply', 'waiting_customer', 'waiting_internal'])),
     assignedMemberId: v.nullable(id),

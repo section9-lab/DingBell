@@ -6,7 +6,7 @@ import * as api from './conversations-api.ts';
 const instant='2026-10-09T00:00:00.000Z';
 const message={id:'msg',sequence:1,platformMessageId:'18446744073709551615',content:['Здравствуйте','<script>literal</script>'],senderId:'9007199254740993',senderType:'Customer',direction:'inbound',isImage:false,isRead:false,eventAt:instant,receivedAt:instant,ingestMode:'backfill',orderNumber:'order-1',sku:'9007199254740993'};
 const conversation={id:'conversation',store:{id:'store',name:'Synthetic',status:'paused'},platformThreadId:'18446744073709551615',platformType:'BUYER_SELLER',platformStatus:'Opened',platformCreatedAt:instant,importedAt:instant,lastMessageAt:instant,latestMessage:{...message,content:[message.content[0]],previewTruncated:true},buyerSenderId:'9007199254740993',buyerOrderNumber:null};
-const workflow={version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null};
+const workflow={version:0,reception:'paused',lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null};
 const listMetadata={viewerMemberId:'member-viewer',counts:{all:4,mine:1,unassigned:2,ai:0}};
 const pageMetadata={viewerMemberId:'member-viewer',pageCursor:'history-page',updatesCursor:'updates-start',newerCursor:null};
 const detail={...conversation,sync:{enabled:false,lastSuccessAt:null,lastError:null,backfillComplete:true}};

@@ -75,6 +75,7 @@ const updatesCursorSchema = v.strictObject({
 const workflowSchema = v.pipe(
   v.strictObject({
     version: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER)),
+    reception: v.picklist(['ai', 'human', 'paused']),
     lifecycle: v.picklist(['open', 'resolved']),
     workStatus: v.nullable(v.picklist(['needs_reply', 'waiting_customer', 'waiting_internal'])),
     assignedMemberId: v.nullable(identifier),
@@ -150,6 +151,7 @@ interface ListRow extends SummaryRow {
   unassignedCount: number;
   aiCount: number;
   workflowSchemaVersion: number | null;
+  workflowReception: 'ai' | 'human' | 'paused' | null;
   workflowVersion: number | null;
   workflowLifecycle: string | null;
   workflowStatus: string | null;
@@ -210,6 +212,7 @@ function workflow(row: ListRow): ConversationWorkflow {
   if (row.workflowSchemaVersion === null)
     return {
       version: 0,
+      reception: 'paused',
       lifecycle: 'open',
       workStatus: 'needs_reply',
       assignedMemberId: null,
@@ -222,6 +225,7 @@ function workflow(row: ListRow): ConversationWorkflow {
     throw new Error('INVALID_CONVERSATION_WORKFLOW');
   const parsed = v.safeParse(workflowSchema, {
     version: row.workflowVersion,
+    reception: row.workflowReception,
     lifecycle: row.workflowLifecycle,
     workStatus:
       row.workflowSchemaVersion === 1
@@ -281,7 +285,8 @@ export async function listConversations(
     pageValues = [...values];
   if (queue === 'mine') pageWhere.push('control.assigned_member_id=viewer.viewerMemberId');
   else if (queue === 'unassigned') pageWhere.push('control.assigned_member_id IS NULL');
-  else if (queue === 'ai') pageWhere.push("control.reception='ai'");
+  // 'paused' is the idle AI-owned state: every conversation belongs to AI unless a human took it.
+  else if (queue === 'ai') pageWhere.push("control.reception IN ('ai','paused')");
   let cursor: v.InferOutput<typeof listCursorSchema> | undefined;
   if (options.cursor !== undefined) {
     const parsed = v.safeParse(listCursorSchema, decodeCursor(options.cursor));
@@ -317,14 +322,15 @@ export async function listConversations(
     ),totals AS (
       SELECT COUNT(*) AS allCount,COUNT(CASE WHEN control.assigned_member_id=viewer.viewerMemberId THEN 1 END) AS mineCount,
         COUNT(CASE WHEN control.assigned_member_id IS NULL THEN 1 END) AS unassignedCount,
-        COUNT(CASE WHEN control.reception='ai' THEN 1 END) AS aiCount ${scopedFrom} WHERE ${where.join(' AND ')}
+        COUNT(CASE WHEN control.reception IN ('ai','paused') THEN 1 END) AS aiCount ${scopedFrom} WHERE ${where.join(' AND ')}
     ),page AS (
       SELECT conversation.id,conversation.organization_id,conversation.store_id,control.schema_version AS workflowSchemaVersion,control.version AS workflowVersion,
-        control.lifecycle AS workflowLifecycle,control.work_status AS workflowStatus,control.assigned_member_id AS assignedMemberId
+        control.lifecycle AS workflowLifecycle,control.work_status AS workflowStatus,control.assigned_member_id AS assignedMemberId,
+        COALESCE(control.reception,'paused') AS workflowReception
       ${scopedFrom} WHERE ${pageWhere.join(' AND ')} ORDER BY conversation.last_message_at DESC,conversation.id DESC LIMIT ?
     )
     SELECT ${summaryColumns},viewer.viewerMemberId,totals.allCount,totals.mineCount,totals.unassignedCount,totals.aiCount,
-      page.workflowSchemaVersion,page.workflowVersion,page.workflowLifecycle,page.workflowStatus,page.assignedMemberId,assignee_user.name AS assigneeName
+      page.workflowSchemaVersion,page.workflowVersion,page.workflowReception,page.workflowLifecycle,page.workflowStatus,page.assignedMemberId,assignee_user.name AS assigneeName
     FROM viewer CROSS JOIN totals LEFT JOIN page ON 1=1
     LEFT JOIN conversation ON conversation.id=page.id AND conversation.organization_id=page.organization_id AND conversation.store_id=page.store_id
     LEFT JOIN store ON store.id=conversation.store_id AND store.organization_id=conversation.organization_id

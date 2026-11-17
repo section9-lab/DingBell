@@ -21,9 +21,10 @@ function humanCommand(state: ConversationControlState): ConversationCommand {
 function hostingText(state: ConversationControlState | undefined) {
   if (!state) return { label: '正在读取托管状态', description: '', tone: 'idle' as const };
   if (state.lifecycle === 'resolved') return { label: '会话已解决', description: '已解决的会话不能继续回复。', tone: 'idle' as const };
-  if (state.reception === 'ai') return { label: 'AI 托管中', description: 'AI 会按回复策略起草回复，经人工确认后发送给消费者。', tone: 'ai' as const };
-  if (state.reception === 'human') return { label: '人工回复中', description: '当前由你人工回复；开启 AI 托管后，AI 只处理此后的新消息。', tone: 'human' as const };
-  return { label: '未接管', description: '会话尚未接管，暂不能发送。开始人工回复后可认领并发送，也可以交给 AI 托管。', tone: 'paused' as const };
+  // AI owns every conversation by default; 'paused' only means no run is in flight right now.
+  if (state.reception === 'ai') return { label: 'AI 托管中', description: 'AI 会按回复策略接待；买家新消息进来后自动处理。', tone: 'ai' as const };
+  if (state.reception === 'human') return { label: '人工回复中', description: '当前由你人工回复；点「开启 AI 托管」或解决会话后，AI 会重新接手。', tone: 'human' as const };
+  return { label: 'AI 托管中', description: 'AI 默认负责接待；买家下一条消息会由 AI 处理。需要你亲自处理时点「人工接管」。', tone: 'ai' as const };
 }
 
 export function ConversationControlPanel({ userId, companyId, conversationId, storeId, children, onDenied }: {
@@ -102,10 +103,8 @@ export function ConversationControlPanel({ userId, companyId, conversationId, st
           {control.isPending && <Spinner aria-hidden="true" />}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {state?.lifecycle === 'open' && state.reception === 'ai' && <Button size="sm" variant="outline" disabled={disabled}
-            onClick={() => void submit(humanCommand(state))}>{pending && <Spinner aria-hidden="true" />}取消 AI 托管</Button>}
-          {state?.lifecycle === 'open' && state.reception === 'paused' && <Button size="sm" disabled={disabled}
-            onClick={() => void submit(humanCommand(state))}>{pending && <Spinner aria-hidden="true" />}开始人工回复</Button>}
+          {state?.lifecycle === 'open' && state.reception !== 'human' && <Button size="sm" variant="outline" disabled={disabled}
+            onClick={() => void submit(humanCommand(state))}>{pending && <Spinner aria-hidden="true" />}人工接管</Button>}
           {state?.lifecycle === 'open' &&
             <AiReceptionControl key={`${userId}:${view!.viewerMemberId}`} scope={{ userId, memberId: view!.viewerMemberId, companyId, conversationId }}
               view={view!} disabled={disabled} onChanged={reread} onDenied={onDenied} />}

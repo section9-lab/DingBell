@@ -48,8 +48,8 @@ test('workflow queues, counters and identity share a freshly authorized D1 snaps
     const page=await read();assert.equal(page.viewerMemberId,'staff-member');assert.deepEqual(page.counts,{all:9,mine:3,unassigned:2,ai:0});
     assert.deepEqual(ids(page),entries.slice(0,9).map(row=>row[0]));
     const workflow=(id:string)=>page.items.find(item=>item.id===id)!.workflow;
-    assert.deepEqual(workflow('empty'),{version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null});
-    assert.deepEqual(workflow('legacy-open'),{version:3,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:'staff-member',assigneeName:'Staff'});
+    assert.deepEqual(workflow('empty'),{version:0,reception:'paused',lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null});
+    assert.deepEqual(workflow('legacy-open'),{version:3,reception:'human',lifecycle:'open',workStatus:'needs_reply',assignedMemberId:'staff-member',assigneeName:'Staff'});
     assert.equal(workflow('legacy-resolved').workStatus,null);assert.equal(workflow('legacy-resolved').lifecycle,'resolved');
     for(const id of ['removed','foreign-assignee'])assert.equal(workflow(id).assigneeName,null);
     assert.equal(workflow('needs').assigneeName,'Target','a removed grant is not a removed membership');

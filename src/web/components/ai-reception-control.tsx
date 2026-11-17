@@ -80,7 +80,7 @@ export function AiReceptionControl({ scope, view, disabled, onChanged, onDenied 
   const current = !query.isError && query.data?.control.version === view.state.version;
 
   return <div role="group" aria-label="AI 托管操作" className="flex flex-wrap items-center gap-2">
-    {pending.state === 'none' && view.state.reception !== 'ai' && <Button size="sm" variant="outline" disabled={disabled || busy || query.isFetching || !current || view.state.version >= Number.MAX_SAFE_INTEGER - 1}
+    {pending.state === 'none' && view.state.reception === 'human' && <Button size="sm" variant="outline" disabled={disabled || busy || query.isFetching || !current || view.state.version >= Number.MAX_SAFE_INTEGER - 1}
       onClick={() => void send({ commandId: crypto.randomUUID(), expectedVersion: view.state.version })}>
       {busy && <Spinner aria-hidden="true" />}开启 AI 托管
     </Button>}

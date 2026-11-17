@@ -53,6 +53,8 @@ export type ConversationStateFilter =
   | 'resolved';
 export interface ConversationWorkflow {
   version: number;
+  /** 'paused' is the idle AI-owned state; only 'human' means a person holds the conversation. */
+  reception: 'ai' | 'human' | 'paused';
   lifecycle: 'open' | 'resolved';
   workStatus: 'needs_reply' | 'waiting_customer' | 'waiting_internal' | null;
   assignedMemberId: string | null;

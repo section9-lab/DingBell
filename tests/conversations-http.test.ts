@@ -13,7 +13,7 @@ test('conversation reads expose only authorized imported facts with exact IDs an
     assert.equal(item.platformCreatedAt,new Date(100).toISOString());assert.equal(item.latestMessage.platformMessageId,'18446744073709551615');
     assert.equal(item.buyerSenderId,'9007199254740993');assert.equal(item.buyerOrderNumber,null);assert.equal(result.conversations[2].buyerSenderId,null);assert.equal(result.conversations[2].buyerOrderNumber,null);
     assert.equal('customerName'in item,false);assert.equal('credentialCiphertext'in item.store,false);
-    assert.deepEqual(item.workflow,{version:0,lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null});
+    assert.deepEqual(item.workflow,{version:0,reception:'paused',lifecycle:'open',workStatus:'needs_reply',assignedMemberId:null,assigneeName:null});
     const detail=await (await f.request('/conv-a')).json() as any;assert.equal(detail.companyId,'company');assert.equal(detail.conversation.id,'conv-a');assert.equal(detail.conversation.sync.enabled,false);
     assert.equal('workflow'in detail.conversation,false);assert.equal('viewerMemberId'in detail,false);assert.equal('counts'in detail,false);
     const messages=await (await f.request('/conv-a/messages')).json() as any;assert.equal(messages.companyId,'company');assert.equal(messages.conversationId,'conv-a');
@@ -52,7 +52,7 @@ test('conversation queues return list workflow and scoped counts independent of 
     }
     const staff=await (await f.request('?queue=mine','staff')).json() as any;
     assert.equal(staff.viewerMemberId,'staff-member');assert.deepEqual(staff.counts,{all:2,mine:1,unassigned:1,ai:0});assert.deepEqual(staff.conversations.map((item:any)=>item.id),['conv-a']);
-    assert.deepEqual(staff.conversations[0].workflow,{version:4,lifecycle:'open',workStatus:'waiting_customer',assignedMemberId:'staff-member',assigneeName:'staff'});
+    assert.deepEqual(staff.conversations[0].workflow,{version:4,reception:'human',lifecycle:'open',workStatus:'waiting_customer',assignedMemberId:'staff-member',assigneeName:'staff'});
     const detail=await (await f.request('/conv-a')).json() as any;assert.equal('workflow'in detail.conversation,false);assert.equal('counts'in detail,false);
     await f.DB.prepare("UPDATE user SET name='客服新名字' WHERE id='staff'").run();
     const renamed=await (await f.request('?state=waiting_customer')).json() as any;assert.equal(renamed.conversations[0].workflow.assigneeName,'客服新名字');assert.equal(renamed.conversations[0].workflow.version,4);

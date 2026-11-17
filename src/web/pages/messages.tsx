@@ -629,6 +629,9 @@ export function MessagesPage({
                               )?.label
                             }
                           </Badge>
+                          {item.workflow.reception === 'human'
+                            ? <Badge variant="secondary">人工</Badge>
+                            : <Badge variant="secondary">AI 托管</Badge>}
                           {item.workflow.assignedMemberId === conversationPage?.viewerMemberId ? (
                             <Badge variant="secondary">我负责</Badge>
                           ) : item.workflow.assignedMemberId === null ? (
