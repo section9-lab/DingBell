@@ -25,6 +25,9 @@ type ProductRow = {
   factsObservedAt: number | null;
   state: string;
   error: string | null;
+  modelId: string | null;
+  stockHasStock: number | null;
+  stockObservedAt: number | null;
   supplySource: string | null;
   purchaseUrl: string | null;
   purchasePrice: string | null;
@@ -149,6 +152,12 @@ function nullableBoolean(value: unknown) {
   if (typeof value !== 'boolean') throw new Error('INVALID_COMMERCE_DATA');
   return value;
 }
+/** SQLite stores flags as 0/1 integers; NULL still means "never observed". */
+function nullableFlag(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (value !== 0 && value !== 1) throw new Error('INVALID_COMMERCE_DATA');
+  return value === 1;
+}
 function nullableDecimal(value: unknown) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'string' || !/^[0-9]+(?:\.[0-9]+)?$/.test(value))
@@ -251,8 +260,15 @@ function productDTO(row: ProductRow) {
     name,
     sku,
     archived,
+    modelId: text(row.modelId, true),
     hasFboStocks,
     hasFbsStocks,
+    // The platform's own "any stock left" flag and the instant it was observed.
+    // A null timestamp means stock was never reported, which is not the same as zero.
+    stock: {
+      hasStock: nullableFlag(row.stockHasStock),
+      observedAt: row.stockObservedAt === null ? null : new Date(row.stockObservedAt).toISOString(),
+    },
     price,
     currency,
     primaryImage,
@@ -541,7 +557,8 @@ export async function listCommerceProducts(
   const rows = (
     await db
       .prepare(`SELECT product.id,store.id AS storeId,store.name AS storeName,product.listing,product.facts,product.list_observed_at AS listObservedAt,
-    product.facts_observed_at AS factsObservedAt,product.detail_state AS state,product.detail_error AS error,${sourcingColumns} ${productFrom}
+    product.facts_observed_at AS factsObservedAt,product.detail_state AS state,product.detail_error AS error,
+    product.model_id AS modelId,product.stock_has_stock AS stockHasStock,product.stock_observed_at AS stockObservedAt,${sourcingColumns} ${productFrom}
     WHERE product.organization_id=? AND product.store_id=? AND product.id>?${filteredWhere} AND ${storeAccess('store.organization_id', false)} ORDER BY product.id LIMIT ?`)
       .bind(
         actor.orgId,
@@ -581,19 +598,101 @@ export async function listCommerceProducts(
         : null,
   };
 }
+type VariantRow = {
+  id: string; offerId: string | null; sku: string | null; name: string | null;
+  archived: number | null; primaryImage: string | null; state: string;
+  hasStock: number | null; present: number; reserved: number;
+};
+function variantImage(value: unknown) {
+  try {
+    return value === null || value === undefined ? null : productImage(value);
+  } catch {
+    return null;
+  }
+}
+function quantity(value: unknown) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
+    throw new Error('INVALID_COMMERCE_DATA');
+  return value;
+}
+function variantDTO(row: VariantRow) {
+  if (!productIdPattern.test(row.id) || !['pending', 'complete', 'error'].includes(row.state))
+    throw new Error('INVALID_COMMERCE_DATA');
+  return {
+    id: row.id,
+    offerId: text(row.offerId),
+    sku: text(row.sku, true),
+    name: text(row.name, true),
+    // json_extract returns 0/1 for JSON booleans, so variants read the flag form.
+    archived: nullableFlag(row.archived),
+    primaryImage: variantImage(row.primaryImage),
+    state: row.state as 'pending' | 'complete' | 'error',
+    stock: {
+      hasStock: nullableFlag(row.hasStock),
+      present: quantity(row.present),
+      reserved: quantity(row.reserved),
+    },
+  };
+}
+function stockSourceDTO(row: { source: string; sku: string; present: number; reserved: number; observedAt: number }) {
+  if (!productIdPattern.test(row.sku) || row.sku.length > 40)
+    throw new Error('INVALID_COMMERCE_DATA');
+  if (typeof row.source !== 'string' || !row.source || row.source.length > 64)
+    throw new Error('INVALID_COMMERCE_DATA');
+  return {
+    source: row.source,
+    sku: row.sku,
+    present: quantity(row.present),
+    reserved: quantity(row.reserved),
+    observedAt: new Date(row.observedAt).toISOString(),
+  };
+}
 export async function readCommerceProduct(
   db: D1Database,
   actor: StoreActor,
   storeId: string,
   id: string,
 ) {
+  const select = `SELECT product.id,store.id AS storeId,store.name AS storeName,product.listing,product.facts,product.list_observed_at AS listObservedAt,
+    product.facts_observed_at AS factsObservedAt,product.detail_state AS state,product.detail_error AS error,
+    product.model_id AS modelId,product.stock_has_stock AS stockHasStock,product.stock_observed_at AS stockObservedAt,${sourcingColumns} ${productFrom}`;
   const row = await db
-    .prepare(`SELECT product.id,store.id AS storeId,store.name AS storeName,product.listing,product.facts,product.list_observed_at AS listObservedAt,
-    product.facts_observed_at AS factsObservedAt,product.detail_state AS state,product.detail_error AS error,${sourcingColumns} ${productFrom}
+    .prepare(`${select}
     WHERE product.organization_id=? AND product.store_id=? AND product.id=? AND ${storeAccess('store.organization_id', false)}`)
     .bind(actor.orgId, storeId, id, actor.actorUserId, actor.sessionId)
     .first<ProductRow>();
-  return row ? productDetailDTO(row) : null;
+  if (!row) return null;
+  const dto = productDetailDTO(row),
+    // Quantities are observed per fulfilment source and replaced as a set on every sync.
+    stocks = (
+      await db
+        .prepare(`SELECT source,sku,present,reserved,observed_at AS observedAt FROM product_stock
+          WHERE organization_id=? AND store_id=? AND product_id=? ORDER BY source,sku`)
+        .bind(actor.orgId, storeId, id)
+        .all<{ source: string; sku: string; present: number; reserved: number; observedAt: number }>()
+    ).results;
+  // Variants exist only when the platform merged this item into a model. The model id is the
+  // authoritative grouping key; merchant offer ids and names are not.
+  const variants = dto.modelId === null ? [] : (
+    await db
+      .prepare(`SELECT product.id,COALESCE(json_extract(product.facts,'$.offerId'),json_extract(product.listing,'$.offerId')) AS offerId,
+        json_extract(product.facts,'$.sku') AS sku,json_extract(product.facts,'$.name') AS name,
+        COALESCE(json_extract(product.facts,'$.archived'),json_extract(product.listing,'$.archived')) AS archived,
+        json_extract(product.facts,'$.primaryImage') AS primaryImage,product.detail_state AS state,product.stock_has_stock AS hasStock,
+        COALESCE(SUM(stock.present),0) AS present,COALESCE(SUM(stock.reserved),0) AS reserved
+        FROM product JOIN store ON store.id=product.store_id AND store.organization_id=product.organization_id
+        LEFT JOIN product_stock stock ON stock.organization_id=product.organization_id AND stock.store_id=product.store_id AND stock.product_id=product.id
+        WHERE product.organization_id=? AND product.store_id=? AND product.model_id=? AND ${storeAccess('store.organization_id', false)}
+        GROUP BY product.id ORDER BY product.id LIMIT 51`)
+      .bind(actor.orgId, storeId, dto.modelId, actor.actorUserId, actor.sessionId)
+      .all<VariantRow>()
+  ).results;
+  return {
+    ...dto,
+    stock: { ...dto.stock, sources: stocks.map(stockSourceDTO) },
+    variants: variants.slice(0, 50).map(variantDTO),
+    variantsTruncated: variants.length > 50,
+  };
 }
 export async function listOrderPostings(
   db: D1Database,

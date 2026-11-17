@@ -126,6 +126,8 @@ export default {
         case 'ai-classified-input':return Response.json(await stub.readClassifiedInput(input.scope));
         case 'ai-dispatch-admit':return Response.json(await stub.admitAiDispatch(input.scope,input.request));
 case 'ai-fallback-classification':return Response.json(await stub.recordFallbackClassification(input.scope,input.runId));
+case 'ai-note-failure':return Response.json(await stub.noteAiFailure(input.scope,input.eventId));
+case 'ai-restart-run':return Response.json(await stub.restartAiRun(input.scope,input.runId));
         case 'ai-dispatch-stop':return Response.json(await stub.stopAiDispatch(input.scope,input.request));
         case 'ai-reception-resume':return Response.json(await stub.resumeAiReception(input.scope,input.actor,input.request));
         case 'holdExpiry':await stub.holdExpiry();break;

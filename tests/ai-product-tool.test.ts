@@ -22,6 +22,12 @@ test('product context resolves only the admitted item, from the message or the c
   assert.equal(direct.canSend, false);
   assert.equal(JSON.stringify(direct).includes('org'), false);
   assert.equal(JSON.stringify(direct).includes('conversationId'), false);
+  // Merchant cost/sourcing and stock stay out of the model surface even though the catalog now
+  // stores model grouping and quantities: the projection is a closed key set, not a passthrough.
+  assert.deepEqual(Object.keys(direct.product!).sort(), ['archived', 'currency', 'name', 'observedAt', 'offerId', 'price', 'primaryImage', 'productId', 'skuSource']);
+  for (const hidden of ['stock', 'modelId', 'present', 'reserved', 'supplySource', 'purchasePrice', 'costing']) {
+    assert.equal(JSON.stringify(direct).includes(hidden), false, `${hidden} must not reach the model`);
+  }
   await x.f.db.prepare("UPDATE message SET sku=NULL WHERE id='question'").run();
   await x.f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,sku,event_at,received_at,ingest_mode) VALUES('later','org','store','conv','later','Customer','inbound','[\"Какой цвет?\"]',0,0,'5787036301',10,10,'incremental')").run();
   const fallback = await read();

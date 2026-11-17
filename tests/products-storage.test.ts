@@ -55,7 +55,7 @@ test('product persistence uses real D1 transactions and current source authoriza
   const capabilities = JSON.stringify(['auth', 'products_read', 'chats_read'].map(code => ({ code, status: 'available', reason: 'read_verified' })));
   const productId = '9000000000817031942';
   const item = (id = productId): OzonProductListItem => ({ id, offerId: `offer-${id}`, sku: '9000000000817031941', archived: false, hasFboStocks: false, hasFbsStocks: true });
-  const facts = (id = productId, price = '000012.3400'): OzonProductDetails => ({ id, offerId: `offer-${id}`, name: 'Синтетический товар', sku: '9000000000817031941', sources: [{ sku: '9000000000817031941', source: 'fbs' }], price, currency: 'RUB', archived: false, createdAt: '2026-09-15T10:00:00Z', primaryImage: 'https://ir-20.ozone.ru/s3/product-1.jpg', images: ['https://ir-20.ozone.ru/s3/product-1.jpg'] });
+  const facts = (id = productId, price = '000012.3400'): OzonProductDetails => ({ id, offerId: `offer-${id}`, name: 'Синтетический товар', sku: '9000000000817031941', sources: [{ sku: '9000000000817031941', source: 'fbs' }], price, currency: 'RUB', archived: false, createdAt: '2026-09-15T10:00:00Z', primaryImage: 'https://ir-20.ozone.ru/s3/product-1.jpg', images: ['https://ir-20.ozone.ru/s3/product-1.jpg'], modelId: '9000000000817031990', stock: { hasStock: true, items: [{ source: 'fbs', sku: '9000000000817031941', present: 5, reserved: 1 }] } });
   async function addStore(id: string) {
     await db.prepare(`INSERT INTO store (id,organization_id,name,platform_store_id,status,credential_key_version,credential_nonce,credential_ciphertext,capabilities,checked_at,expires_at,created_at,updated_at)
       VALUES (?,?,'Products',?,'verified','synthetic','synthetic','synthetic',?,1,?,1,1)`).bind(id, actor.orgId, id, capabilities, Date.now() + 3_600_000).run();
@@ -205,6 +205,33 @@ test('product persistence uses real D1 transactions and current source authoriza
     assert.equal(JSON.stringify(saved).includes('must-not-persist'), false);
     const snapshot = await db.prepare('SELECT facts FROM product_source_snapshot WHERE store_id=?').bind(id).first<string>('facts');
     assert.equal(snapshot?.includes('must-not-persist'), false);
+  });
+  await context.test('model grouping and stock quantities stay outside the immutable facts snapshot', async () => {
+    const id = await addStore('product-stock'); await list(id); await details(id);
+    const stored = await db.prepare("SELECT model_id AS modelId,stock_has_stock AS hasStock,stock_observed_at AS observedAt,facts FROM product WHERE store_id=? AND id=?").bind(id, productId).first<any>();
+    assert.equal(stored.modelId, '9000000000817031990');
+    assert.equal(stored.hasStock, 1);
+    assert.ok(stored.observedAt > 0);
+    // Facts remain the explicit whitelist only; stock lives in its own table.
+    assert.equal(stored.facts.includes('present'), false);
+    assert.equal(JSON.parse(stored.facts).modelId, undefined);
+    assert.deepEqual((await db.prepare('SELECT source,sku,present,reserved FROM product_stock WHERE store_id=?').bind(id).all()).results, [
+      { source: 'fbs', sku: '9000000000817031941', present: 5, reserved: 1 },
+    ]);
+    // A stock-only change rewrites quantities without appending source history or losing facts.
+    await db.prepare("UPDATE product SET detail_state='pending',detail_attempt=0 WHERE store_id=? AND id=?").bind(id, productId).run();
+    await details(id, [{ ...facts(), stock: { hasStock: false, items: [] } as OzonProductDetails['stock'] }]);
+    assert.equal(await count('product_source_snapshot', id), 1);
+    assert.equal(await count('product_stock', id), 0);
+    assert.equal(await db.prepare('SELECT stock_has_stock FROM product WHERE store_id=? AND id=?').bind(id, productId).first('stock_has_stock'), 0);
+    const observedAt = await db.prepare('SELECT stock_observed_at AS observedAt FROM product WHERE store_id=? AND id=?').bind(id, productId).first<number>('observedAt');
+    assert.ok(observedAt !== null);
+    // An unreported stocks field is unknown: it must not clear quantities or the observation time.
+    await db.prepare("UPDATE product SET detail_state='pending',detail_attempt=0 WHERE store_id=? AND id=?").bind(id, productId).run();
+    await details(id, [{ ...facts(), stock: null }]);
+    const kept = await db.prepare('SELECT stock_observed_at AS observedAt FROM product WHERE store_id=? AND id=?').bind(id, productId).first<number>('observedAt');
+    assert.equal(kept, observedAt);
+    assert.equal(await count('product_stock', id), 0);
   });
   await context.test('a chat toggle cannot invalidate the products lease; a chat lease cannot commit products', async () => {
     const id = await addStore('product-source-isolation');

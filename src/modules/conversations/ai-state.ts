@@ -17,7 +17,7 @@ export const aiHandoffSchema=v.union([controlledAiHandoffSchema,legacyAiHandoffS
 export const aiAdmissionSchema=v.strictObject({messageId:id,inputRevision:counter,question:replyBodySchema,policyId:id,policyRevision:v.pipe(counter,v.minValue(1)),
  policyConfig:v.pipe(replyPolicyConfigSchema,v.check(c=>c.kind==='automatic'&&c.mode==='automatic')),stage:policyStageSchema,language:v.picklist(['ru','zh-CN','en'])});
 export const aiRunSchema=v.pipe(v.strictObject({schemaVersion:v.literal(1),scope:aiScopeSchema,request:aiStartSchema,admission:aiAdmissionSchema,
- controlEpoch:counter,startedAt:time,deadlineAt:time}),v.check(r=>r.deadlineAt>r.startedAt&&r.deadlineAt<=r.startedAt+180_000&&r.request.messageId===r.admission.messageId&&r.request.policyId===r.admission.policyId&&r.request.stage===r.admission.stage));
+ controlEpoch:counter,startedAt:time,deadlineAt:time}),v.check(r=>r.deadlineAt>r.startedAt&&r.deadlineAt<=r.startedAt+660_000&&r.request.messageId===r.admission.messageId&&r.request.policyId===r.admission.policyId&&r.request.stage===r.admission.stage));
 const fields={commandId:id,expectedVersion:counter,actorUserId:v.null(),actorMemberId:v.null(),appliedState:storedControlStateSchema,run:aiRunSchema};
 export const aiReceiptSchema=v.pipe(v.variant('action',[
  v.strictObject({...fields,action:v.literal('ai_start'),origin:v.literal('system')}),

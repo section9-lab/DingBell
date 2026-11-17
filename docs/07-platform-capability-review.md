@@ -203,7 +203,7 @@ Vectorize 的官方合同已明确 namespace/metadata 检索前过滤、向量 I
 | 方法 | 已核对合同 | 实施边界 |
 | --- | --- | --- |
 | `/v3/product/list` | `filter.visibility`、`last_id`、`limit`；响应 `result.items/last_id/total`，官方最多 1000 条 | 应用每页最多 100；总数或短页不作为一致快照完成证据；无进展的非空页拒绝推进 |
-| `/v3/product/info/list` | 按 `product_id` 查询，顶层 `items`；商品 ID、offer_id、名称、SKU/来源、字符串价格与币种、归档标记 | 只接收请求过的 ID；缺失详情不当作删除，导入不自动发布知识；库存布尔标记不当库存数量 |
+| `/v3/product/info/list` | 按 `product_id` 查询，顶层 `items`；商品 ID、offer_id、名称、SKU/来源、字符串价格与币种、归档标记、`model_info.model_id` 型号分组、`stocks` 各来源 `present/reserved` | 只接收请求过的 ID；缺失详情不当作删除，导入不自动发布知识；型号分组与库存独立于不可变的 `product.facts` 快照存储，库存是同步观察值而非实时承诺，AI 工具仍不返回库存 |
 | `/v4/posting/fbs/list` | `cursor`、必需的 `filter`、每页 1–100、`sort_dir`；顶层 `postings/has_next/cursor`；查询期间最多一年 | 不混入旧 v3 的 result/offset；应用采用更小固定窗口，逐页保持同一组条件 |
 | `/v3/posting/fbs/get` | 按 `posting_number` 获取 `result`；订单/包裹标识、原始状态、商品数量、字符串金额、物流字段与业务时间 | 包裹不等同订单；不采集本批不需要的收件人地址/电话；不生成履约通知 |
 

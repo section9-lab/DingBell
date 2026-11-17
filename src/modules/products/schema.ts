@@ -19,6 +19,12 @@ export const product = sqliteTable('product', {
   id: text('id').notNull(), organizationId: text('organization_id').notNull(), storeId: text('store_id').notNull(),
   listing: text('listing').notNull(), listObservedAt: integer('list_observed_at').notNull(), listSourceUpdatedAt: integer('list_source_updated_at'),
   facts: text('facts'), factsObservedAt: integer('facts_observed_at'), factsSourceUpdatedAt: integer('facts_source_updated_at'),
+  // Platform variant grouping. A model covers the color/size variants of one item, but Ozon only
+  // reports it in the details response, so it is stored beside the facts rather than inside them.
+  modelId: text('model_id'),
+  // Stock is observed far more often than product facts, so it keeps its own timestamp instead of
+  // rewriting product.facts and the immutable product_source_snapshot history.
+  stockHasStock: integer('stock_has_stock'), stockObservedAt: integer('stock_observed_at'),
   detailEpoch: integer('detail_epoch').notNull(), detailGeneration: integer('detail_generation').notNull(),
   detailRevision: integer('detail_revision').notNull().default(0), detailState: text('detail_state').notNull().default('pending'),
   detailAttempt: integer('detail_attempt').notNull().default(0), detailDueAt: integer('detail_due_at').notNull(), detailError: text('detail_error'),
@@ -27,12 +33,31 @@ export const product = sqliteTable('product', {
   foreignKey({ columns: [table.storeId, table.organizationId], foreignColumns: [store.id, store.organizationId] }).onDelete('cascade'),
   uniqueIndex('product_scope_unique').on(table.storeId, table.organizationId, table.id),
   index('product_detail_due_idx').on(table.storeId, table.detailEpoch, table.detailState, table.detailDueAt, table.id),
+  index('product_model_idx').on(table.storeId, table.modelId).where(sql`${table.modelId} IS NOT NULL`),
   check('product_listing_json', sql`json_valid(${table.listing}) AND json_type(${table.listing})='object'`),
   check('product_facts_json', sql`${table.facts} IS NULL OR (json_valid(${table.facts}) AND json_type(${table.facts})='object')`),
+  check('product_stock_has_stock_valid', sql`${table.stockHasStock} IS NULL OR ${table.stockHasStock} IN (0,1)`),
   check('product_detail_state_valid', sql`${table.detailState} IN ('pending','complete','error')`),
   check('product_detail_counters_valid', sql`${table.detailEpoch}>0 AND ${table.detailGeneration}>0 AND ${table.detailRevision}>=0 AND ${table.detailAttempt} BETWEEN 0 AND 3`),
   // Ozon list/detail source timestamp semantics have not been established.
   check('product_source_time_unknown', sql`${table.listSourceUpdatedAt} IS NULL AND ${table.factsSourceUpdatedAt} IS NULL`),
+]);
+
+// Per-source stock quantities observed in the same details response. Rows are replaced per product
+// on each observation, so an observed empty list means zero stock while a missing timestamp means
+// the platform never reported stock for that product.
+export const productStock = sqliteTable('product_stock', {
+  organizationId: text('organization_id').notNull(), storeId: text('store_id').notNull(),
+  productId: text('product_id').notNull(), source: text('source').notNull(), sku: text('sku').notNull(),
+  present: integer('present').notNull(), reserved: integer('reserved').notNull(),
+  observedAt: integer('observed_at').notNull(),
+}, table => [
+  primaryKey({ columns: [table.storeId, table.productId, table.source, table.sku] }),
+  foreignKey({ columns: [table.storeId, table.organizationId, table.productId], foreignColumns: [product.storeId, product.organizationId, product.id] }).onDelete('cascade'),
+  index('product_stock_product_idx').on(table.organizationId, table.storeId, table.productId),
+  check('product_stock_quantity_valid', sql`${table.present}>=0 AND ${table.reserved}>=0`),
+  check('product_stock_source_valid', sql`length(${table.source}) BETWEEN 1 AND 64`),
+  check('product_stock_sku_valid', sql`length(${table.sku}) BETWEEN 1 AND 40 AND ${table.sku} GLOB '[0-9]*'`),
 ]);
 
 export const productSourceSnapshot = sqliteTable('product_source_snapshot', {

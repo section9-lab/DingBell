@@ -17,7 +17,7 @@ export class OzonReadError extends Error {
 }
 export type Credentials = { clientId: string; apiKey: string };
 const decimal = /^(0|[1-9][0-9]{0,39})$/;
-const idFields = new Set(['id', 'product_id', 'chat_id', 'message_id', 'last_message_id', 'first_unread_message_id', 'sku', 'order_id', 'order_number']);
+const idFields = new Set(['id', 'product_id', 'chat_id', 'message_id', 'last_message_id', 'first_unread_message_id', 'sku', 'order_id', 'order_number', 'model_id']);
 function invalid(): never { throw new OzonReadError('invalid_response'); }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value as Record<string, unknown>; }
 function retryAfter(value: string | null): number | undefined {

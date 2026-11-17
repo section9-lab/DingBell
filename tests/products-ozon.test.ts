@@ -32,6 +32,8 @@ const detail = {
   created_at: '2026-09-15T10:00:00.123456Z',
   images: ['https://ir-20.ozone.ru/s3/one.jpg', 'https://ir-20.ozone.ru/s3/two.jpg'],
   primary_image: ['https://ir-20.ozone.ru/s3/two.jpg'],
+  model_info: { count: 1, model_id: '9000000000817031990' },
+  stocks: { has_stock: true, stocks: [{ present: 12, reserved: 3, sku: '9000000000817031941', source: 'fbs' }] },
 };
 const response = (body: unknown): typeof fetch => (async () => Response.json(body)) as typeof fetch;
 const fails = (code: string) => (error: unknown) =>
@@ -158,6 +160,8 @@ test('detail reads correlate requested IDs and preserve raw decimal prices and s
       createdAt: '2026-09-15T10:00:00.123456Z',
       primaryImage: detail.primary_image[0],
       images: [detail.primary_image[0], detail.images[0]],
+      modelId: '9000000000817031990',
+      stock: { hasStock: true, items: [{ source: 'fbs', sku: listing.sku, present: 12, reserved: 3 }] },
     },
   ]);
   for (const price of ['0', '00012.3400', '999999999999999999999999.000000001']) {
@@ -211,6 +215,8 @@ test('optional product facts remain unknown and absent details do not become del
     createdAt: null,
     primaryImage: null,
     images: [],
+    modelId: null,
+    stock: null,
   });
   assert.deepEqual(
     await readOzonProductDetails(
@@ -228,7 +234,8 @@ test(
   async (context) => {
     const body = JSON.stringify({ items: [detail] })
       .replaceAll('"9000000000817031942"', '9000000000817031942')
-      .replaceAll('"9000000000817031941"', '9000000000817031941');
+      .replaceAll('"9000000000817031941"', '9000000000817031941')
+      .replaceAll('"9000000000817031990"', '9000000000817031990');
     const result = await readOzonProductDetails(
       credentials,
       { productIds: [listing.product_id] },
@@ -237,6 +244,7 @@ test(
     assert.equal(result.items[0].id, listing.product_id);
     assert.equal(result.items[0].sku, listing.sku);
     assert.equal(result.items[0].sources[0].sku, listing.sku);
+    assert.equal(result.items[0].modelId, '9000000000817031990');
     const shared = stripTypeScriptTypes(
       readFileSync(new URL('../src/modules/ozon/read.ts', import.meta.url), 'utf8'),
     );
@@ -330,6 +338,20 @@ test('detail responses reject unrelated IDs, duplicates, malformed facts and num
     [{ ...detail, images: ['https://not-ozon.invalid/tracker.jpg'] }],
     [{ ...detail, primary_image: {} }],
     [{ ...detail, images: Array.from({ length: 21 }, () => detail.images[0]) }],
+    // Model grouping and stock are validated, not coerced: the count is not a variant total and
+    // quantities are never fractions, negatives or duplicated source+sku pairs.
+    [{ ...detail, model_info: [] }],
+    [{ ...detail, model_info: { count: 1, model_id: '1.5' } }],
+    [{ ...detail, model_info: { count: -1, model_id: '9000000000817031990' } }],
+    [{ ...detail, stocks: { has_stock: 'true' } }],
+    [{ ...detail, stocks: { stocks: {} } }],
+    [{ ...detail, stocks: { stocks: [{ present: -1, reserved: 0, sku: listing.sku, source: 'fbs' }] } }],
+    [{ ...detail, stocks: { stocks: [{ present: 1.5, reserved: 0, sku: listing.sku, source: 'fbs' }] } }],
+    [{ ...detail, stocks: { stocks: [{ present: 1, reserved: 0, sku: 'x', source: 'fbs' }] } }],
+    [{ ...detail, stocks: { stocks: [
+      { present: 1, reserved: 0, sku: listing.sku, source: 'fbs' },
+      { present: 2, reserved: 0, sku: listing.sku, source: 'fbs' },
+    ] } }],
   ]) {
     await assert.rejects(
       readOzonProductDetails(

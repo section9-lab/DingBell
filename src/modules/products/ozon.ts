@@ -21,6 +21,10 @@ export interface OzonProductDetails {
   createdAt: string | null;
   primaryImage: string | null;
   images: string[];
+  /** Platform model identifier grouping color/size variants; absent when the item is not merged. */
+  modelId: string | null;
+  /** Stock per fulfilment source. null means the provider did not report stock at all. */
+  stock: { hasStock: boolean | null; items: { source: string; sku: string; present: number; reserved: number }[] } | null;
 }
 const decimalId = /^(0|[1-9][0-9]{0,39})$/;
 function invalid(): never {
@@ -57,6 +61,36 @@ function currency(value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string' || !/^[A-Z]{3}$/.test(value)) invalid();
   return value;
+}
+/** Ozon reports stock and model counts as signed 32-bit integers, never as strings or fractions. */
+function quantity(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) invalid();
+  return value;
+}
+const maximumStockSources = 100;
+/** Stock quantities are per fulfilment source; a repeated key would make the stored number ambiguous. */
+function stock(value: unknown): OzonProductDetails['stock'] {
+  if (value === undefined || value === null) return null;
+  const row = object(value), items = row.stocks ?? [];
+  if (!Array.isArray(items) || items.length > maximumStockSources) invalid();
+  const parsed = items.map((entry) => {
+    const item = object(entry);
+    return {
+      source: text(item.source, 64),
+      sku: id(item.sku),
+      present: quantity(item.present),
+      reserved: quantity(item.reserved),
+    };
+  });
+  if (new Set(parsed.map((item) => `${item.source}:${item.sku}`)).size !== parsed.length) invalid();
+  return { hasStock: optionalBoolean(row.has_stock), items: parsed };
+}
+/** The model is only reported for merged variants; count counts the response, not the model. */
+function model(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const row = object(value);
+  if (row.count !== undefined && row.count !== null) quantity(row.count);
+  return optionalId(row.model_id);
 }
 // Ozon reports the marketplace creation date ("上架时间") as an ISO 8601 instant,
 // often with fractional seconds and always in UTC ("...Z").
@@ -232,6 +266,8 @@ export async function readOzonProductDetails(
       createdAt: timestamp(row.created_at),
       primaryImage: primary[0] ?? images[0] ?? colors[0] ?? null,
       images: all,
+      modelId: model(row.model_info),
+      stock: stock(row.stocks),
     };
   });
   return { items };

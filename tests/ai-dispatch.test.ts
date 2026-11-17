@@ -21,6 +21,8 @@ async function fixture(){
   const controller={receiveInbound:async(scope:any,eventId:string)=>(await f.call('inbound',{eventId},scope)).body,admitAiDispatch:async(scope:any,request:any)=>(await f.call('ai-dispatch-admit',{request},scope)).body,
    stopAiDispatch:async(scope:any,request:any)=>(await f.call('ai-dispatch-stop',{request},scope)).body,
    recordFallbackClassification:async(scope:any,runId:string)=>(await f.call('ai-fallback-classification',{runId},scope)).body,
+   noteAiFailure:async(scope:any,eventId:string)=>(await f.call('ai-note-failure',{eventId},scope)).body,
+   restartAiRun:async(scope:any,runId:string)=>(await f.call('ai-restart-run',{runId},scope)).body,
    readClassifiedInput:async(scope:any)=>(await f.call('ai-classified-input',{},scope)).body,
    startAi:async(scope:any,request:any)=>(await f.call('ai-start',{request},scope)).body,
    readAiWork:async(scope:any,runId:string)=>(await f.call('ai-work-read',{runId},scope)).body};
@@ -58,12 +60,6 @@ test('one dispatch window covers both model calls instead of cutting at three se
  await m.dispatchAiReceptions(f.env(),deps,undefined,10_000);
  assert.equal(calls.length,2,'a slow classification must not abandon the answer in the same window');
  assert.equal(await f.db.prepare('SELECT due_at FROM ai_dispatch').first('due_at'),null,'the dispatch finished instead of retrying');
-});
-test('configuration or budget refusal returns to the human queue without replaying an admitted run',{timeout:30000},async t=>{
- const m=await api(),f=await fixture();t.after(f.close);const input=await f.append();let calls=0;
- await m.dispatchAiReceptions(f.env(),{reconcile:async()=>({status:'unavailable'}),execute:async()=>{calls++;return {status:'unavailable'};}});assert.equal(calls,1);
- const state=(await f.call('read')).body.view.state;assert.equal(state.reception,'paused');assert.equal(state.workStatus,'needs_reply');assert.equal(await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='ai_dispatch_stop'").first('n'),1);
- const runId=await f.db.prepare('SELECT run_id FROM ai_dispatch').first('run_id'),replay=await f.call('ai-dispatch-stop',{request:{eventId:input.eventId,runId,targetRunId:runId,reason:'unavailable'}});assert.equal(replay.body.outcome,'accepted');assert.deepEqual(replay.body.state,state);
 });
 test('a pending answer continues with its original identity after restart instead of repeating classification or interrupting it',{timeout:30000},async t=>{
  const m=await api(),f=await fixture();t.after(f.close);await f.append();let intakeId='',answerId='',answerCalls=0;const calls:string[]=[];
@@ -207,4 +203,16 @@ test('a classifier that never submits its tool still starts an answer with the p
  const events=await f.db.prepare("SELECT action FROM conversation_control_event ORDER BY sequence").all();
  assert.deepEqual(events.results.map((row:any)=>row.action).slice(0,4),['customer_message','ai_intake_start','ai_classification','ai_start']);
  assert.equal(await f.db.prepare("SELECT outcome FROM store_audit_event WHERE action='ai.classification'").first('outcome'),'fallback_ready_presale');
+});
+
+test('a failing model is retried twice and only then handed to a human',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);await f.append();
+ let calls=0;const deps={reconcile:async()=>({status:'pending'}),execute:async()=>{calls++;return {status:'unavailable' as const};}};
+ for(let attempt=1;attempt<=3;attempt++){
+  await m.dispatchAiReceptions(f.env(),deps);
+  if(attempt<3)await f.db.prepare('UPDATE ai_dispatch SET due_at=0').run();
+ }
+ assert.equal(calls,3,'three model attempts before any handoff');
+ assert.equal(await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='ai_dispatch_stop'").first('n'),1);
+ assert.equal((await f.call('read')).body.view.state.reception,'paused');
 });

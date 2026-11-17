@@ -95,8 +95,8 @@ return class ConversationController extends Base {
     const access=await this.access(scope,actor);
     return access?.directory?{outcome:'found',view:await this.view(access.directory,access.memberId)}:{outcome:'not_found'};
   }
-  /** Provider latency for one classification spans 20–60s; a 60s cap killed runs mid-call. */
-  protected aiTimeoutMs(){return 150_000;}
+  /** The model is slow and occasionally stalls; give one attempt ten minutes before retrying. */
+  protected aiTimeoutMs(){return 600_000;}
   /** Company default, cached per instance: a paused conversation adopts AI on the next live message. */
   private defaultAiCache:{organizationId:string;enabled:boolean;at:number}|null=null;
   private async defaultAiReception(organizationId:string){
@@ -204,7 +204,8 @@ return class ConversationController extends Base {
       if(JSON.stringify(await transaction.get('aiRun'))!==JSON.stringify(oldValue)||await transaction.get(`receipt:ai-start:${request.runId}`)||await transaction.get(`receipt:ai-resume:${request.runId}`))return {outcome:'conflict' as const};
       const waiting=listening&&state.reception==='ai'&&state.controlEpoch===listening.controlEpoch&&JSON.stringify(await transaction.get('aiListening'))===JSON.stringify(listening)&&(oldRun?.request.runId??null)===listening.request.previousRunId;
       const queued=pending&&pending.event.messageId===request.messageId&&state.reception==='ai'&&state.controlEpoch===pending.controlEpoch&&JSON.stringify(await transaction.get('aiPendingInput'))===JSON.stringify(pending)&&(!oldRun||oldRun.controlEpoch<state.controlEpoch)&&!await transaction.get('aiClassification');
-      if(state.version!==request.expectedVersion||state.lifecycle!=='open'||(!waiting&&!queued&&(state.reception!=='paused'||state.controlEpoch!==0||oldRun))||state.assignedMemberId!==null||state.workStatus!=='needs_reply'||oldRun?.request.runId===request.runId)return {outcome:'conflict' as const};
+      const fresh=state.reception==='ai'&&!oldRun;
+      if(state.version!==request.expectedVersion||state.lifecycle!=='open'||(!waiting&&!queued&&!fresh&&(state.reception!=='paused'||state.controlEpoch!==0||oldRun))||state.assignedMemberId!==null||state.workStatus!=='needs_reply'||oldRun?.request.runId===request.runId)return {outcome:'conflict' as const};
       if(execution&&(!execution.closure||JSON.stringify(execution.payload.run)!==JSON.stringify(oldRun)))return {outcome:'unavailable' as const};
       if([state.version,state.controlEpoch,state.sequence].some(n=>n>=Number.MAX_SAFE_INTEGER-1))return {outcome:'conflict' as const};
       const now=Math.max(Date.now(),state.updatedAt),run=v.parse(aiIntakeRunSchema,{schemaVersion:2,kind:'intake',scope,request,admission,controlEpoch:state.controlEpoch+1,startedAt:now,deadlineAt:now+this.aiTimeoutMs()});
@@ -479,6 +480,28 @@ return class ConversationController extends Base {
     }
     const result=await this.commitHandoff(directory,run,input,'agent');if(result.outcome!=='accepted')await this.auditClassification(scope,runId,`handoff_${result.outcome}`);await this.flush(scope);
     return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
+  }
+  /** Count failed attempts for one input; the dispatcher retries twice more, then hands off. */
+  async noteAiFailure(scope:ControlScope,eventId:string){
+    if(!this.routed(scope)||!identifier(eventId))return {count:0};
+    return this.ctx.storage.transaction(async transaction=>{
+      const key=`aiAttempt:${eventId}`;
+      const previous=await transaction.get<number>(key);
+      const count=(typeof previous==='number'?previous:0)+1;
+      await transaction.put(key,count);
+      return {count};
+    });
+  }
+  /** Drop the in-flight run so the next dispatch starts a brand-new attempt. */
+  async restartAiRun(scope:ControlScope,runId:string){
+    if(!this.routed(scope))return {outcome:'unavailable' as const};
+    return this.ctx.storage.transaction(async transaction=>{
+      const value=await transaction.get('aiRun');if(!value)return {outcome:'ignored' as const};
+      const run=v.parse(aiWorkSchema,value);
+      if(run.request.runId!==runId||!sameScope(run.scope,scope))return {outcome:'ignored' as const};
+      await transaction.delete(['aiRun','aiDeadline','aiClassification','aiListening']);
+      return {outcome:'accepted' as const};
+    });
   }
   /**
    * Last-resort buyer notice: the answer run ended without a send and without a committed

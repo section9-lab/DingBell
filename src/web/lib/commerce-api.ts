@@ -28,6 +28,10 @@ const costing = v.nullable(
     validFrom: v.string(),
   }),
 );
+const stockSummary = v.object({
+  hasStock: v.nullable(v.boolean()),
+  observedAt: optionalText,
+});
 const productFields = {
   id: v.string(),
   store,
@@ -35,8 +39,10 @@ const productFields = {
   name: optionalText,
   sku: optionalText,
   archived: v.nullable(v.boolean()),
+  modelId: optionalText,
   hasFboStocks: v.nullable(v.boolean()),
   hasFbsStocks: v.nullable(v.boolean()),
+  stock: stockSummary,
   price: optionalText,
   currency: optionalText,
   primaryImage: optionalText,
@@ -52,7 +58,36 @@ const productFields = {
 const product = v.object(productFields);
 const productDetail = v.object({
   ...productFields,
+  stock: v.object({
+    ...stockSummary.entries,
+    sources: v.array(
+      v.object({
+        source: v.string(),
+        sku: v.string(),
+        present: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        reserved: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        observedAt: v.string(),
+      }),
+    ),
+  }),
   sources: v.array(v.object({ sku: v.string(), source: v.string() })),
+  variants: v.array(
+    v.object({
+      id: v.string(),
+      offerId: v.string(),
+      sku: optionalText,
+      name: optionalText,
+      archived: v.nullable(v.boolean()),
+      primaryImage: optionalText,
+      state,
+      stock: v.object({
+        hasStock: v.nullable(v.boolean()),
+        present: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        reserved: v.pipe(v.number(), v.integer(), v.minValue(0)),
+      }),
+    }),
+  ),
+  variantsTruncated: v.boolean(),
 });
 const postingImage = v.nullable(
   v.pipe(

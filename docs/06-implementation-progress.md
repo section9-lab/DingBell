@@ -3302,3 +3302,14 @@ Cloudflare 最新真云检查使用全新 D1、全部 54 份迁移、实际 Pi W
 - 已知代价：未配置价格时 `ai_generation.charged_micros` 与预算台账恒为 0，用量记录不再是真实成本来源。
 
 验证：`tsc --noEmit`（根与 `src/web`）通过；完整 `npm test` 1174/1174 通过。
+
+## 144. 商品型号分组与库存观察值（2026-11-17）
+
+`/v3/product/info/list` 本来就在每个 item 里返回 `model_info.model_id` 与 `stocks`，此前解析层只取 11 个字段，二者被丢弃；因此同款多颜色在库里是互不关联的商品，库存只有列表接口的布尔标记。
+
+- **解析**：`OzonProductDetails` 新增 `modelId`（int64 走共享 `idFields` 字符串化保护，避免精度丢失）与 `stock`（`hasStock` + 各来源 `present/reserved`）。字段类型不符、负数、小数、重复 `source+sku` 一律 `invalid_response`，不做强制转换。
+- **存储**：迁移 `0083_product_variants_stock.sql` 新增 `product.model_id`、`product.stock_has_stock`、`product.stock_observed_at` 与 `product_stock` 表（按来源和 SKU 存数量）。库存与型号不进入 `product.facts`，因此库存刷新不会新增 `product_source_snapshot`、不会使已发布知识来源失效。`stocks` 字段缺失视为未知，不会清空既有数量或观察时间；`stocks` 存在但列表为空才是观察到的零库存。
+- **回填**：同一迁移把非 pending 的存量商品重置为 pending，让详情同步重新观察一次；相同 facts 不会插入新快照。
+- **读取**：商品 DTO 增加 `modelId`、`stock.hasStock/observedAt`；详情额外返回各来源库存与同型号变体（按 `model_id` 归组，最多 50 个并标记截断）。后台商品详情页展示型号、来源库存数字与变体切换。
+- **AI 边界不变**：`AiProductContext` 仍是 9 个字段的封闭集合，`get_product_info` 不返回型号、数量或库存；测试固定键集合并断言 `stock/modelId/present/supplySource/purchasePrice/costing` 不出现在模型输入侧。
+- **验证**：`npm test` 1053/1053、`npm run check:types`（根与 `src/web`）通过。

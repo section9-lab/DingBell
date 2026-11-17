@@ -22,10 +22,27 @@ export async function finishAiDispatch(db:D1Database,value:AiDispatchClaim,done:
   .bind(done?null:now+1000,c.scope.controllerId,c.scope.organizationId,c.scope.storeId,c.scope.conversationId,c.eventId,c.runId,c.token).run();
 }
 type Result={status:string};
+/** Rotate the queue target so the next tick starts a brand-new run instead of replaying a dead one. */
+async function rotateDispatch(db:D1Database,c:AiDispatchClaim,runId:string,dueAt:number){
+ await db.prepare(`UPDATE ai_dispatch SET run_id=?,due_at=?,token=NULL WHERE controller_id=? AND organization_id=? AND store_id=? AND conversation_id=? AND event_id=?`)
+  .bind(runId,dueAt,c.scope.controllerId,c.scope.organizationId,c.scope.storeId,c.scope.conversationId,c.eventId).run();
+}
 type Dependencies={execute?:(env:SupportBindings,scope:AiDispatchClaim['scope'],runId:string)=>Promise<Result>;reconcile?:(env:SupportBindings,scope:AiDispatchClaim['scope'])=>Promise<Result>};
 /** The queue addresses original work only; every model call still needs live controller and financial authority. */
 async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependencies){
  const controller=getConversationController(env,c.scope.controllerId),execute=deps.execute??executeAiRun,reconcile=deps.reconcile??reconcileConversationAi;
+ const retry=async(reason:string)=>{
+  const counted=typeof controller.noteAiFailure==='function'?await controller.noteAiFailure(c.scope,c.eventId).catch(()=>({count:3})):{count:3};
+  logEvent('ai.dispatch.retry',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,reason,attempt:counted.count});
+  if(counted.count<3){
+   if(typeof controller.restartAiRun==='function')await controller.restartAiRun(c.scope,c.runId).catch(()=>{});
+   await rotateDispatch(env.DB!,c,crypto.randomUUID(),Date.now()+1000);
+   return false;
+  }
+  // Three failures: tell the buyer a person is following up, then park the conversation.
+  if(typeof controller.sendFallbackNotice==='function')await controller.sendFallbackNotice(c.scope,c.runId).catch(()=>{});
+  return stop('unavailable');
+ };
  const stop=async(reason:'disabled'|'timeout'|'unavailable'|'runtime_failure',targetRunId:string|null=c.runId)=>{
   const r=await controller.stopAiDispatch(c.scope,{eventId:c.eventId,runId:c.runId,targetRunId,reason});
   logEvent('ai.dispatch.stop',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,reason,targetRunId,outcome:r.outcome});
@@ -72,7 +89,7 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
   return finishAnswer(await execute(env,c.scope,admitted.answerRunId),admitted.answerRunId);
  }
  if(result.status==='pending'||result.status==='unconfirmed')return false;
- return stop(result.status==='unavailable'?'unavailable':'runtime_failure');
+ return retry(result.status==='unavailable'?'unavailable':'runtime_failure');
 }
 /** One tick may finish classification and the answer together; a fixed 3s cut both model calls off. */
 export const DISPATCH_WINDOW_MS = 20_000;

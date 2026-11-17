@@ -110,6 +110,10 @@ export async function commitProductDetails(db: D1Database, lease: SyncLease, wor
   bounded(rows); bounded(work.items);
   const token = crypto.randomUUID(), condition = syncPageCondition(lease,token), observedAt = Date.now(), next = future(retryDueAt);
   const workJSON = JSON.stringify(work.items), factsJSON = JSON.stringify(rows);
+  // Stock and model grouping are observed alongside the facts but never inside the immutable snapshot.
+  const pinnedJSON = JSON.stringify(page.items.map(item=>({id:item.id,modelId:item.modelId})));
+  const stockPinnedJSON = JSON.stringify(page.items.flatMap(item=>item.stock===null?[]:[{id:item.id,hasStock:item.stock.hasStock}]));
+  const stockJSON = JSON.stringify(page.items.flatMap(item=>item.stock===null?[]:item.stock.items.map(row=>({productId:item.id,source:row.source,sku:row.sku,present:row.present,reserved:row.reserved}))));
   const results = await db.batch([
     prepareSyncPageGate(db,lease,token,{sql:productDetailGate(),
       values:[workJSON,lease.storeId,lease.orgId,work.epoch,work.items.length]}),
@@ -119,6 +123,21 @@ export async function commitProductDetails(db: D1Database, lease: SyncLease, wor
       facts_observed_at=?,detail_revision=detail_revision+1,detail_state='complete',detail_attempt=0,detail_error=NULL
       WHERE store_id=? AND organization_id=? AND id IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
       .bind(factsJSON,observedAt,lease.storeId,lease.orgId,factsJSON,...condition.values),
+    // An omitted model_info is unknown, not proof the item left its model, so only a reported id replaces the stored one.
+    db.prepare(`UPDATE product SET model_id=COALESCE((SELECT json_extract(value,'$.modelId') FROM json_each(?) WHERE json_extract(value,'$.id')=product.id),product.model_id)
+      WHERE store_id=? AND organization_id=? AND id IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
+      .bind(pinnedJSON,lease.storeId,lease.orgId,pinnedJSON,...condition.values),
+    db.prepare(`UPDATE product SET stock_has_stock=COALESCE((SELECT json_extract(value,'$.hasStock') FROM json_each(?) WHERE json_extract(value,'$.id')=product.id),product.stock_has_stock),
+      stock_observed_at=? WHERE store_id=? AND organization_id=? AND id IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
+      .bind(stockPinnedJSON,observedAt,lease.storeId,lease.orgId,stockPinnedJSON,...condition.values),
+    // Only products the provider actually reported stock for are replaced; an absent stocks field stays unknown.
+    db.prepare(`DELETE FROM product_stock WHERE store_id=? AND organization_id=? AND product_id IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
+      .bind(lease.storeId,lease.orgId,stockPinnedJSON,...condition.values),
+    db.prepare(`INSERT INTO product_stock(organization_id,store_id,product_id,source,sku,present,reserved,observed_at)
+      SELECT ?,?,json_extract(value,'$.productId'),json_extract(value,'$.source'),json_extract(value,'$.sku'),json_extract(value,'$.present'),json_extract(value,'$.reserved'),?
+      FROM json_each(?) WHERE ${condition.sql}
+      ON CONFLICT(store_id,product_id,source,sku) DO UPDATE SET present=excluded.present,reserved=excluded.reserved,observed_at=excluded.observed_at`)
+      .bind(lease.orgId,lease.storeId,observedAt,stockJSON,...condition.values),
     db.prepare(`UPDATE product SET detail_attempt=detail_attempt+1,detail_revision=detail_revision+1,
       detail_state=CASE WHEN detail_attempt+1>=3 THEN 'error' ELSE 'pending' END,detail_error='product_details_missing',detail_due_at=?
       WHERE store_id=? AND organization_id=? AND id IN (SELECT json_extract(value,'$.id') FROM json_each(?))

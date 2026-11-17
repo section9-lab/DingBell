@@ -110,7 +110,7 @@ export function ConversationControlPanel({ userId, companyId, conversationId, st
               view={view!} disabled={disabled} onChanged={reread} onDenied={onDenied} />}
         </div>
       </div>
-      {state?.reception === 'ai' && view
+      {state?.reception !== 'human' && view
         ? <AiLoopActivity key={`${companyId}:${conversationId}:${view.viewerMemberId}`} companyId={companyId} conversationId={conversationId} memberId={view.viewerMemberId} />
         : !!hosting.description && <p className="mt-1 text-xs text-muted-foreground">{hosting.description}</p>}
       {!!notice && <p role="status" className="mt-1 text-xs text-muted-foreground">{notice}</p>}
