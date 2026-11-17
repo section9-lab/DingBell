@@ -465,18 +465,47 @@ return class ConversationController extends Base {
   }
   async requestHandoff(scope:ControlScope,runId:string,value:unknown){
     const input=v.parse(aiHandoffSchema,value);
-    if(!v.is(v.pipe(v.string(),v.uuid()),runId)||!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
-    const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
+    const refuse=async(reason:string)=>{await this.auditClassification(scope,runId,`handoff_${reason}`);return {outcome:'unavailable' as const};};
+    if(!v.is(v.pipe(v.string(),v.uuid()),runId)||!this.env.DB||!this.routed(scope))return refuse('scope');
+    const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return refuse('directory');
     const historical=await this.ctx.storage.get<ControlReceipt|AiReceipt>(`receipt:ai-handoff:${runId}`);
-    const valueRun=historical?.action==='request_handoff'?checkedAiReceipt(historical).run:await this.ctx.storage.get('aiRun');if(!valueRun)return {outcome:'unavailable' as const};
-    const work=v.parse(aiWorkSchema,valueRun);if(work.schemaVersion!==1)return {outcome:'unavailable' as const};const run=work;if(run.request.runId!==runId||!sameScope(run.scope,scope))return {outcome:'unavailable' as const};
+    const valueRun=historical?.action==='request_handoff'?checkedAiReceipt(historical).run:await this.ctx.storage.get('aiRun');if(!valueRun)return refuse('run_missing');
+    const work=v.parse(aiWorkSchema,valueRun);if(work.schemaVersion!==1)return refuse('not_answer_run');const run=work;if(run.request.runId!==runId||!sameScope(run.scope,scope))return refuse('run_scope');
     // A committed receipt is historical evidence, even after policy disablement.
     if(!historical){
-      if(Date.now()>=run.deadlineAt)return {outcome:'unavailable' as const};
-      const admission=await readAiAdmission(this.env.DB,scope,run.request);if(JSON.stringify(admission)!==JSON.stringify(run.admission))return {outcome:'unavailable' as const};
+      if(Date.now()>=run.deadlineAt)return refuse('deadline');
+      const admission=await readAiAdmission(this.env.DB,scope,run.request);if(JSON.stringify(admission)!==JSON.stringify(run.admission))return refuse('admission_changed');
     }
-    const result=await this.commitHandoff(directory,run,input,'agent');await this.flush(scope);
+    const result=await this.commitHandoff(directory,run,input,'agent');if(result.outcome!=='accepted')await this.auditClassification(scope,runId,`handoff_${result.outcome}`);await this.flush(scope);
     return result.outcome==='accepted'?{...result,state:await this.ctx.storage.transaction(transaction=>this.state(transaction,directory))}:result;
+  }
+  /**
+   * Last-resort buyer notice: the answer run ended without a send and without a committed
+   * handoff (a refused tool call must not leave the buyer in silence). Idempotent per run.
+   */
+  async sendFallbackNotice(scope:ControlScope,runId:string){
+    if(!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
+    const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
+    const value=await this.ctx.storage.get('aiRun');if(!value)return {outcome:'unavailable' as const};
+    const work=v.parse(aiWorkSchema,value);if(work.schemaVersion!==1||work.request.runId!==runId||!sameScope(work.scope,scope))return {outcome:'unavailable' as const};
+    if(await this.ctx.storage.get(`receipt:ai-notice:${runId}`))return {outcome:'existing' as const};
+    const state=await this.ctx.storage.transaction(transaction=>this.state(transaction,directory));
+    if(state.lifecycle!=='open'||state.reception!=='ai'||state.assignedMemberId!==null)return {outcome:'ignored' as const};
+    if(this.env.OUTBOUND_ENABLED!=='true'||this.env.AI_OUTBOUND_ENABLED!=='true')return {outcome:'unavailable' as const};
+    const context=await readAiReplyDispatchContext(this.env.DB,scope);
+    if(!context?.outboundEnabled||!context.replyAvailable||context.store.platform!=='ozon')return {outcome:'unavailable' as const};
+    let credentials:{apiKey:string};
+    try{
+      if(!context.store.credentialKeyVersion||!context.store.credentialNonce||!context.store.credentialCiphertext)throw new Error('missing credentials');
+      credentials=await decryptCredentials(this.env,{orgId:scope.organizationId,storeId:scope.storeId,platformStoreId:context.store.platformStoreId,credentialVersion:context.store.credentialVersion},
+        {keyVersion:context.store.credentialKeyVersion,nonce:context.store.credentialNonce,ciphertext:context.store.credentialCiphertext});
+    }catch{return {outcome:'unavailable' as const};}
+    const language=work.admission.language;
+    const body=(language==='ru'?'Получил ваш вопрос. Проверю информацию и вернусь с ответом в этом чате.':language==='zh-CN'?'已收到你的问题，核对信息后在这里回复你。':'Got your question. I will check and reply here.') as string;
+    const result=await this.sendReply({clientId:context.store.platformStoreId,apiKey:credentials.apiKey},{chatId:context.platformThreadId,body});
+    await this.ctx.storage.put(`receipt:ai-notice:${runId}`,{at:Date.now(),outcome:result.outcome});
+    await this.auditClassification(scope,runId,`notice_${result.outcome}`);
+    return result.outcome==='sent'?{outcome:'accepted' as const,sent:true}:{outcome:'unavailable' as const,sent:false};
   }
   private async expireAi(directory:ControlDirectory){
     const value=await this.ctx.storage.get('aiRun');if(!value)return;

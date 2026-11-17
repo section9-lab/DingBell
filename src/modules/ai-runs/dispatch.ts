@@ -37,6 +37,12 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
    const queued=await controller.enqueueAiReply(c.scope,id);
    logEvent('ai.dispatch.answer',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:id,queued:queued.outcome});
    if(queued.outcome==='accepted')return true;
+   // No send_message and no committed handoff: tell the buyer a person is following up.
+   const notice=typeof controller.sendFallbackNotice==='function'
+    ?await controller.sendFallbackNotice(c.scope,id).catch(()=>({outcome:'unavailable' as const,sent:false}))
+    :{outcome:'unavailable' as const,sent:false};
+   logEvent('ai.dispatch.notice',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:id,outcome:notice.outcome,sent:notice.sent});
+   if(notice.outcome==='accepted')return true;
   }
   return stop(result.status==='unavailable'?'unavailable':'runtime_failure',id);
  };
