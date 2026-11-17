@@ -33,8 +33,8 @@ export function AiLoopActivity({ companyId, conversationId, memberId }: { compan
     : data.status === 'pending'
       ? latest ? `Agent 正在${meta[latest.kind].label}${latest.kind === 'tool' ? ` · ${latest.name}` : ''}…` : 'Agent 正在启动…'
       : data.status === 'completed' ? `Agent 已完成${replied ? '并提交回复' : latest?.kind === 'answer' ? '并生成回复' : ''}（${steps.length} 步）`
-        : data.status === 'failed' ? 'Agent 本次执行失败'
-          : '当前没有可展示的 Agent 执行记录';
+        : data.status === 'failed' ? `Agent 本次执行失败（${steps.length} 步）`
+          : steps.length > 0 ? `上次 Agent 执行记录（${steps.length} 步）` : '当前没有可展示的 Agent 执行记录';
   return <div className="mt-1.5 flex flex-col gap-1.5">
     <div className="flex min-w-0 items-center gap-2">
       {data?.status === 'pending'

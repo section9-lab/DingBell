@@ -1,7 +1,7 @@
 import type {ControlScope} from '../conversations/control-types.ts';
 import {getConversationController,type ControlBindings} from '../conversations/control-bindings.ts';
 import type {AiReceipt} from './finance.ts';
-import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGeneration,freezeAiConfig,type AiExecution,type AiRunReader} from './storage.ts';
+import {readAiExecution,reserveAiExecution,bindAiExecutionReceipt,settleAiGeneration,freezeAiConfig,saveAiLoopSnapshot,type AiExecution,type AiRunReader} from './storage.ts';
 import {logEvent} from '../../platform/log.ts';
 import {isOutboundPromptVersion} from '../../shared/ai-versions.ts';
 import type {SupportInspection} from './ledger.ts';
@@ -31,7 +31,10 @@ async function observe(env:SupportBindings,run:AiExecution,runtime:SupportRuntim
   if(!state||!matchingSupport(state,run)||JSON.stringify(state.receipt)!==JSON.stringify(run.receipt)||(await runtime.lookup(run))?.uid!==run.receipt.uid)return view('unconfirmed');
   for(const g of state.generations)if(g.evidence?.complete&&g.evidence.usageReported&&g.evidence.usage)
    await settleAiGeneration(env.DB!,run.payload.run.scope,run.id,g.sequence,run.receipt,g.evidence.usage);
-  if(status!=='pending'&&!run.closure)await runtime.close(run);
+  if(status!=='pending'&&!run.closure){
+   try{const loop=await runtime.activity?.(run);if(loop)await saveAiLoopSnapshot(env.DB!,run,loop);}catch{/* history is best effort */}
+   await runtime.close(run);
+  }
   return view(status);
  }catch{return view('unconfirmed');}
 }

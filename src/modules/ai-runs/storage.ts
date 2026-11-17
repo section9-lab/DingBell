@@ -151,3 +151,15 @@ export async function closeAiExecution(db:D1Database,scope:ControlScope,runId:st
   .bind(encoded,...bound(scope,runId),proof.providerPermits,...args).run();
  if(JSON.stringify((await required(db,scope,runId)).closure)!==encoded)throw new Error('AI_CLOSURE_CONFLICT');
 }
+
+/** Persist the Agent loop so the conversation panel keeps showing it after the runtime closes. */
+export async function saveAiLoopSnapshot(db:D1Database,run:AiExecution,loop:{steps:unknown[];truncated:boolean}){
+ const encoded=JSON.stringify(loop);if(new TextEncoder().encode(encoded).length>65536)return;
+ await db.prepare(`INSERT INTO ai_loop_snapshot(run_id,organization_id,store_id,conversation_id,payload,created_at)
+  VALUES(?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET payload=excluded.payload,created_at=excluded.created_at`)
+  .bind(run.id,run.payload.run.scope.organizationId,run.payload.run.scope.storeId,run.payload.run.scope.conversationId,encoded,Date.now()).run();
+}
+export async function readAiLoopSnapshot(db:D1Database,runId:string){
+ const row=await db.prepare('SELECT payload FROM ai_loop_snapshot WHERE run_id=?').bind(runId).first<{payload:string}>();
+ if(!row)return null;try{return JSON.parse(row.payload) as {steps:unknown[];truncated:boolean};}catch{return null;}
+}

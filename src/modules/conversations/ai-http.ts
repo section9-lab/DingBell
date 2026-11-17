@@ -5,7 +5,7 @@ import {configured,limitedBody,signedIn} from '../identity/http.ts';
 import {diagnoseAiReceptionBlocker} from './ai-listening.ts';
 import {aiReceptionCommandSchema,aiReceptionSchema} from '../../shared/ai-reception.ts';
 import {companySupportConfigurationView} from '../company-model/runtime.ts';
-import {readAiExecution} from '../ai-runs/storage.ts';
+import {readAiExecution,readAiLoopSnapshot} from '../ai-runs/storage.ts';
 import {aiActivitySchema} from '../../shared/ai-activity.ts';
 import {getConversationController} from './control-bindings.ts';
 import {ensureControlDirectory,readControlAccess} from './control-storage.ts';
@@ -92,6 +92,8 @@ export function registerAiReceptionRoutes(app:Hono<ApplicationEnv>){
    const status=!run.closure?'pending':run.closure.kind!=='runtime_closed'?'unavailable':run.closure.outcome==='completed'?'completed':'failed';
    let loop:import('../../../packages/agent-runtime/contracts.ts').AgentLoop|null=null;
    try{loop=run.receipt&&c.env.AGENT_RUNTIME?.support.activity?await c.env.AGENT_RUNTIME.support.activity(run):null;}catch{loop=null;}
+   // The runtime closes with the run; fall back to the snapshot so the history stays visible.
+   if(!loop)loop=(await readAiLoopSnapshot(c.env.DB!,run.id)) as typeof loop;
    const question='untrustedCustomerQuestion'in run.modelInput?run.modelInput.untrustedCustomerQuestion:'';
    const input=question?[{id:`input:${run.id}`,kind:'input' as const,text:question.length>600?`${question.slice(0,600)}…`:question}]:[];
    return jsonResponse(c,v.parse(aiActivitySchema,{companyId,conversationId,runId:run.id,status,steps:[...input,...(loop?.steps??[])],truncated:loop?.truncated??false}));
