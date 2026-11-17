@@ -95,7 +95,8 @@ return class ConversationController extends Base {
     const access=await this.access(scope,actor);
     return access?.directory?{outcome:'found',view:await this.view(access.directory,access.memberId)}:{outcome:'not_found'};
   }
-  protected aiTimeoutMs(){return 60_000;}
+  /** Provider latency for one classification spans 20–60s; a 60s cap killed runs mid-call. */
+  protected aiTimeoutMs(){return 150_000;}
   /** Company default, cached per instance: a paused conversation adopts AI on the next live message. */
   private defaultAiCache:{organizationId:string;enabled:boolean;at:number}|null=null;
   private async defaultAiReception(organizationId:string){

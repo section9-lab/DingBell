@@ -85,7 +85,9 @@ export function registerAiReceptionRoutes(app:Hono<ApplicationEnv>){
    const empty=(status:'unavailable'|'pending'='unavailable')=>jsonResponse(c,v.parse(aiActivitySchema,{companyId,conversationId,runId:null,status,steps:[],truncated:false}));
    const directory=access.directory;if(!directory)return empty();
    const scope=directory.scope;
-   const row=await c.env.DB!.prepare(`SELECT id FROM ai_execution WHERE organization_id=? AND store_id=? AND conversation_id=? AND controller_id=? AND json_extract(payload,'$.run.schemaVersion')=1 ORDER BY created_at DESC,id DESC LIMIT 1`)
+   // Follow the newest run, including the classification step: a pending intake must be visible
+   // instead of leaving the previous answer's history on screen.
+   const row=await c.env.DB!.prepare(`SELECT id FROM ai_execution WHERE organization_id=? AND store_id=? AND conversation_id=? AND controller_id=? ORDER BY created_at DESC,id DESC LIMIT 1`)
      .bind(scope.organizationId,scope.storeId,scope.conversationId,scope.controllerId).first<{id:string}>();
    if(!row)return empty();
    const run=await readAiExecution(c.env.DB!,scope,row.id);if(!run)return empty();
