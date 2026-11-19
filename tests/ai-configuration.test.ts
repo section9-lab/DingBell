@@ -46,3 +46,14 @@ test('absent, malformed, oversized and incomplete configuration remains visibly 
   const data=m.supportConfigurationView({AI_RECEPTION_CONFIG_JSON:raw});assert.equal(data.pricesConfigured,false);assert.equal(data.model,null);assert.equal(data.runReservationMicros,null);assert.equal(data.perGenerationMicros,null);assert.equal(data.maxGenerations,null);
  }
 });
+test('v3 exposes the customer-safe product profile without granting cost or stock promises', async () => {
+ const m = await api(), p = await import('../src/modules/ai-runs/policy.ts');
+ const parsed = m.parseSupportConfiguration({ ...config, model: { ...config.model, promptVersion: 'support-reply-v3' } });
+ assert.equal(parsed.config.model.promptVersion, 'support-reply-v3');
+ const instructions = p.supportInstructions('support-reply-v3');
+ for (const phrase of ['get_product_info', 'description', 'attributes', 'purchase cost', 'supplier', 'margin', 'commission', 'exact warehouse quantities', 'observation snapshot']) {
+  assert.match(instructions, new RegExp(phrase, 'i'));
+ }
+ assert.match(instructions, /request_handoff/);
+ assert.doesNotMatch(instructions, /prepare_reply/);
+});

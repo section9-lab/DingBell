@@ -3,8 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { URL } from 'node:url';
-import { commitProductDetails, commitProductList, getDueProductWork, getProductCounts, productDetailGate, productSnapshotInsert } from '../src/modules/products/storage.ts';
-import type { ProductDetailsWork, ProductListWork } from '../src/modules/products/types.ts';
+import { commitProductAttributes, commitProductDescription, commitProductDetails, commitProductList, getDueProductWork, getProductCounts, productDetailGate, productSnapshotInsert } from '../src/modules/products/storage.ts';
+import type { ProductAttributesWork, ProductDescriptionWork, ProductDetailsWork, ProductListWork } from '../src/modules/products/types.ts';
 import type { OzonProductDetails, OzonProductListItem } from '../src/modules/products/ozon.ts';
 import * as synchronization from '../src/modules/sync/storage.ts';
 import type { SyncLease } from '../src/modules/sync/types.ts';
@@ -255,6 +255,44 @@ test('product persistence uses real D1 transactions and current source authoriza
     await db.prepare('UPDATE store SET credential_version=credential_version+1,revision=revision+1 WHERE id=?').bind(id).run();
     assert.equal(await getDueProductWork(db, current.lease), null);
     assert.equal(await commitProductDetails(db, current.lease, current.work, { items: [facts()] }, Date.now() + 30_000), false);
+  });
+  await context.test('profile work is bounded, queued separately and stores only customer-safe specs', async () => {
+    const id = await addStore('product-profile'); await list(id); await details(id);
+    assert.ok(await db.prepare('SELECT 1 FROM product_service_profile WHERE store_id=?').bind(id).first());
+    await db.prepare('UPDATE product_service_profile SET attributes_due_at=1 WHERE store_id=?').bind(id).run();
+    const attributeLease = await lease(id), attributeWork = await getDueProductWork(db, attributeLease);
+    assert.equal(attributeWork?.kind, 'attributes');
+    assert.ok(await commitProductAttributes(db, attributeLease, attributeWork as ProductAttributesWork, { items: [{
+      id: productId, attributesJSON: JSON.stringify([{ name: 'Материал', value: 'хлопок' }]),
+      lengthMm: 30, widthMm: 20, heightMm: 10, dimensionUnit: 'mm', weightG: 50, weightUnit: 'g',
+    }] }, Date.now() + 300_000));
+    let profile = await db.prepare('SELECT attributes_state AS attributesState,attributes_json AS attributesJSON,length_mm AS lengthMm,weight_g AS weightG FROM product_service_profile WHERE store_id=?').bind(id).first<any>();
+    assert.equal(profile.attributesState, 'complete');
+    assert.deepEqual(JSON.parse(profile.attributesJSON), [{ name: 'Материал', value: 'хлопок' }]);
+    assert.equal(profile.lengthMm, 30);
+    assert.equal(profile.weightG, 50);
+    assert.equal(JSON.stringify(profile).includes('purchase'), false);
+
+    await db.prepare('UPDATE product_service_profile SET description_due_at=1 WHERE store_id=?').bind(id).run();
+    const descriptionLease = await lease(id), descriptionWork = await getDueProductWork(db, descriptionLease);
+    assert.equal(descriptionWork?.kind, 'description');
+    assert.ok(await commitProductDescription(db, descriptionLease, descriptionWork as ProductDescriptionWork, 'Мягкая повязка.'));
+    profile = await db.prepare('SELECT description_state AS descriptionState,description FROM product_service_profile WHERE store_id=?').bind(id).first<any>();
+    assert.equal(profile.descriptionState, 'complete');
+    assert.equal(profile.description, 'Мягкая повязка.');
+  });
+  await context.test('profile work yields to due details and runs once the detail queue is empty', async () => {
+    const id = await addStore('product-profile-fair'); await list(id);
+    await db.prepare('INSERT INTO product_service_profile(organization_id,store_id,product_id,attributes_due_at,updated_at) VALUES(?,?,?,1,1)').bind(actor.orgId,id,productId).run();
+    const first = await lease(id), details = await getDueProductWork(db, first);
+    assert.equal(details?.kind, 'details');
+    assert.ok(await commitProductDetails(db, first, details as ProductDetailsWork, { items: [facts()] }, Date.now() + 30_000));
+    await db.prepare('UPDATE product_sync_cursor SET due_at=? WHERE store_id=?').bind(Date.now() + 3_600_000, id).run();
+    const second = await lease(id), profile = await getDueProductWork(db, second);
+    assert.equal(profile?.kind, 'attributes');
+    assert.ok(await commitProductAttributes(db, second, profile as ProductAttributesWork, { items: [{
+      id: productId, attributesJSON: '[]', lengthMm: null, widthMm: null, heightMm: null, dimensionUnit: null, weightG: null, weightUnit: null,
+    }] }, Date.now() + 300_000));
   });
   await context.test('scope foreign keys and fresh member authorization protect read progress', async () => {
     const id = await addStore('product-scope'); await list(id); await details(id);

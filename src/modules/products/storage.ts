@@ -1,7 +1,7 @@
 import { NOW_MS } from '../../platform/database/sql.ts';
 import { MAX_TIMESTAMP_MS } from '../../shared/time.ts';
 import type { OzonProductDetails, OzonProductListItem } from './ozon.ts';
-import type { ProductCounts, ProductDetailsWork, ProductListWork, ProductWork } from './types.ts';
+import type { ProductAttributesWork, ProductCounts, ProductDescriptionWork, ProductDetailsWork, ProductListWork, ProductWork } from './types.ts';
 import { storeAccess, type StoreActor } from '../stores/storage.ts';
 import { prepareSyncPageFinish, prepareSyncPageGate, syncLeaseCondition, syncPageCondition } from '../sync/storage.ts';
 import type { SyncLease, SyncSQL } from '../sync/types.ts';
@@ -18,8 +18,10 @@ function future(value: number) {
 function due(lease: SyncLease): SyncSQL {
   return { sql: `(SELECT MIN(at) FROM (
     SELECT due_at AS at FROM product_sync_cursor WHERE store_id=? AND organization_id=? AND epoch=?
-    UNION ALL SELECT detail_due_at AS at FROM product WHERE store_id=? AND organization_id=? AND detail_epoch=? AND detail_state='pending'))`,
-    values: [lease.storeId,lease.orgId,lease.epoch,lease.storeId,lease.orgId,lease.epoch] };
+    UNION ALL SELECT detail_due_at AS at FROM product WHERE store_id=? AND organization_id=? AND detail_epoch=? AND detail_state='pending'
+    UNION ALL SELECT attributes_due_at AS at FROM product_service_profile WHERE store_id=? AND organization_id=? AND attributes_state='pending'
+    UNION ALL SELECT description_due_at AS at FROM product_service_profile WHERE store_id=? AND organization_id=? AND description_state='pending'))`,
+    values: [lease.storeId,lease.orgId,lease.epoch,lease.storeId,lease.orgId,lease.epoch,lease.storeId,lease.orgId,lease.storeId,lease.orgId] };
 }
 function listing(item: OzonProductListItem) {
   if (!decimalId.test(item.id) || typeof item.id !== 'string') throw new Error('INVALID_PRODUCT_PAGE');
@@ -41,12 +43,26 @@ export async function getDueProductWork(db: D1Database, lease: SyncLease, limit 
   const pending = await db.prepare(`SELECT id,detail_generation AS generation,detail_revision AS revision,detail_due_at AS dueAt FROM product
     WHERE store_id=? AND organization_id=? AND detail_epoch=? AND detail_state='pending' AND detail_due_at<=${nowSQL} AND ${guard.sql}
     ORDER BY detail_due_at,id LIMIT ?`).bind(lease.storeId,lease.orgId,lease.epoch,...guard.values,limit).all<{id:string;generation:number;revision:number;dueAt:number}>();
+  // Profile enrichment is a separate, bounded stream. It alternates with details so a large
+  // catalog cannot starve descriptions, and a large profile backlog cannot starve discovery.
+  const profileWork = async (): Promise<ProductWork | null> => {
+    const attributes = await db.prepare(`SELECT product_id AS id,attributes_due_at AS dueAt FROM product_service_profile
+      WHERE store_id=? AND organization_id=? AND attributes_state='pending' AND attributes_due_at<=${nowSQL}
+      ORDER BY attributes_due_at,product_id LIMIT 10`).bind(lease.storeId,lease.orgId).all<{id:string;dueAt:number}>();
+    if (attributes.results.length) return {kind:'attributes',storeId:lease.storeId,epoch:lease.epoch,dueAt:attributes.results[0]!.dueAt,
+      items:attributes.results.map(({id})=>({id}))};
+    const description = await db.prepare(`SELECT product_id AS id,description_due_at AS dueAt FROM product_service_profile
+      WHERE store_id=? AND organization_id=? AND description_state='pending' AND description_due_at<=${nowSQL}
+      ORDER BY description_due_at,product_id LIMIT 1`).bind(lease.storeId,lease.orgId).first<{id:string;dueAt:number}>();
+    return description ? {kind:'description',storeId:lease.storeId,epoch:lease.epoch,dueAt:description.dueAt,items:[{id:description.id}]} : null;
+  };
   // Persisted alternation prevents a large catalog or detail backlog starving the other stream.
   if (cursor.ready && (!pending.results.length || cursor.lastKind === 'details')) {
     return {kind:'list',storeId:cursor.storeId,epoch:cursor.epoch,generation:cursor.generation,revision:cursor.revision,cursor:cursor.cursor,recentCursors:JSON.parse(cursor.recentCursors),dueAt:cursor.dueAt};
   }
-  return pending.results.length ? {kind:'details',storeId:lease.storeId,epoch:lease.epoch,dueAt:pending.results[0].dueAt,
-    items:pending.results.map(({id,generation,revision})=>({id,generation,revision}))} : null;
+  if (pending.results.length) return {kind:'details',storeId:lease.storeId,epoch:lease.epoch,dueAt:pending.results[0].dueAt,
+    items:pending.results.map(({id,generation,revision})=>({id,generation,revision}))};
+  return await profileWork();
 }
 
 export async function commitProductList(db: D1Database, lease: SyncLease, work: ProductListWork, page: { items: OzonProductListItem[]; lastId: string; reportedTotal: number }, nextDueAt: number): Promise<boolean> {
@@ -117,6 +133,14 @@ export async function commitProductDetails(db: D1Database, lease: SyncLease, wor
   const results = await db.batch([
     prepareSyncPageGate(db,lease,token,{sql:productDetailGate(),
       values:[workJSON,lease.storeId,lease.orgId,work.epoch,work.items.length]}),
+    // A changed public fact (name, images, price, stock flags) invalidates the derived profile.
+    // The old text stays visible while the profile queue refreshes it; unchanged facts do not requeue.
+    db.prepare(`UPDATE product_service_profile SET attributes_state='pending',attributes_due_at=?,attributes_attempt=0,
+      description_state='pending',description_due_at=?,description_attempt=0,updated_at=?
+      WHERE store_id=? AND organization_id=? AND product_id IN (
+        SELECT product.id FROM product CROSS JOIN json_each(?) item
+        WHERE product.id=json_extract(item.value,'$.id') AND product.facts IS NOT json_extract(item.value,'$.facts') AND ${condition.sql})`)
+      .bind(observedAt,observedAt,observedAt,lease.storeId,lease.orgId,factsJSON,...condition.values),
     db.prepare(productSnapshotInsert(condition.sql))
       .bind(lease.orgId,lease.storeId,observedAt,factsJSON,lease.storeId,lease.orgId,...condition.values),
     db.prepare(`UPDATE product SET facts=(SELECT json_extract(value,'$.facts') FROM json_each(?) WHERE json_extract(value,'$.id')=product.id),
@@ -143,6 +167,12 @@ export async function commitProductDetails(db: D1Database, lease: SyncLease, wor
       WHERE store_id=? AND organization_id=? AND id IN (SELECT json_extract(value,'$.id') FROM json_each(?))
         AND id NOT IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
       .bind(next,lease.storeId,lease.orgId,workJSON,factsJSON,...condition.values),
+    // New details enqueue a customer-safe profile. Existing profiles are not reset by a routine
+    // detail refresh; a future explicit refresh can requeue them without rewriting the snapshot.
+    db.prepare(`INSERT INTO product_service_profile(organization_id,store_id,product_id,attributes_due_at,description_due_at,updated_at)
+      SELECT ?,?,json_extract(value,'$.id'),?,?,? FROM json_each(?) WHERE ${condition.sql}
+      ON CONFLICT(store_id,product_id) DO NOTHING`)
+      .bind(lease.orgId,lease.storeId,observedAt+60_000,observedAt+60_000,observedAt,factsJSON,...condition.values),
     db.prepare(`UPDATE product_sync_cursor SET last_kind='details' WHERE store_id=? AND organization_id=? AND ${condition.sql}`)
       .bind(lease.storeId,lease.orgId,...condition.values),
     ...prepareSyncPageFinish(db,lease,token,due(lease)),
@@ -157,4 +187,113 @@ export async function getProductCounts(db: D1Database, actor: StoreActor, storeI
     (SELECT COUNT(*) FROM product WHERE store_id=store.id AND organization_id=store.organization_id AND detail_state='error') AS failedCount
     FROM store WHERE store.id=? AND store.organization_id=? AND ${storeAccess('store.organization_id',false)}`)
     .bind(storeId,actor.orgId,actor.actorUserId,actor.sessionId).first<ProductCounts>();
+}
+
+export interface ProductAttributesRow {
+  id: string;
+  attributesJSON: string;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  dimensionUnit: string | null;
+  weightG: number | null;
+  weightUnit: string | null;
+}
+
+/** Commits public characteristics and dimensions for one bounded attributes page. */
+export async function commitProductAttributes(db: D1Database, lease: SyncLease, work: ProductAttributesWork, page: { items: ProductAttributesRow[] }, retryDueAt: number): Promise<boolean> {
+  if (lease.source !== 'products' || work.kind !== 'attributes' || work.storeId !== lease.storeId || work.epoch !== lease.epoch) return false;
+  if (!work.items.length || work.items.length > 10 || page.items.length > work.items.length) throw new Error('INVALID_PRODUCT_PAGE');
+  const ids = work.items.map(item => item.id);
+  if (new Set(ids).size !== ids.length || page.items.some(item => !ids.includes(item.id)) || new Set(page.items.map(item => item.id)).size !== page.items.length) throw new Error('INVALID_PRODUCT_PAGE');
+  bounded(page.items);
+  const token = crypto.randomUUID(), condition = syncPageCondition(lease, token), observedAt = Date.now(), next = future(retryDueAt);
+  const workJSON = JSON.stringify(work.items), pageJSON = JSON.stringify(page.items);
+  const results = await db.batch([
+    prepareSyncPageGate(db, lease, token),
+    db.prepare(`UPDATE product_service_profile SET
+      attributes_json=(SELECT json_extract(value,'$.attributesJSON') FROM json_each(?) WHERE json_extract(value,'$.id')=product_service_profile.product_id),
+      length_mm=(SELECT json_extract(value,'$.lengthMm') FROM json_each(?) WHERE json_extract(value,'$.id')=product_service_profile.product_id),
+      width_mm=(SELECT json_extract(value,'$.widthMm') FROM json_each(?) WHERE json_extract(value,'$.id')=product_service_profile.product_id),
+      height_mm=(SELECT json_extract(value,'$.heightMm') FROM json_each(?) WHERE json_extract(value,'$.id')=product_service_profile.product_id),
+      dimension_unit=(SELECT json_extract(value,'$.dimensionUnit') FROM json_each(?) WHERE json_extract(value,'$.id')=product_service_profile.product_id),
+      weight_g=(SELECT json_extract(value,'$.weightG') FROM json_each(?) WHERE json_extract(value,'$.id')=product_service_profile.product_id),
+      weight_unit=(SELECT json_extract(value,'$.weightUnit') FROM json_each(?) WHERE json_extract(value,'$.id')=product_service_profile.product_id),
+      attributes_state='complete',attributes_attempt=0,attributes_due_at=0,observed_at=?,updated_at=?
+      WHERE store_id=? AND organization_id=? AND product_id IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
+      .bind(pageJSON,pageJSON,pageJSON,pageJSON,pageJSON,pageJSON,pageJSON,observedAt,observedAt,lease.storeId,lease.orgId,pageJSON,...condition.values),
+    db.prepare(`UPDATE product_service_profile SET attributes_attempt=attributes_attempt+1,
+      attributes_state=CASE WHEN attributes_attempt+1>=3 THEN 'unavailable' ELSE 'pending' END,attributes_due_at=?,updated_at=?
+      WHERE store_id=? AND organization_id=? AND product_id IN (SELECT json_extract(value,'$.id') FROM json_each(?))
+        AND product_id NOT IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
+      .bind(next,observedAt,lease.storeId,lease.orgId,workJSON,pageJSON,...condition.values),
+    ...prepareSyncPageFinish(db, lease, token, due(lease)),
+  ]);
+  return !!results.at(-1)!.results.length;
+}
+
+/** Records a failed attributes read without turning a transient provider error into a deletion. */
+export async function commitProductAttributesFailure(db: D1Database, lease: SyncLease, work: ProductAttributesWork, retryDueAt: number): Promise<boolean> {
+  if (lease.source !== 'products' || work.kind !== 'attributes' || work.storeId !== lease.storeId || work.epoch !== lease.epoch) return false;
+  const token = crypto.randomUUID(), condition = syncPageCondition(lease, token), observedAt = Date.now(), next = future(retryDueAt), workJSON = JSON.stringify(work.items);
+  const results = await db.batch([
+    prepareSyncPageGate(db, lease, token),
+    db.prepare(`UPDATE product_service_profile SET attributes_attempt=attributes_attempt+1,
+      attributes_state=CASE WHEN attributes_attempt+1>=3 THEN 'unavailable' ELSE 'pending' END,attributes_due_at=?,updated_at=?
+      WHERE store_id=? AND organization_id=? AND product_id IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND ${condition.sql}`)
+      .bind(next,observedAt,lease.storeId,lease.orgId,workJSON,...condition.values),
+    ...prepareSyncPageFinish(db, lease, token, due(lease), { success: false }),
+  ]);
+  return !!results.at(-1)!.results.length;
+}
+
+/** Commits one public description. Empty descriptions are marked unavailable, not retried forever. */
+export async function commitProductDescription(db: D1Database, lease: SyncLease, work: ProductDescriptionWork, description: string | null): Promise<boolean> {
+  if (lease.source !== 'products' || work.kind !== 'description' || work.storeId !== lease.storeId || work.epoch !== lease.epoch || work.items.length !== 1) return false;
+  const id = work.items[0]!.id, text = description?.trim() ?? '';
+  if (text.length > 8000) throw new Error('INVALID_PRODUCT_PAGE');
+  const token = crypto.randomUUID(), condition = syncPageCondition(lease, token), observedAt = Date.now();
+  const results = await db.batch([
+    prepareSyncPageGate(db, lease, token),
+    db.prepare(`UPDATE product_service_profile SET description=?,description_state=?,description_attempt=0,description_due_at=0,observed_at=?,updated_at=?
+      WHERE store_id=? AND organization_id=? AND product_id=? AND ${condition.sql}`)
+      .bind(text || null, text ? 'complete' : 'unavailable', observedAt, observedAt, lease.storeId, lease.orgId, id, ...condition.values),
+    ...prepareSyncPageFinish(db, lease, token, due(lease)),
+  ]);
+  return !!results.at(-1)!.results.length;
+}
+
+export async function commitProductDescriptionFailure(db: D1Database, lease: SyncLease, work: ProductDescriptionWork, retryDueAt: number): Promise<boolean> {
+  if (lease.source !== 'products' || work.kind !== 'description' || work.storeId !== lease.storeId || work.epoch !== lease.epoch || work.items.length !== 1) return false;
+  const id = work.items[0]!.id, token = crypto.randomUUID(), condition = syncPageCondition(lease, token), observedAt = Date.now(), next = future(retryDueAt);
+  const results = await db.batch([
+    prepareSyncPageGate(db, lease, token),
+    db.prepare(`UPDATE product_service_profile SET description_attempt=description_attempt+1,
+      description_state=CASE WHEN description_attempt+1>=3 THEN 'unavailable' ELSE 'pending' END,description_due_at=?,updated_at=?
+      WHERE store_id=? AND organization_id=? AND product_id=? AND ${condition.sql}`)
+      .bind(next,observedAt,lease.storeId,lease.orgId,id,...condition.values),
+    ...prepareSyncPageFinish(db, lease, token, due(lease), { success: false }),
+  ]);
+  return !!results.at(-1)!.results.length;
+}
+
+export async function readCachedAttributeNames(db: D1Database, items: { descriptionCategoryId: string; typeId: string; attributeIds: string[] }[], language: 'RU' | 'EN' | 'ZH_HANS' = 'RU') {
+  const pairs = new Map<string, { descriptionCategoryId: string; typeId: string }>();
+  for (const item of items) pairs.set(`${item.descriptionCategoryId}:${item.typeId}`, item);
+  const names = new Map<string, string>();
+  for (const pair of pairs.values()) {
+    const rows = (await db.prepare(`SELECT attribute_id AS id,name FROM product_category_attribute
+      WHERE description_category_id=? AND type_id=? AND language=?`).bind(pair.descriptionCategoryId, pair.typeId, language).all<{ id: string; name: string }>()).results;
+    for (const row of rows) names.set(`${pair.descriptionCategoryId}:${pair.typeId}:${row.id}`, row.name);
+  }
+  return names;
+}
+
+export async function saveCachedAttributeNames(db: D1Database, descriptionCategoryId: string, typeId: string, language: 'RU' | 'EN' | 'ZH_HANS', items: { id: string; name: string }[]) {
+  if (!items.length) return;
+  const observedAt = Date.now(), rows = JSON.stringify(items);
+  await db.prepare(`INSERT INTO product_category_attribute(description_category_id,type_id,language,attribute_id,name,observed_at)
+    SELECT ?,?,?,json_extract(value,'$.id'),json_extract(value,'$.name'),? FROM json_each(?) WHERE true
+    ON CONFLICT(description_category_id,type_id,language,attribute_id) DO UPDATE SET name=excluded.name,observed_at=excluded.observed_at`)
+    .bind(descriptionCategoryId, typeId, language, observedAt, rows).run();
 }

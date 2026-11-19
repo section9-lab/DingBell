@@ -26,6 +26,7 @@ import {Pager} from '../components/pager';
 import {Table,TableBody,TableCell,TableHead,TableHeader,TableRow} from '../components/ui/table';
 
 const states={pending:'等待详情',complete:'资料完整',error:'读取失败'} as const;
+const profileStates={complete:'客户资料完整',partial:'部分客户资料',unavailable:'尚未同步客户资料'} as const;
 const yes=(value:boolean|null)=>value===null?'平台未提供':value?'是':'否';
 const stockLabel=(value:boolean|null)=>value===null?'平台未提供':value?'有货':'无货';
 const money=(price:string|null,currency:string|null)=>price===null?'—':`${price}${currency?` ${currency}`:''}`;
@@ -100,8 +101,21 @@ export function ProductsPage({company}:{company:Company}){
           {detail.data.product.stock.sources.length?<ul className="mt-3 grid gap-2">{detail.data.product.stock.sources.map(source=><li key={`${source.source}:${source.sku}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2"><Badge variant="outline">{source.source}</Badge><span className="text-xs text-muted-foreground">SKU {source.sku}</span><span>可售 {source.present}</span><span className="text-muted-foreground">预留 {source.reserved}</span></li>)}</ul>:<p className="mt-3 text-muted-foreground">{detail.data.product.stock.observedAt?'同步时平台未报告任何来源的库存，视为零库存。':'尚未同步到该商品的库存。'}</p>}
           {detail.data.product.variants.length>1&&<div className="mt-4"><p className="mb-2 text-muted-foreground">同型号变体（{detail.data.product.variants.length} 个{detail.data.product.variantsTruncated?'，仅显示前 50 个':''}）</p><div className="flex flex-wrap gap-2">{detail.data.product.variants.map(variant=><Button key={variant.id} size="sm" variant={variant.id===detail.data!.product.id?'secondary':'outline'} aria-current={variant.id===detail.data!.product.id?'true':undefined} onClick={()=>selectProduct(variant.id)}>{variant.offerId} · {stockLabel(variant.stock.hasStock)}</Button>)}</div><p className="mt-2 text-xs text-muted-foreground">变体按平台型号归组，颜色与尺码取值以 Ozon 商品页为准。</p></div>}
         </section>
-        <section className="sm:col-span-2 border-t pt-5" aria-label="货源与采购价"><h3 className="mb-3 font-medium">货源与采购价</h3><ProductSourcingForm companyId={company.id} storeId={storeId} product={detail.data.product} canEdit={canEdit} date={date}/></section>
-        <section className="sm:col-span-2 border-t pt-5" aria-label="成本模型"><h3 className="mb-3 font-medium">成本模型<span className="ml-2 text-xs font-normal text-muted-foreground">来自商家价格表，与核算中心共用；修改请前往核算中心</span></h3>
+        <section className="sm:col-span-2 border-t pt-5" aria-label="客户可见资料">
+          <h3 className="mb-3 font-medium">客户可见资料<span className="ml-2 text-xs font-normal text-muted-foreground">会用于 AI 客服回答，不含成本</span></h3>
+          <div className="grid gap-4">
+            <div><p className="mb-1 text-muted-foreground">商品描述</p>{detail.data.product.serviceProfile.description?<p className="whitespace-pre-wrap break-words">{detail.data.product.serviceProfile.description}</p>:<p className="text-muted-foreground">平台尚未同步商品描述。</p>}</div>
+            {detail.data.product.serviceProfile.attributes.length?<div><p className="mb-1 text-muted-foreground">商品属性</p><dl className="grid gap-2 sm:grid-cols-2">{detail.data.product.serviceProfile.attributes.map((attribute,index)=><div key={`${attribute.name}:${index}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2"><dt className="break-words text-muted-foreground">{attribute.name}</dt><dd className="break-words whitespace-pre-wrap">{attribute.value}</dd></div>)}</dl></div>:<p className="text-muted-foreground">平台尚未同步商品属性。</p>}
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div><dt className="text-muted-foreground">包装尺寸</dt><dd>{detail.data.product.serviceProfile.dimensions?`${detail.data.product.serviceProfile.dimensions.length} × ${detail.data.product.serviceProfile.dimensions.width} × ${detail.data.product.serviceProfile.dimensions.height} ${detail.data.product.serviceProfile.dimensions.unit}`:'平台未提供'}</dd></div>
+              <div><dt className="text-muted-foreground">包装重量</dt><dd>{detail.data.product.serviceProfile.weight?`${detail.data.product.serviceProfile.weight.value} ${detail.data.product.serviceProfile.weight.unit}`:'平台未提供'}</dd></div>
+            </dl>
+            <p className="text-xs text-muted-foreground">{profileStates[detail.data.product.serviceProfile.status]}{detail.data.product.serviceProfile.observedAt?` · 观察于 ${date(detail.data.product.serviceProfile.observedAt)}`:''}</p>
+          </div>
+        </section>
+        <section className="sm:col-span-2 border-t pt-5" aria-label="内部经营"><h3 className="mb-3 font-medium">内部经营<span className="ml-2 text-xs font-normal text-muted-foreground">不会进入 AI 上下文</span></h3>
+          <div className="grid gap-5"><section aria-label="货源与采购价"><h4 className="mb-3 font-medium">货源与采购价</h4><ProductSourcingForm companyId={company.id} storeId={storeId} product={detail.data.product} canEdit={canEdit} date={date}/></section>
+          <section aria-label="成本模型"><h4 className="mb-3 font-medium">成本模型<span className="ml-2 text-xs font-normal text-muted-foreground">来自商家价格表，与核算中心共用；修改请前往核算中心</span></h4>
           {detail.data.product.costing?<dl className="grid gap-3 sm:grid-cols-3">
             {costingRow('拿货成本',`${detail.data.product.costing.purchasePrice} ${detail.data.product.costing.purchaseCurrency}`)}
             {costingRow('代贴单费',detail.data.product.costing.labelFee===null?'—':`${detail.data.product.costing.labelFee} 元/件`)}
@@ -112,6 +126,7 @@ export function ProductsPage({company}:{company:Company}){
             {costingRow('物流渠道',detail.data.product.costing.supplySource??'—')}
             {costingRow('生效时间',date(detail.data.product.costing.validFrom))}
           </dl>:<p className="text-muted-foreground">该商品尚未映射到价格表成本（可在核算中心补录，或回填表格映射后重新同步）。</p>}
+          </section></div>
         </section>
       </CardContent></Card>}
     </>:products.isPending?<LoadingState>正在读取商品…</LoadingState>:products.isError?<ErrorNotice error={products.error}/>:products.data?.products.length?<>

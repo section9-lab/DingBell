@@ -32,6 +32,16 @@ const stockSummary = v.object({
   hasStock: v.nullable(v.boolean()),
   observedAt: optionalText,
 });
+const serviceProfile = v.object({
+  description: optionalText,
+  attributes: v.array(v.object({ name: v.string(), value: v.string() })),
+  dimensions: v.nullable(v.object({
+    length: v.number(), width: v.number(), height: v.number(), unit: v.string(),
+  })),
+  weight: v.nullable(v.object({ value: v.number(), unit: v.string() })),
+  status: v.picklist(['complete', 'partial', 'unavailable']),
+  observedAt: optionalText,
+});
 const productFields = {
   id: v.string(),
   store,
@@ -43,6 +53,7 @@ const productFields = {
   hasFboStocks: v.nullable(v.boolean()),
   hasFbsStocks: v.nullable(v.boolean()),
   stock: stockSummary,
+  serviceProfile,
   price: optionalText,
   currency: optionalText,
   primaryImage: optionalText,

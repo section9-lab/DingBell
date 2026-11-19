@@ -68,7 +68,7 @@ test('persistent source fairness gives both chat and products bounded opportunit
     throw new Error('Unexpected synthetic request');
   }) as typeof fetch;
   for (let index = 0; index < 8; index++) { await ready(); await runSyncPage(env, scope, { fetcher }); }
-  assert.equal(calls.length, 8);
+  assert.equal(calls.length, 8, calls.join(','));
   for (let index = 0; index < calls.length; index += 2) assert.deepEqual(new Set(calls.slice(index,index+2)), new Set(['/v3/chat/list','/v3/product/list']));
 });
 
@@ -168,4 +168,54 @@ test('one shared lease serializes sources and fences an expired product response
   await old;
   assert.equal(JSON.parse((await db.prepare('SELECT listing FROM product').first<string>('listing'))!).offerId,'newer');
   assert.equal(await db.prepare('SELECT cursor FROM product_sync_cursor').first('cursor'),'newer-page');
+});
+
+test('profile work fetches public attributes and one description without touching cost tables', { timeout: 30_000 }, async context => {
+  const { db, env, ready } = await fixture(context);
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  const fetcher = (async (input, init) => {
+    const path = new URL(String(input)).pathname, body = JSON.parse(String(init?.body)); calls.push({ path, body });
+    if (path === '/v3/product/list') return Response.json({ result: { items: body.last_id ? [] : [listed], last_id: 'end', total: 1 } });
+    if (path === '/v3/product/info/list') return Response.json({ items: [detail] });
+    if (path === '/v4/product/info/attributes') return Response.json({ result: [{
+      id: listed.product_id, description_category_id: '17028922', type_id: '91565',
+      name: 'Synthetic product', offer_id: listed.offer_id, sku: '9000000000817031941',
+      height: 10, width: 20, depth: 30, dimension_unit: 'mm', weight: 50, weight_unit: 'g',
+      attributes: [{ id: '85', values: [{ value: 'Brand' }] }, { id: '9048', values: [{ value: 'Synthetic product' }] }],
+      commissions: [{ percent: 0.2 }],
+    }] });
+    if (path === '/v1/description-category/attribute') return Response.json({ result: [{ id: '85', name: 'Бренд' }, { id: '9048', name: 'Название' }] });
+    if (path === '/v1/product/info/description') return Response.json({ result: { id: listed.product_id, description: '<p>Мягкая повязка.</p>' } });
+    throw new Error(`Unexpected synthetic request: ${path}`);
+  }) as typeof fetch;
+  // Discover and hydrate the product first.
+  await ready(); await runSyncPage(env, scope, { fetcher });
+  await ready(); await runSyncPage(env, scope, { fetcher });
+  assert.equal(calls.map(call => call.path).slice(0, 2).join(','), '/v3/product/list,/v3/product/info/list');
+  // Disable catalog work so the next tick is the profile stream.
+  await db.batch([
+    db.prepare('UPDATE store_sync_source SET due_at=0'),
+    db.prepare('UPDATE product_sync_cursor SET due_at=?').bind(Date.now() + 3_600_000),
+    db.prepare('UPDATE product_service_profile SET attributes_due_at=0'),
+  ]);
+  await runSyncPage(env, scope, { fetcher });
+  const attributes = calls.find(call => call.path === '/v4/product/info/attributes');
+  assert.deepEqual(attributes?.body, { filter: { product_id: [listed.product_id] }, limit: 1 });
+  let profile = await db.prepare('SELECT attributes_state AS state,attributes_json AS json,length_mm AS lengthMm,weight_g AS weightG FROM product_service_profile').first<any>();
+  assert.equal(profile.state, 'complete');
+  assert.deepEqual(JSON.parse(profile.json), [{ name: 'Бренд', value: 'Brand' }]);
+  assert.equal(profile.lengthMm, 30);
+  assert.equal(profile.weightG, 50);
+  // Description runs as a separate one-product read.
+  await db.batch([
+    db.prepare('UPDATE store_sync_source SET due_at=0'),
+    db.prepare('UPDATE product_service_profile SET description_due_at=0'),
+  ]);
+  await runSyncPage(env, scope, { fetcher });
+  const description = calls.find(call => call.path === '/v1/product/info/description');
+  assert.deepEqual(description?.body, { product_id: listed.product_id });
+  profile = await db.prepare('SELECT description_state AS state,description FROM product_service_profile').first<any>();
+  assert.equal(profile.state, 'complete');
+  assert.equal(profile.description, 'Мягкая повязка.');
+  assert.equal(JSON.stringify(profile).includes('purchase'), false);
 });

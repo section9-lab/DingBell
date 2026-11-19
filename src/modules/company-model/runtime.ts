@@ -2,7 +2,7 @@ import type { SupportBindings } from '../ai-runs/execution.ts';
 import { parseSupportConfiguration, supportConfigurationView } from '../ai-runs/configuration.ts';
 import { readCompanyModel } from './storage.ts';
 import { modelExecutionSchema, defaultModelGenerations } from '../../shared/company-model.ts';
-import { SUPPORT_REPLY_V2, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
+import { SUPPORT_REPLY_CURRENT, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
 import { credentialConfig } from '../stores/credentials.ts';
 import { modelBaseUrl, modelEndpoint } from './security.ts';
 import { modelAccessToken } from './oauth.ts';
@@ -25,7 +25,7 @@ export async function resolveSupportConfiguration(env:SupportBindings,companyId:
   if(!env.AGENT_RUNTIME||!credentialConfig(env)||modelBaseUrl(row.baseUrl,env)!==row.baseUrl)return null;
   try{
     const execution=row.execution?v.parse(modelExecutionSchema,JSON.parse(row.execution)):defaultExecution;
-    const promptVersion=SUPPORT_REPLY_V2;
+    const promptVersion=SUPPORT_REPLY_CURRENT;
     const maxGenerations=execution.maxGenerations??defaultModelGenerations;
     return parseSupportConfiguration({maxGenerations,model:{provider:'openai-compatible',model:row.model,modelConfigVersion:'company-model-v1',promptVersion,
       connection:{companyId,revision:row.revision,baseUrl:row.baseUrl},maxInputTokens:execution.maxInputTokens,maxOutputTokens:execution.maxOutputTokens,

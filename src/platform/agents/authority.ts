@@ -22,7 +22,7 @@ import { createProductInfoTool, createOrderInfoTool } from '../../modules/conver
 import { createSendMessageTool } from '../../modules/conversations/send-message-tool.ts';
 import { prepareAiMessage } from '../../modules/ai-runs/message-intent.ts';
 import { recordAiProductFact, recordAiOrderFact } from '../../modules/ai-runs/fact-evidence.ts';
-import { SUPPORT_REPLY_V2, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
+import { isOutboundPromptVersion } from '../../shared/ai-versions.ts';
 import { frozenCompanyProvider } from '../../modules/company-model/runtime.ts';
 
 type Row = { instance_id: string; kind: AgentKind; run_id: string; uid: string; definition: string; fingerprint: string; receipt: string | null };
@@ -113,10 +113,10 @@ export class BusinessAgentAuthority implements AgentAuthority {
     if (work.schemaVersion === 2) return [createClassificationTool(work,controller)] as unknown as CommonTool[];
     const read = (scope: ControlScope, runId: string) => controller.readAiRun(scope,runId);
     const tools: CommonTool[] = [createHandoffTool(work,controller)] as unknown as CommonTool[];
-    if (version === SUPPORT_REPLY_V2) {
+    if (version && isOutboundPromptVersion(version)) {
       tools.push(createBashTool(work,{ run: (scope,runId,command,signal) => discoverAiKnowledge(this.env,read,scope,runId,{command},signal) }) as unknown as CommonTool);
       tools.push(createReadTool(work,{ read: (scope,runId,input,signal) => readAiKnowledgeFile(this.env,read,scope,runId,input,signal) }) as unknown as CommonTool);
-      tools.push(createProductInfoTool(work,{ read: (scope,runId) => recordAiProductFact(this.env,scope,runId) }) as unknown as CommonTool);
+      tools.push(createProductInfoTool(work, version, { read: (scope,runId) => recordAiProductFact(this.env,scope,runId) }) as unknown as CommonTool);
       tools.push(createOrderInfoTool(work,{ read: (scope,runId) => recordAiOrderFact(this.env,scope,runId) }) as unknown as CommonTool);
       tools.push(createSendMessageTool(work,{ prepare: (scope,runId,input) => prepareAiMessage(this.env,read,scope,runId,input), wakeAiReply: (...args) => controller.wakeAiReply(...args), requestHandoff: (...args) => controller.requestHandoff(...args) }) as unknown as CommonTool);
       return tools;

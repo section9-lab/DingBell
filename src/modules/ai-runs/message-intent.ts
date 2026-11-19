@@ -4,7 +4,7 @@ import { aiRunSchema, aiScopeSchema } from '../conversations/ai-state.ts';
 import type { ControlScope } from '../conversations/control-types.ts';
 import { knowledgeHash } from '../knowledge/content.ts';
 import { resolveTextKnowledgeDocuments } from '../knowledge/text-profile.ts';
-import { SUPPORT_REPLY_V2 } from '../../shared/ai-versions.ts';
+import { SUPPORT_REPLY_VERSIONS, isOutboundPromptVersion } from '../../shared/ai-versions.ts';
 import { aiSendMessageInputSchema } from '../conversations/send-message-tool.ts';
 import { replyBodySchema } from '../conversations/control-state.ts';
 import { aiDocumentEvidenceSchema, aiKnowledgeScope, type AiKnowledgeBindings } from './knowledge.ts';
@@ -20,6 +20,7 @@ const identifier = v.pipe(v.string(), v.minLength(1), v.maxLength(256));
 const uuid = v.pipe(v.string(), v.uuid());
 const hash = v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/));
 const result = (status: 'prepared' | 'conflict' | 'unavailable' | 'unconfirmed', intentId: string | null = null) => ({ status, intentId, canSend: false as const, sent: false as const });
+const promptVersionsSQL = SUPPORT_REPLY_VERSIONS.map(version => `'${version}'`).join(',');
 const from = `ai_execution e
  JOIN store s ON s.id=e.store_id AND s.organization_id=e.organization_id
  JOIN conversation c ON c.id=e.conversation_id AND c.store_id=e.store_id AND c.organization_id=e.organization_id
@@ -28,7 +29,7 @@ const eligible = (mode: ReviewMode) => `e.id=? AND e.payload=plan.value AND e.pa
  AND ${mode === 'live' ? 'e.closure IS NULL' : `e.closure=? AND e.receipt=? AND e.generations>0
   AND e.generations=(SELECT COUNT(*) FROM ai_generation WHERE run_id=e.id)
   AND NOT EXISTS (SELECT 1 FROM ai_generation WHERE run_id=e.id AND (usage IS NULL OR charged_micros IS NULL OR settled_at IS NULL))`}
- AND json_extract(e.config,'$.model.promptVersion')='${SUPPORT_REPLY_V2}' AND ${currentPayload}
+ AND json_extract(e.config,'$.model.promptVersion') IN (${promptVersionsSQL}) AND ${currentPayload}
  AND s.outbound_enabled=1 AND s.status IN ('verified','partial','attention') AND s.platform='ozon'
  AND length(s.platform_store_id)>0 AND length(c.platform_thread_id)>0 AND s.credential_version>0
  AND length(s.credential_key_version)>0 AND length(s.credential_nonce)>0 AND length(s.credential_ciphertext)>0 AND s.expires_at>${now}
@@ -47,14 +48,16 @@ const savedReplySchema = v.strictObject({
   knowledgeEvidence: v.nullable(aiDocumentEvidenceSchema),
   platformStoreId: identifier, platformThreadId: identifier,
   credentialVersion: v.pipe(v.number(), v.integer(), v.minValue(1)),
-  promptVersion: v.literal(SUPPORT_REPLY_V2),
+  promptVersion: v.picklist(SUPPORT_REPLY_VERSIONS),
 });
 type SavedReply = v.InferOutput<typeof savedReplySchema>;
 
 async function authority(env: Bindings, read: AiRunReader, scope: ControlScope, id: string, mode: ReviewMode, citations: readonly string[], factIds: readonly string[]) {
   if (!enabled(env)) return null;
   const db = env.DB!, execution = await readAiExecution(db, scope, id);
-  if (!execution || execution.config.model.promptVersion !== SUPPORT_REPLY_V2) return null;
+  if (!execution) return null;
+  const promptVersion = execution.config.model.promptVersion;
+  if (!isOutboundPromptVersion(promptVersion)) return null;
   if (mode === 'live' ? execution.closure !== null : execution.closure?.kind !== 'runtime_closed' || execution.closure.outcome !== 'completed'
     || execution.status !== 'settled' || execution.remainingReservedMicros !== 0 || !execution.receipt || !execution.generations.length
     || execution.generations.some(g => g.usage === null || g.chargedMicros === null || g.settledAt === null)) return null;
@@ -91,7 +94,7 @@ async function authority(env: Bindings, read: AiRunReader, scope: ControlScope, 
   }
   if (facts.length && !await revalidateAiFactEvidence(env, scope, id, facts, mode === 'completed')) return null;
   if (JSON.stringify(await current()) !== JSON.stringify(channel)) return null;
-  return { run, evidence, rawEvidence, facts, payloadHash, channel, current };
+  return { run, evidence, rawEvidence, facts, payloadHash, channel, current, promptVersion };
 }
 
 async function saved(db: D1Database, id: string): Promise<SavedReply | null> {
@@ -115,7 +118,7 @@ export async function prepareAiMessage(env: Bindings, read: AiRunReader, scope: 
       facts: c.facts.map(({ id, kind, ref, snapshotHash }) => ({ id, kind, ref, snapshotHash })),
       knowledgeEvidence: c.evidence,
       platformStoreId: c.channel.platformStoreId, platformThreadId: c.channel.platformThreadId, credentialVersion: c.channel.credentialVersion,
-      promptVersion: SUPPORT_REPLY_V2,
+      promptVersion: c.promptVersion,
     });
     await env.DB!.prepare('UPDATE ai_execution SET reply=? WHERE id=? AND payload_hash=? AND reply IS NULL').bind(reply, id, c.payloadHash).run();
     const confirmed = await reviewAiMessage(env, read, scope, id);

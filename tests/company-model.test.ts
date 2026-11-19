@@ -135,11 +135,11 @@ test('company models run with a default envelope and zero recorded cost without 
  assert.equal(available.enabled,true);assert.equal(available.pricesConfigured,true);assert.equal(available.runReservationMicros,0);
  const result=await f.request('',{...command,expectedVersion:1,execution:{...prices,maxGenerations:2}});assert.equal(result.status,200);
  const cost=await resolveSupportConfiguration(env,'company');assert.ok(cost);assert.equal(cost.config.model.provider,'openai-compatible');assert.equal(cost.config.model.model,command.model);assert.equal(cost.config.model.connection?.revision,2);
- assert.equal(cost.config.model.promptVersion,'support-reply-v2');assert.equal(cost.config.maxGenerations,2);assert.ok(cost.total>0);assert.equal(JSON.stringify(cost).includes(command.apiKey),false);
+ assert.equal(cost.config.model.promptVersion,'support-reply-v3');assert.equal(cost.config.maxGenerations,2);assert.ok(cost.total>0);assert.equal(JSON.stringify(cost).includes(command.apiKey),false);
  assert.equal((await companySupportConfigurationView(env,'company')).enabled,true);
  assert.equal(await resolveSupportConfiguration({...env,AGENT_RUNTIME:undefined},'company'),null);
  assert.equal((await f.request('',{...command,expectedVersion:2,execution:{...prices,maxGenerations:2}})).status,200);
- assert.equal((await resolveSupportConfiguration(env,'company'))?.config.model.promptVersion,'support-reply-v2');
+ assert.equal((await resolveSupportConfiguration(env,'company'))?.config.model.promptVersion,'support-reply-v3');
  assert.equal((await resolveSupportConfiguration(env,'company'))?.config.maxGenerations,2);
 });
 

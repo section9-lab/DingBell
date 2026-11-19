@@ -15,7 +15,7 @@ export const modelExecutionSchema=v.strictObject({
   maxOutputTokens:v.pipe(v.number(),v.integer(),v.minValue(modelExecutionLimits.output.min),v.maxValue(modelExecutionLimits.output.max)),
   maxGenerations:v.optional(v.pipe(v.number(),v.integer(),v.minValue(modelExecutionLimits.generations.min),v.maxValue(modelExecutionLimits.generations.max))),
   inputMicrosPerMillion:amount,outputMicrosPerMillion:amount,cacheReadMicrosPerMillion:amount,cacheWriteMicrosPerMillion:amount,
-  // Deprecated compatibility field for historical rows. New runs always use support-reply-v2;
+  // Deprecated compatibility field for historical rows. New runs always use support-reply-v3;
   // the runtime ignores this value and the UI no longer exposes a draft mode.
   autoReply:v.optional(v.boolean()),
 });

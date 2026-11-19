@@ -1,7 +1,7 @@
 import * as v from 'valibot';
 import { knowledgeHash } from '../knowledge/content.ts';
 import type { ControlScope } from '../conversations/control-types.ts';
-import { SUPPORT_REPLY_V2 } from '../../shared/ai-versions.ts';
+import { isSupportKnowledgePromptVersion } from '../../shared/ai-versions.ts';
 import { readAiProductContext, type AiProductContext } from './product.ts';
 import { readAiOrderContext, type AiOrderContext } from './order.ts';
 import { readAiExecution } from './storage.ts';
@@ -39,7 +39,7 @@ async function live(env: { DB?: D1Database }, scope: ControlScope, runId: string
   if (!env.DB) return null;
   const execution = await readAiExecution(env.DB, scope, runId);
   if (!execution || execution.closure || Date.now() >= execution.payload.run.deadlineAt) return null;
-  return execution.config.model.promptVersion === SUPPORT_REPLY_V2 ? execution : null;
+  return isSupportKnowledgePromptVersion(execution.config.model.promptVersion) ? execution : null;
 }
 
 /** Freeze one product read for this run. The model receives an opaque id, never a scope. */

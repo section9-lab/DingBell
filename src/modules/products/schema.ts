@@ -60,6 +60,35 @@ export const productStock = sqliteTable('product_stock', {
   check('product_stock_sku_valid', sql`length(${table.sku}) BETWEEN 1 AND 40 AND ${table.sku} GLOB '[0-9]*'`),
 ]);
 
+// Customer-safe profile used by AI. This table deliberately has no purchase price, supplier,
+// commission or margin columns; those live only in product_sourcing and product_costing.
+export const productServiceProfile = sqliteTable('product_service_profile', {
+  organizationId: text('organization_id').notNull(), storeId: text('store_id').notNull(), productId: text('product_id').notNull(),
+  description: text('description'), descriptionState: text('description_state').notNull().default('pending'),
+  descriptionDueAt: integer('description_due_at').notNull().default(0), descriptionAttempt: integer('description_attempt').notNull().default(0),
+  attributesJson: text('attributes_json'), attributesState: text('attributes_state').notNull().default('pending'),
+  attributesDueAt: integer('attributes_due_at').notNull().default(0), attributesAttempt: integer('attributes_attempt').notNull().default(0),
+  lengthMm: integer('length_mm'), widthMm: integer('width_mm'), heightMm: integer('height_mm'), dimensionUnit: text('dimension_unit'),
+  weightG: integer('weight_g'), weightUnit: text('weight_unit'), observedAt: integer('observed_at'), updatedAt: integer('updated_at').notNull(),
+}, table => [
+  primaryKey({ columns: [table.storeId, table.productId] }),
+  foreignKey({ columns: [table.storeId, table.organizationId, table.productId], foreignColumns: [product.storeId, product.organizationId, product.id] }).onDelete('cascade'),
+  check('product_service_profile_description_state', sql`${table.descriptionState} IN ('pending','complete','unavailable')`),
+  check('product_service_profile_attributes_state', sql`${table.attributesState} IN ('pending','complete','unavailable')`),
+  check('product_service_profile_attempts', sql`${table.descriptionAttempt} BETWEEN 0 AND 3 AND ${table.attributesAttempt} BETWEEN 0 AND 3`),
+  check('product_service_profile_description_length', sql`${table.description} IS NULL OR length(${table.description}) <= 8000`),
+  check('product_service_profile_attributes_json', sql`${table.attributesJson} IS NULL OR (json_valid(${table.attributesJson}) AND json_type(${table.attributesJson}) = 'array')`),
+]);
+
+// Category/type scoped attribute labels. Product values remain per product in the profile above.
+export const productCategoryAttribute = sqliteTable('product_category_attribute', {
+  descriptionCategoryId: text('description_category_id').notNull(), typeId: text('type_id').notNull(),
+  language: text('language').notNull(), attributeId: text('attribute_id').notNull(), name: text('name').notNull(), observedAt: integer('observed_at').notNull(),
+}, table => [
+  primaryKey({ columns: [table.descriptionCategoryId, table.typeId, table.language, table.attributeId] }),
+  check('product_category_attribute_language', sql`${table.language} IN ('RU','EN','ZH_HANS')`),
+]);
+
 export const productSourceSnapshot = sqliteTable('product_source_snapshot', {
   id: text('id').primaryKey(), organizationId: text('organization_id').notNull(), storeId: text('store_id').notNull(),
   productId: text('product_id').notNull(), facts: text('facts').notNull(), observedAt: integer('observed_at').notNull(),

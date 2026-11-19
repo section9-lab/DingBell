@@ -17,7 +17,7 @@ export class OzonReadError extends Error {
 }
 export type Credentials = { clientId: string; apiKey: string };
 const decimal = /^(0|[1-9][0-9]{0,39})$/;
-const idFields = new Set(['id', 'product_id', 'chat_id', 'message_id', 'last_message_id', 'first_unread_message_id', 'sku', 'order_id', 'order_number', 'model_id']);
+const idFields = new Set(['id', 'product_id', 'chat_id', 'message_id', 'last_message_id', 'first_unread_message_id', 'sku', 'order_id', 'order_number', 'model_id', 'description_category_id', 'type_id']);
 function invalid(): never { throw new OzonReadError('invalid_response'); }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(); return value as Record<string, unknown>; }
 function retryAfter(value: string | null): number | undefined {
@@ -82,7 +82,7 @@ async function boundedJSON(response: Response, aborted: Promise<never>): Promise
   } finally { void reader.cancel().catch(() => {}); }
 }
 
-export const ozonReadPaths = ['/v3/chat/list', '/v3/chat/history', '/v3/product/list', '/v3/product/info/list', '/v4/posting/fbs/list', '/v3/posting/fbs/get', '/v3/posting/fbo/list', '/v2/posting/fbo/get', '/v1/posting/fbp/list', '/v1/posting/fbp/get'] as const;
+export const ozonReadPaths = ['/v3/chat/list', '/v3/chat/history', '/v3/product/list', '/v3/product/info/list', '/v4/product/info/attributes', '/v1/product/info/description', '/v1/description-category/attribute', '/v4/posting/fbs/list', '/v3/posting/fbs/get', '/v3/posting/fbo/list', '/v2/posting/fbo/get', '/v1/posting/fbp/list', '/v1/posting/fbp/get'] as const;
 /** Seller-cabinet configuration writes. They share the read transport but never return entity ids. */
 export const ozonWritePaths = ['/v1/notification/list', '/v1/notification/set', '/v1/notification/update', '/v1/notification/delete', '/v1/notification/enable', '/v1/notification/check'] as const;
 export type OzonReadPath = (typeof ozonReadPaths)[number];

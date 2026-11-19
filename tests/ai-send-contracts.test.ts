@@ -36,8 +36,8 @@ test('AI send receipts strictly identify the original intent without becoming a 
  for(const change of [{origin:'human'},{runId:'invalid'},{intentId:'other'},{commandId:'other'},{actorUserId:'owner'},{actorMemberId:'owner-member'},{expectedVersion:4},{body:' '},{extra:'invented'}])assert.throws(()=>m.checkedAiSendReceipt({...value,...change}));
  for(const change of [{schemaVersion:1},{version:3},{sequence:0},{lifecycle:'resolved'},{reception:'human'},{workStatus:'waiting_customer'},{assignedMemberId:'owner-member'}])assert.throws(()=>m.checkedAiSendReceipt({...value,appliedState:{...value.appliedState,...change}}));
 });
-async function outboundFixture(){
- const x=await aiAnswerFixture('support-reply-v2');
+async function outboundFixture(version='support-reply-v2'){
+ const x=await aiAnswerFixture(version);
  try{
   const key=await encryptCredentials(x.f.credentialEnv,{orgId:'org',storeId:'store',platformStoreId:'1',credentialVersion:1},{apiKey:'synthetic-api-key'});
   await x.f.db.prepare("UPDATE store SET outbound_enabled=1,credential_key_version=?,credential_nonce=?,credential_ciphertext=?,capabilities=?,expires_at=? WHERE id='store'")
@@ -45,6 +45,12 @@ async function outboundFixture(){
   const env={...x.env,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'},read=await readAiKnowledgeFile(env,x.read,x.scope,x.run.request.runId,{path:`/knowledge/${x.documentId}.md`});assert.equal(read.status,'found');const prepared=await prepareAiMessage(env,x.read,x.scope,x.run.request.runId,x.input);assert.equal(prepared.status,'prepared');return x;
  }catch(e){await x.f.close();throw e;}
 }
+test('v3 evidence-backed replies freeze the v3 prompt version', {timeout:30000}, async t => {
+ const x=await outboundFixture('support-reply-v3');t.after(x.f.close);const id=x.run.request.runId;
+ const prepared=await prepareAiMessage({...x.env,AI_OUTBOUND_ENABLED:'true',OUTBOUND_ENABLED:'true'},x.read,x.scope,id,x.input);assert.equal(prepared.status,'prepared');
+ const row=await x.f.db.prepare('SELECT reply FROM ai_execution WHERE id=?').bind(id).first<{reply:string}>();assert.ok(row?.reply);
+ assert.equal(JSON.parse(row.reply).promptVersion,'support-reply-v3');
+});
 test('AI receipt and delivery projections preserve null actors, immutable provenance and monotonic attempts',{timeout:30000},async t=>{
  await receiptApi();const x=await outboundFixture();t.after(x.f.close);const id=x.run.request.runId,queued=ai(id);
  queued.intent.body=x.input.body;queued.intent.controlEpoch=x.run.controlEpoch;queued.intent.bodyHash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(x.input.body)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');

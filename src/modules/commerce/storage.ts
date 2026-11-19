@@ -28,6 +28,17 @@ type ProductRow = {
   modelId: string | null;
   stockHasStock: number | null;
   stockObservedAt: number | null;
+  profileDescription: string | null;
+  profileDescriptionState: string | null;
+  profileAttributes: string | null;
+  profileAttributesState: string | null;
+  profileLengthMm: number | null;
+  profileWidthMm: number | null;
+  profileHeightMm: number | null;
+  profileDimensionUnit: string | null;
+  profileWeightG: number | null;
+  profileWeightUnit: string | null;
+  profileObservedAt: number | null;
   supplySource: string | null;
   purchaseUrl: string | null;
   purchasePrice: string | null;
@@ -227,6 +238,38 @@ function costingDTO(row: ProductRow): CostingDTO | null {
     validFrom: new Date(row.costingValidFrom).toISOString(),
   };
 }
+function serviceProfile(row: ProductRow) {
+  const attributes = (() => {
+    if (!row.profileAttributes) return [];
+    try {
+      const value: unknown = JSON.parse(row.profileAttributes);
+      if (!Array.isArray(value)) return [];
+      return value.flatMap(item => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const entry = item as Record<string, unknown>;
+        return typeof entry.name === 'string' && typeof entry.value === 'string'
+          ? [{ name: entry.name, value: entry.value }] : [];
+      }).slice(0, 40);
+    } catch { return []; }
+  })();
+  const length = row.profileLengthMm, width = row.profileWidthMm, height = row.profileHeightMm;
+  const dimensions = length !== null && width !== null && height !== null && row.profileDimensionUnit
+    ? { length, width, height, unit: row.profileDimensionUnit } : null;
+  const weight = row.profileWeightG !== null && row.profileWeightUnit
+    ? { value: row.profileWeightG, unit: row.profileWeightUnit } : null;
+  const status = row.profileDescriptionState === null && row.profileAttributesState === null
+    ? 'unavailable' as const
+    : row.profileDescriptionState === 'complete' && row.profileAttributesState === 'complete'
+      ? 'complete' as const : 'partial' as const;
+  return {
+    description: row.profileDescription,
+    attributes,
+    dimensions,
+    weight,
+    status,
+    observedAt: row.profileObservedAt === null ? null : new Date(row.profileObservedAt).toISOString(),
+  };
+}
 function productDTO(row: ProductRow) {
   const listing = object(row.listing)!;
   const facts = object(row.facts);
@@ -274,6 +317,7 @@ function productDTO(row: ProductRow) {
     primaryImage,
     images,
     createdAt,
+    serviceProfile: serviceProfile(row),
     sourcing: sourcingDTO(row),
     costing: costingDTO(row),
     state: row.state as 'pending' | 'complete' | 'error',
@@ -534,12 +578,18 @@ function likePattern(query: string) {
   return `%${query.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
 }
 
+const profileColumns = `profile.description AS profileDescription,profile.description_state AS profileDescriptionState,
+  profile.attributes_json AS profileAttributes,profile.attributes_state AS profileAttributesState,
+  profile.length_mm AS profileLengthMm,profile.width_mm AS profileWidthMm,profile.height_mm AS profileHeightMm,
+  profile.dimension_unit AS profileDimensionUnit,profile.weight_g AS profileWeightG,profile.weight_unit AS profileWeightUnit,
+  profile.observed_at AS profileObservedAt`;
 const sourcingColumns = `sourcing.supply_source AS supplySource,sourcing.purchase_url AS purchaseUrl,sourcing.purchase_price AS purchasePrice,sourcing.purchase_currency AS purchaseCurrency,
   sourcing.updated_at AS sourcingUpdatedAt,sourcing_user.name AS sourcingUpdatedByName,
   costing.purchase_price AS costingPurchasePrice,costing.purchase_currency AS costingPurchaseCurrency,costing.label_fee AS costingLabelFee,costing.weight_grams AS costingWeightGrams,
   costing.commission_rate AS costingCommissionRate,costing.list_price AS costingListPrice,costing.promo_discount AS costingPromoDiscount,costing.supply_source AS costingSupplySource,
   costing.valid_from AS costingValidFrom`;
 const productFrom = `FROM product JOIN store ON store.id=product.store_id AND store.organization_id=product.organization_id
+  LEFT JOIN product_service_profile profile ON profile.organization_id=product.organization_id AND profile.store_id=product.store_id AND profile.product_id=product.id
   LEFT JOIN product_sourcing sourcing ON sourcing.organization_id=product.organization_id AND sourcing.store_id=product.store_id AND sourcing.product_id=product.id
   LEFT JOIN user sourcing_user ON sourcing_user.id=sourcing.updated_by
   LEFT JOIN product_costing costing ON costing.organization_id=product.organization_id AND costing.store_id=product.store_id AND costing.product_id=product.id AND costing.valid_to IS NULL`;
@@ -558,7 +608,7 @@ export async function listCommerceProducts(
     await db
       .prepare(`SELECT product.id,store.id AS storeId,store.name AS storeName,product.listing,product.facts,product.list_observed_at AS listObservedAt,
     product.facts_observed_at AS factsObservedAt,product.detail_state AS state,product.detail_error AS error,
-    product.model_id AS modelId,product.stock_has_stock AS stockHasStock,product.stock_observed_at AS stockObservedAt,${sourcingColumns} ${productFrom}
+    product.model_id AS modelId,product.stock_has_stock AS stockHasStock,product.stock_observed_at AS stockObservedAt,${profileColumns},${sourcingColumns} ${productFrom}
     WHERE product.organization_id=? AND product.store_id=? AND product.id>?${filteredWhere} AND ${storeAccess('store.organization_id', false)} ORDER BY product.id LIMIT ?`)
       .bind(
         actor.orgId,
@@ -655,7 +705,7 @@ export async function readCommerceProduct(
 ) {
   const select = `SELECT product.id,store.id AS storeId,store.name AS storeName,product.listing,product.facts,product.list_observed_at AS listObservedAt,
     product.facts_observed_at AS factsObservedAt,product.detail_state AS state,product.detail_error AS error,
-    product.model_id AS modelId,product.stock_has_stock AS stockHasStock,product.stock_observed_at AS stockObservedAt,${sourcingColumns} ${productFrom}`;
+    product.model_id AS modelId,product.stock_has_stock AS stockHasStock,product.stock_observed_at AS stockObservedAt,${profileColumns},${sourcingColumns} ${productFrom}`;
   const row = await db
     .prepare(`${select}
     WHERE product.organization_id=? AND product.store_id=? AND product.id=? AND ${storeAccess('store.organization_id', false)}`)
