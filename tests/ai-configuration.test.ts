@@ -51,7 +51,7 @@ test('v3 exposes the customer-safe product profile without granting cost or stoc
  const parsed = m.parseSupportConfiguration({ ...config, model: { ...config.model, promptVersion: 'support-reply-v3' } });
  assert.equal(parsed.config.model.promptVersion, 'support-reply-v3');
  const instructions = p.supportInstructions('support-reply-v3');
- for (const phrase of ['get_product_info', 'description', 'attributes', 'purchase cost', 'supplier', 'margin', 'commission', 'exact warehouse quantities', 'observation snapshot']) {
+ for (const phrase of ['get_product_info', 'description', 'attributes', 'purchase cost', 'supplier', 'margin', 'commission', 'exact warehouse quantities', 'observation snapshot', 'partial profile is normal']) {
   assert.match(instructions, new RegExp(phrase, 'i'));
  }
  assert.match(instructions, /request_handoff/);
