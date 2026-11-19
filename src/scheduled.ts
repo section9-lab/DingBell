@@ -28,8 +28,10 @@ async function repairOne(env:Bindings,scope:ControlScope) {
  * here and the coordinator also refuses to poll once an endpoint cuts over.
  */
 async function wakePollingStores(env:Bindings) {
-  if(!env.DB||!env.STORE_COORDINATOR||!pollingEnabled(env))return;
-  const stores=(await listStoresAwaitingDiscovery(env.DB,50)).results;
+  if(!env.DB||!env.STORE_COORDINATOR)return;
+  // Chat discovery stays off when the deployment disables it, but products and order streams
+  // always need a coordinator wake when their durable due time has passed.
+  const stores=(await listStoresAwaitingDiscovery(env.DB,50,pollingEnabled(env))).results;
   for(let index=0;index<stores.length;index+=5)
     await Promise.allSettled(stores.slice(index,index+5).map(scope=>wakeStoreSync(env,scope)));
 }

@@ -116,20 +116,21 @@ export async function getSyncRuntime(db:D1Database,scope:SyncScope,source:SyncSo
   return current?.enabled?{state:current,store}:null;
 }
 /**
- * Stores that still need a periodic discovery wake-up: an enabled source is due and the store has
- * no Push cutover. The coordinator itself refuses to poll after a cutover, so this only restores
- * discovery for stores that never configured Push.
+ * Stores with at least one enabled source due for a wake-up. Chat discovery is excluded when the
+ * deployment has disabled timer discovery; products and order streams must still be woken, or a
+ * missing coordinator alarm leaves their due timestamps frozen forever.
  */
-export function listStoresAwaitingDiscovery(db:D1Database,limit:number) {
+export function listStoresAwaitingDiscovery(db:D1Database,limit:number,includeChat=true) {
   return db.prepare(`SELECT DISTINCT authority.organization_id AS orgId,authority.store_id AS storeId
     FROM store_sync_source AS authority
     JOIN store ON store.id=authority.store_id AND store.organization_id=authority.organization_id
     JOIN store_coordinator AS coordinator ON coordinator.store_id=authority.store_id AND coordinator.organization_id=authority.organization_id
     WHERE ${validSource} AND authority.due_at<=${nowSQL}
+      AND (?=1 OR authority.source<>'chat')
       AND (coordinator.blocked_until IS NULL OR coordinator.blocked_until<=${nowSQL})
       AND (coordinator.lease_until IS NULL OR coordinator.lease_until<=${nowSQL})
       AND NOT EXISTS(SELECT 1 FROM store_push_endpoint WHERE store_id=authority.store_id AND organization_id=authority.organization_id AND cutover_at IS NOT NULL)
-    ORDER BY authority.due_at LIMIT ?`).bind(limit).all<SyncScope>();
+    ORDER BY authority.due_at LIMIT ?`).bind(includeChat?1:0,limit).all<SyncScope>();
 }
 
 export async function getStoreCoordinatorRuntime(db:D1Database,scope:SyncScope):Promise<StoreCoordinatorRecord|null> {

@@ -71,6 +71,10 @@ test('real D1 synchronization commits an immutable page and its checkpoint under
     await db.prepare('UPDATE store_sync_source SET due_at=1').run();
     const ids = async () => (await listStoresAwaitingDiscovery(db, 50)).results.map(row => row.storeId).sort();
     assert.deepEqual(await ids(), ['blocked', 'cutover', 'polled']);
+    // With timer chat discovery disabled, only non-chat due sources wake the coordinator.
+    await db.prepare("INSERT INTO store_sync_source(store_id,organization_id,source,enabled,epoch,credential_version,due_at,updated_at) VALUES('polled','sync-org','products',1,1,1,1,1)").run();
+    assert.deepEqual((await listStoresAwaitingDiscovery(db, 50, false)).results.map(row => row.storeId).sort(), ['polled']);
+    await db.prepare("DELETE FROM store_sync_source WHERE source='products'").run();
     await db.prepare(`INSERT INTO store_push_endpoint (store_id,organization_id,endpoint_id,revision,generation,mode,seller_id,secret_hash,key_version,nonce,ciphertext,cutover_at,created_at,updated_at)
       VALUES (?,'sync-org','endpoint-cutover',1,1,'active','999','hash','v1','nonce','ciphertext',1,1,1)`).bind(cutOver).run();
     assert.deepEqual(await ids(), ['blocked', 'polled'], 'a Push cutover stops timer discovery');
