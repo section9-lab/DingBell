@@ -22,6 +22,8 @@ async function fixture(){
    stopAiDispatch:async(scope:any,request:any)=>(await f.call('ai-dispatch-stop',{request},scope)).body,
    recordFallbackClassification:async(scope:any,runId:string)=>(await f.call('ai-fallback-classification',{runId},scope)).body,
    noteAiFailure:async(scope:any,eventId:string)=>(await f.call('ai-note-failure',{eventId},scope)).body,
+   noteReconcileFailure:async(scope:any,eventId:string)=>(await f.call('ai-reconcile-failure',{eventId},scope)).body,
+   sendFallbackNotice:async(scope:any,runId:string)=>(await f.call('ai-notice',{runId},scope)).body,
    restartAiRun:async(scope:any,runId:string)=>(await f.call('ai-restart-run',{runId},scope)).body,
    readClassifiedInput:async(scope:any)=>(await f.call('ai-classified-input',{},scope)).body,
    startAi:async(scope:any,request:any)=>(await f.call('ai-start',{request},scope)).body,
@@ -117,7 +119,7 @@ test('overdue dispatches return to humans without starting any model, and reserv
  const m=await api();for(const reason of ['timeout']){
   const f=await fixture();try{await f.append();const row=(await f.db.prepare('SELECT run_id FROM ai_dispatch').first())!;
    assert.equal((await f.call('execute',{command:{commandId:`ai-dispatch-stop:${row.run_id}`,expectedVersion:1,action:'claim'}})).body.outcome,'conflict');
-   if(reason==='timeout')await f.db.prepare('UPDATE ai_dispatch SET created_at=?').bind(Date.now()-300001).run();
+   if(reason==='timeout')await f.db.prepare('UPDATE ai_dispatch SET created_at=?').bind(Date.now()-660001).run();
    await m.dispatchAiReceptions(f.env(),{reconcile:async()=>({status:'unavailable'}),execute:async()=>{throw new Error('must not execute');}});
    const r=JSON.parse((await f.db.prepare("SELECT receipt FROM conversation_control_event WHERE action='ai_dispatch_stop'").first<string>('receipt'))!);assert.equal(r.input.reason,reason);assert.equal((await f.call('read')).body.view.state.reception,'paused');assert.equal((await m.claimAiDispatches(f.db,Date.now()+60001)).length,0);assert.equal(await f.db.prepare('SELECT count(*) n FROM ai_execution').first('n'),0);
   }finally{await f.close();}
@@ -215,4 +217,61 @@ test('a failing model is retried twice and only then handed to a human',{timeout
  assert.equal(calls,3,'three model attempts before any handoff');
  assert.equal(await f.db.prepare("SELECT count(*) n FROM conversation_control_event WHERE action='ai_dispatch_stop'").first('n'),1);
  assert.equal((await f.call('read')).body.view.state.reception,'paused');
+});
+
+test('an intake deadline inside the controller budget stays readable',{timeout:30000},async t=>{
+ // Regression: the controller issues a 600s intake deadline, while the intake schema still
+ // capped it at 60s. Every dispatch then read no work, retried, and timed out in silence.
+ const {conversationControlFixture}=await import('./fixtures/conversation-control.ts');
+ const f=await conversationControlFixture(undefined,{aiTimeoutMs:600_000});t.after(f.close);
+ await f.db.prepare("UPDATE store SET status='verified' WHERE id='store'").run();
+ const policyId=crypto.randomUUID(),config={kind:'automatic' as const,name:'Reception',storeIds:['store'],priority:50,stage:'presale' as const,mode:'automatic' as const,language:'customer' as const,tone:'concise' as const,instructions:''};
+ const {createPolicy,changePolicy}=await import('../src/modules/reply-policies/storage.ts');
+ assert.ok(await createPolicy(f.db,f.actor(),policyId,config));assert.ok(await changePolicy(f.db,f.actor(),policyId,1,{action:'test'},crypto.randomUUID()));assert.ok(await changePolicy(f.db,f.actor(),policyId,2,{action:'publish'},crypto.randomUUID()));
+ const now=Date.now(),id=crypto.randomUUID();
+ await f.db.batch([
+  f.db.prepare("INSERT INTO message(id,organization_id,store_id,conversation_id,platform_message_id,sender_type,direction,content,is_image,is_read,event_at,received_at,ingest_mode) VALUES(?,'org','store','conv',?,'Customer','inbound','[\"Есть ли зелёные шапки?\"]',0,0,?,?,'incremental')").bind(id,id,now,now),
+  f.db.prepare("INSERT INTO ingest_event(id,organization_id,store_id,conversation_id,message_id,state,live_observed_at,trace_id,created_at) VALUES(?,'org','store','conv',?,'pending',?,'synthetic',?)").bind(id,id,now,now),
+ ]);
+ const [claim]=await claimInboundEvents(f.db,Date.now());await f.call('inbound',{eventId:claim.eventId});await finishInboundEvent(f.db,claim,'accepted',Date.now(),true);
+ const [step]=await (await api()).claimAiDispatches(f.db,Date.now());assert.ok(step);
+ const admitted=await f.call('ai-dispatch-admit',{request:{eventId:step.eventId,runId:step.runId}});assert.equal(admitted.body.outcome,'accepted');
+ const work=await f.call('ai-work-read',{runId:step.runId});assert.equal(work.status,200,JSON.stringify(work.body));assert.equal(work.body.request.runId,step.runId);assert.ok(work.body.deadlineAt-work.body.startedAt>60_000);
+});
+
+test('a timeout still notifies the buyer instead of parking in silence',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);
+ const notices:string[]=[];
+ const env:any={...f.env(),CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>({
+  admitAiDispatch:f.controller.admitAiDispatch,stopAiDispatch:f.controller.stopAiDispatch,readClassifiedInput:f.controller.readClassifiedInput,
+  recordFallbackClassification:f.controller.recordFallbackClassification,startAi:f.controller.startAi,
+  noteAiFailure:async()=>({count:3}),noteReconcileFailure:f.controller.noteReconcileFailure,restartAiRun:f.controller.restartAiRun,
+  sendFallbackNotice:async(_scope:any,runId:string)=>{notices.push(runId);return {outcome:'accepted',sent:true};},
+ })}};
+ await f.append();await f.db.prepare('UPDATE ai_dispatch SET created_at=?').bind(Date.now()-660001).run();
+ await m.dispatchAiReceptions(env,{reconcile:async()=>({status:'unavailable'}),execute:async()=>{throw new Error('must not execute');}});
+ assert.equal(notices.length,1);assert.equal((await f.call('read')).body.view.state.reception,'paused');
+});
+
+test('three unconfirmed reconciles drop the dead run and let the next admission execute',{timeout:30000},async t=>{
+ const m=await api(),f=await fixture();t.after(f.close);await f.append();
+ const restarts:string[]=[],executed:string[]=[];
+ const env:any={...f.env(),CONVERSATION_CONTROLLER:{idFromName:(id:string)=>id,get:()=>({
+  admitAiDispatch:f.controller.admitAiDispatch,stopAiDispatch:f.controller.stopAiDispatch,readClassifiedInput:f.controller.readClassifiedInput,
+  recordFallbackClassification:f.controller.recordFallbackClassification,startAi:f.controller.startAi,
+  noteAiFailure:f.controller.noteAiFailure,noteReconcileFailure:f.controller.noteReconcileFailure,
+  restartAiRun:async(scope:any,runId:string)=>{restarts.push(runId);return f.controller.restartAiRun(scope,runId);},
+  sendFallbackNotice:async()=>({outcome:'accepted',sent:true}),
+ })}};
+ const deps={reconcile:async()=>({status:'unconfirmed'}),execute:async(_env:any,_scope:any,runId:string)=>{executed.push(runId);return {status:'completed'};}};
+ for(let tick=0;tick<3;tick++){await f.db.prepare('UPDATE ai_dispatch SET due_at=0').run();await m.dispatchAiReceptions(env,deps);}
+ assert.equal(restarts.length,1,'the third stalled tick restarts the stale run');
+ assert.ok(executed.length>=1,'the same tick must then admit and execute instead of blocking');
+ assert.equal(executed[0],restarts[0],'the first model call runs the original dispatch target');
+});
+
+
+test('scheduled dispatch window is bounded so queued replies are not starved', async () => {
+  const m = await api();
+  assert.ok(m.DISPATCH_WINDOW_MS >= 10_000 && m.DISPATCH_WINDOW_MS <= 30_000, `unexpected window ${m.DISPATCH_WINDOW_MS}`);
 });

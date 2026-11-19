@@ -21,7 +21,7 @@ import {checkedAiSendReceipt,type AiSendReceipt} from './ai-reply-receipt.ts';
 import type {SupportBindings} from '../ai-runs/execution.ts';
 import {selectReplyPolicy} from '../reply-policies/matching.ts';
 import {aiReceptionCommandSchema} from '../../shared/ai-reception.ts';
-import {logEvent} from '../../platform/log.ts';
+import {logEvent,logFailure} from '../../platform/log.ts';
 import {readDefaultAiReception} from '../ai-runs/default-reception.ts';
 import {aiListeningRequestSchema,aiListeningSchema,checkedAiListeningReceipt,readAiListeningBoundary,isNewAiInput,type AiListening} from './ai-listening.ts';
 import {aiPendingInputSchema,checkedInboundReceipt,readInboundEvent,type AiPendingInput} from './inbound.ts';
@@ -492,6 +492,17 @@ return class ConversationController extends Base {
       return {count};
     });
   }
+  /** Count dispatcher ticks that could not reconcile the current run; after three the run is dropped. */
+  async noteReconcileFailure(scope:ControlScope,eventId:string){
+    if(!this.routed(scope)||!identifier(eventId))return {count:0};
+    return this.ctx.storage.transaction(async transaction=>{
+      const key=`aiReconcile:${eventId}`;
+      const previous=await transaction.get<number>(key);
+      const count=(typeof previous==='number'?previous:0)+1;
+      await transaction.put(key,count);
+      return {count};
+    });
+  }
   /** Drop the in-flight run so the next dispatch starts a brand-new attempt. */
   async restartAiRun(scope:ControlScope,runId:string){
     if(!this.routed(scope))return {outcome:'unavailable' as const};
@@ -511,7 +522,7 @@ return class ConversationController extends Base {
     if(!this.env.DB||!this.routed(scope))return {outcome:'unavailable' as const};
     const directory=await readControlDirectory(this.env.DB,scope);if(!directory)return {outcome:'unavailable' as const};
     const value=await this.ctx.storage.get('aiRun');if(!value)return {outcome:'unavailable' as const};
-    const work=v.parse(aiWorkSchema,value);if(work.schemaVersion!==1||work.request.runId!==runId||!sameScope(work.scope,scope))return {outcome:'unavailable' as const};
+    const work=v.parse(aiWorkSchema,value);if(work.request.runId!==runId||!sameScope(work.scope,scope))return {outcome:'unavailable' as const};
     if(await this.ctx.storage.get(`receipt:ai-notice:${runId}`))return {outcome:'existing' as const};
     const state=await this.ctx.storage.transaction(transaction=>this.state(transaction,directory));
     if(state.lifecycle!=='open'||state.reception!=='ai'||state.assignedMemberId!==null)return {outcome:'ignored' as const};
@@ -524,7 +535,10 @@ return class ConversationController extends Base {
       credentials=await decryptCredentials(this.env,{orgId:scope.organizationId,storeId:scope.storeId,platformStoreId:context.store.platformStoreId,credentialVersion:context.store.credentialVersion},
         {keyVersion:context.store.credentialKeyVersion,nonce:context.store.credentialNonce,ciphertext:context.store.credentialCiphertext});
     }catch{return {outcome:'unavailable' as const};}
-    const language=work.admission.language;
+    // An intake run has no classified language yet; the question itself is the only signal, so the
+    // acknowledgement follows its script instead of guessing from store defaults.
+    const language=work.schemaVersion===1?work.admission.language
+      :/[\u0400-\u04FF]/.test(work.admission.question)?'ru':/[\u4E00-\u9FFF]/.test(work.admission.question)?'zh-CN':'en';
     const body=(language==='ru'?'Получил ваш вопрос. Проверю информацию и вернусь с ответом в этом чате.':language==='zh-CN'?'已收到你的问题，核对信息后在这里回复你。':'Got your question. I will check and reply here.') as string;
     const result=await this.sendReply({clientId:context.store.platformStoreId,apiKey:credentials.apiKey},{chatId:context.platformThreadId,body});
     await this.ctx.storage.put(`receipt:ai-notice:${runId}`,{at:Date.now(),outcome:result.outcome});
@@ -917,7 +931,8 @@ return class ConversationController extends Base {
     if(!context.outboundEnabled||!context.replyAvailable||context.store.platform!=='ozon'||!isBuyerChatType(context.platformType))return 'CAPABILITY_UNVERIFIED';
     return null;
   }
-  private async deferReply(snapshot:ReplySnapshot,dueAt:number) {
+  private async deferReply(scope:ControlScope,snapshot:ReplySnapshot,dueAt:number,reason='deferred') {
+    logEvent('reply.defer',{orgId:scope.organizationId,storeId:scope.storeId,conversationId:scope.conversationId,intentId:snapshot.intent.id,reason,dueAt,now:Date.now()});
     if(snapshot.intent.schemaVersion===2){
       const run=await this.ctx.storage.get<AiRun>('aiRun');
       if(run?.request.runId!==snapshot.intent.runId||Date.now()>=run.deadlineAt){await this.skipReply(snapshot,'AI_AUTHORITY_REVOKED');return;}
@@ -930,7 +945,9 @@ return class ConversationController extends Base {
       const due=await transaction.list<string>({prefix:replyDuePrefix,limit:1});if(!due.size)return null;
       const snapshot=await this.storedReply(transaction,[...due.values()][0]!);if(!snapshot)throw new Error('INVALID_REPLY_STATE');
       if([...due.keys()][0]!==dueKey(snapshot))throw new Error('INVALID_REPLY_STATE');
-      return snapshot.intent.schemaVersion===2||snapshot.intent.dueAt!<=Date.now()?snapshot:null;
+      // A deferred intent must wait for its due time; ignoring it for AI replies re-entered the
+      // sender every projection tick and kept the queue busy without ever attempting delivery.
+      return snapshot.intent.dueAt!<=Date.now()?snapshot:null;
     });
     if(!snapshot)return;
     const {intent}=snapshot;
@@ -940,8 +957,9 @@ return class ConversationController extends Base {
     }
     if(intent.state!=='queued')throw new Error('INVALID_REPLY_STATE');
     let context:ReplyDispatchContext|null;
-    try {context=await this.replyContext(scope,intent);} catch {
-      await this.deferReply(snapshot,Date.now()+60_000);return;
+    try {context=await this.replyContext(scope,intent);} catch(error) {
+      logFailure('reply.context',error,{orgId:scope.organizationId,storeId:scope.storeId,conversationId:scope.conversationId,intentId:intent.id});
+      await this.deferReply(scope,snapshot,Date.now()+60_000,'context_error');return;
     }
     if(!context){await this.skipReply(snapshot,intent.schemaVersion===2?'AI_AUTHORITY_REVOKED':'ACCESS_REVOKED');return;}
     if(context.store.credentialVersion!==intent.credentialVersion){await this.skipReply(snapshot,'CREDENTIAL_CHANGED');return;}
@@ -954,7 +972,7 @@ return class ConversationController extends Base {
     }
     if(intent.dueAt!>Date.now())return;
     const pendingRate=await this.ctx.storage.get<{until:number}>('replyRateLimit');
-    if(pendingRate){await this.deferReply(snapshot,Math.max(Date.now()+60_000,pendingRate.until));return;}
+    if(pendingRate){await this.deferReply(scope,snapshot,Math.max(Date.now()+60_000,pendingRate.until),'rate_limit');return;}
     let credentials:{apiKey:string};
     try {
       if(!context.store.credentialKeyVersion||!context.store.credentialNonce||!context.store.credentialCiphertext)throw new Error('missing credentials');
@@ -962,10 +980,11 @@ return class ConversationController extends Base {
         {keyVersion:context.store.credentialKeyVersion,nonce:context.store.credentialNonce,ciphertext:context.store.credentialCiphertext});
     } catch {await this.skipReply(snapshot,'CREDENTIALS_UNAVAILABLE');return;}
     let permit:number;
-    try {permit=await reserveReply(this.env,{orgId:scope.organizationId,storeId:scope.storeId});} catch {
-      await this.deferReply(snapshot,Date.now()+60_000);return;
+    try {permit=await reserveReply(this.env,{orgId:scope.organizationId,storeId:scope.storeId});} catch(error) {
+      logFailure('reply.permit',error,{orgId:scope.organizationId,storeId:scope.storeId,conversationId:scope.conversationId,intentId:intent.id});
+      await this.deferReply(scope,snapshot,Date.now()+60_000,'permit_error');return;
     }
-    if(permit>Date.now()) {await this.deferReply(snapshot,permit);return;}
+    if(permit>Date.now()) {await this.deferReply(scope,snapshot,permit,'permit_wait');return;}
     if(await bodyHash(intent.body)!==intent.bodyHash)throw new Error('INVALID_REPLY_STATE');
     // Re-read current company authorization after all asynchronous preparation.
     context=await this.replyContext(scope,intent);

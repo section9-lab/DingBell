@@ -12,6 +12,15 @@ function fixture(){
   appliedState:{schemaVersion:2,lifecycle:'open',reception:'paused',assignedMemberId:null,workStatus:'needs_reply',version:2,sequence:2,controlEpoch:2,updatedAt:2}};
  return {run,input,stored,result:{outcome:'accepted',receipt}};
 }
+
+/** Workers RPC stubs turn every property access into a method name; `.bind` becomes an RPC call. */
+function rpcStub<T extends object>(target:T):T{
+ const method=(name:string)=>new Proxy((()=>{}) as unknown as object,{
+  get(_t,property){throw new TypeError(`The RPC receiver does not implement the method "${String(property)}"`);},
+  apply:(_t,_this,args:unknown[])=>(target as Record<string,(...input:unknown[])=>unknown>)[name](...args),
+ });
+ return new Proxy({} as T,{get:(_t,property)=>method(String(property))});
+}
 const context=(data:AiHandoffToolInput)=>({data,toolCallId:'synthetic-tool-call',step:{do:async<T>(_name:string,fn:()=>T|Promise<T>)=>fn()},log:{info(){},warn(){},error(){}}});
 test('Agent handoff captures its authority, exposes only constrained input and returns a terminal minimal result',async()=>{
  const {createHandoffTool}=await api(),f=fixture(),original=structuredClone(f.run);let args:unknown[]=[];
@@ -37,4 +46,11 @@ test('refused handoffs terminate without claiming success and an already aborted
   assert.deepEqual(await tool.run(context(f.input)),{output:{status:'rejected',canSend:false,sent:false},terminate:true});
   const before=calls;await assert.rejects(()=>tool.run({...context(f.input),signal:AbortSignal.abort()}) as Promise<unknown>,{name:'AbortError'});assert.equal(calls,before);
  }
+});
+
+test('an RPC-stub controller works without invoking a ".bind" method',async()=>{
+ const {createHandoffTool}=await api(),f=fixture();let args:unknown[]=[];
+ const tool=createHandoffTool(f.run,rpcStub({requestHandoff:async(...input:unknown[])=>{args=input;return f.result;}}));
+ assert.deepEqual(await tool.run(context(f.input)),{output:{status:'committed',canSend:false,sent:false},terminate:true});
+ assert.deepEqual(args,[f.run.scope,f.run.request.runId,f.stored]);
 });

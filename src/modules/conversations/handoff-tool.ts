@@ -8,7 +8,9 @@ const refusal=v.object({outcome:v.picklist(['conflict','unavailable'])});
 const output=v.strictObject({status:v.picklist(['committed','rejected','unconfirmed']),canSend:v.literal(false),sent:v.literal(false)});
 /** The caller supplies the persisted admitted run, never model-selected authority. */
 export function createHandoffTool(value:AiRun,controller:HandoffController){
- const run=v.parse(aiRunSchema,structuredClone(value)),request=controller.requestHandoff.bind(controller);
+ const run=v.parse(aiRunSchema,structuredClone(value));
+ // See classification-tool: binding an RPC stub method turns `.bind` into an RPC method call.
+ const request=(scope:ControlScope,runId:string,input:ControlledAiHandoff)=>controller.requestHandoff(scope,runId,input);
  return defineTool({name:'request_handoff',description:'Request human support. neededInformation may contain only product_model, issue_description, desired_resolution, usage_context, or photo_or_video. Never request an order identifier, address, phone, email, identity document, credential, payment information, or arbitrary free-text field. This does not send a message or promise a business outcome.',
   input:aiHandoffToolInputSchema,output,durable:true,timeoutMs:10000,
   async run({data,step,signal}){

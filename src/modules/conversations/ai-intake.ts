@@ -24,8 +24,10 @@ export const aiClassificationSchema=v.strictObject({stage:v.picklist(['presale',
 const candidate=v.strictObject({stage:policyStageSchema,policyId:id,policyRevision:v.pipe(counter,v.minValue(1)),mode:v.picklist(['automatic','suggest']),language:v.picklist(['customer','ru','zh-CN','en'])});
 const admission=v.strictObject({messageId:id,inputRevision:counter,question:replyBodySchema,event:inboundEventSchema,
  candidates:v.pipe(v.array(candidate),v.minLength(1),v.maxLength(3),v.check(rows=>new Set(rows.map(r=>r.stage)).size===rows.length&&rows.some(r=>r.mode==='automatic')))});
+// The intake run shares the controller's single model budget: a 60s cap here rejected the
+// 600s deadline the controller now issues, so every run failed validation before it could start.
 export const aiIntakeRunSchema=v.pipe(v.strictObject({schemaVersion:v.literal(2),kind:v.literal('intake'),scope:aiScopeSchema,request:aiIntakeRequestSchema,admission,
- controlEpoch:counter,startedAt:time,deadlineAt:time}),v.check(r=>r.deadlineAt>r.startedAt&&r.deadlineAt<=r.startedAt+60000&&r.request.messageId===r.admission.messageId
+ controlEpoch:counter,startedAt:time,deadlineAt:time}),v.check(r=>r.deadlineAt>r.startedAt&&r.deadlineAt<=r.startedAt+660_000&&r.request.messageId===r.admission.messageId
   &&r.admission.event.messageId===r.request.messageId&&r.admission.event.sequence<=r.admission.inputRevision&&JSON.stringify(r.scope)===JSON.stringify(r.admission.event.scope)));
 export const aiWorkSchema=v.union([aiRunSchema,aiIntakeRunSchema]);
 const decision=v.variant('kind',[

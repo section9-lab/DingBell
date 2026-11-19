@@ -3313,3 +3313,15 @@ Cloudflare 最新真云检查使用全新 D1、全部 54 份迁移、实际 Pi W
 - **读取**：商品 DTO 增加 `modelId`、`stock.hasStock/observedAt`；详情额外返回各来源库存与同型号变体（按 `model_id` 归组，最多 50 个并标记截断）。后台商品详情页展示型号、来源库存数字与变体切换。
 - **AI 边界不变**：`AiProductContext` 仍是 9 个字段的封闭集合，`get_product_info` 不返回型号、数量或库存；测试固定键集合并断言 `stock/modelId/present/supplySource/purchasePrice/costing` 不出现在模型输入侧。
 - **验证**：`npm test` 1053/1053、`npm run check:types`（根与 `src/web`）通过。
+
+## 145. 修复 AI 工具写入与回复队列的两个生产专属故障（2026-11-19）
+
+线上连续多日「AI 不回复」，本地测试全绿。用生产日志与 D1 还原出两个只在 Workers RPC / Durable Object 环境出现的问题。
+
+- **工具写入全失败**：`classification-tool.ts` 与 `handoff-tool.ts` 用 `controller.method.bind(controller)` 冻结控制器调用。`controller` 是 Workers RPC stub，任何属性访问都会被当作方法名，于是 `.bind` 变成一次名为 `bind` 的 RPC 调用，接收端报 `TypeError: The RPC receiver does not implement the method "bind"`。工具因此一律返回 `unconfirmed`，分类与转人工都写不进去，只能走兜底通知。改为显式闭包，并新增以「会拒绝 `.bind` 的 RPC 代理」为替身的回归测试。
+- **回复队列空转**：`dispatchReply` 对 AI 回复（schemaVersion 2）忽略 `intent.dueAt`，每个投影 tick 都重新进入发送流程；`reserveReply` 的 1 秒限流返回未来时间后 `deferReply` 又抬高 revision，与 `blockConcurrencyWhile` 里的 revision 相等校验互相竞争，导致 intent 永远到不了 `sending`。现在统一遵守 `dueAt`，并把 `replyContext` / `reserveReply` 的异常与每次 defer 的原因写入日志（`reply.context`、`reply.permit`、`reply.defer`）。
+- **兜底通知覆盖分类阶段**：`sendFallbackNotice` 之前只接受回答运行；现在分类阶段超时也会按问题文本选择语言发送确认，避免买家在分类卡住时完全静默。
+- **派发预算对齐**：分类 run 的 deadline 上限从 60 秒放宽到 660 秒，与 `aiTimeoutMs()` 一致；单个输入的放弃阈值保持 660 秒。默认派发窗口收敛为 25 秒：窗口超时不再被 `Promise.allSettled` 静默吞掉，未完成的 run 由下一轮从持久回执继续；连续 3 次 `unconfirmed` 会丢弃陈旧 run。
+- **回复延迟定位**：生产 16:48:53 入站、16:50:18 生成 `send_intent`、16:56:37 才建立 `send_attempt`，中间 6 分 19 秒没有 Ozon 请求；原因是 scheduled tick 长时间占住 ConversationController，回复 alarm 无法按时触发。25 秒窗口让 tick 尽快释放，回复不再排在同步任务后面。
+- **闭环验证（生产）**：买家 05:55:20 发送「Сколько стоит эта шапка?」，05:56:23 生成 `send_intent`，06:04:13 `send_attempt` 记录 `sent / HTTP 200 / provider_result=success`，`message` 新增 `direction=outbound` 的俄语回答「…цена — 26,80 CNY…」，Ozon 聊天窗口可见。
+- **验证**：`npm test` 1069/1069、`npm run check:types`、`biome lint`、`drizzle-kit check` 通过。

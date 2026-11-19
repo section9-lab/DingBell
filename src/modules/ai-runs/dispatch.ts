@@ -3,7 +3,7 @@ import type {SyncScope} from '../sync/types.ts';
 import {aiScopeSchema} from '../conversations/ai-state.ts';
 import {getConversationController} from '../conversations/control-bindings.ts';
 import {executeAiRun,reconcileConversationAi,type SupportBindings} from './execution.ts';
-import {logEvent} from '../../platform/log.ts';
+import {logEvent,logFailure} from '../../platform/log.ts';
 const id=v.pipe(v.string(),v.minLength(1),v.maxLength(256)),uuid=v.pipe(v.string(),v.uuid());
 const time=v.pipe(v.number(),v.integer(),v.minValue(0),v.maxValue(8640000000000000-300000));
 const claimSchema=v.strictObject({scope:aiScopeSchema,eventId:id,runId:uuid,token:uuid,inputSequence:v.pipe(v.number(),v.integer(),v.minValue(1),v.maxValue(Number.MAX_SAFE_INTEGER)),createdAt:time});
@@ -63,8 +63,22 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
   }
   return stop(result.status==='unavailable'?'unavailable':'runtime_failure',id);
  };
- if(Date.now()-c.createdAt>=300000)return stop('timeout',null);
- const repaired=await reconcile(env,c.scope);if(repaired.status==='unconfirmed')return false;
+ if(Date.now()-c.createdAt>=DISPATCH_MAX_AGE_MS){
+  logEvent('ai.dispatch.timeout',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,ageMs:Date.now()-c.createdAt});
+  // A timeout must never leave the buyer in silence: the same acknowledgement used after three
+  // failed attempts also covers a run that never finishes.
+  if(typeof controller.sendFallbackNotice==='function')await controller.sendFallbackNotice(c.scope,c.runId).catch(()=>{});
+  return stop('timeout',null);
+ }
+ const repaired=await reconcile(env,c.scope);
+ if(repaired.status==='unconfirmed'){
+  // An unreconcilable run blocks every later input for this conversation. Count the stall on the
+  // controller and, after three ticks, drop the dead run so a fresh admission can proceed.
+  const counted=typeof controller.noteReconcileFailure==='function'?await controller.noteReconcileFailure(c.scope,c.eventId).catch(()=>({count:3})):{count:3};
+  logEvent('ai.dispatch.reconcile',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,attempt:counted.count});
+  if(counted.count<3)return false;
+  if(typeof controller.restartAiRun==='function')await controller.restartAiRun(c.scope,c.runId).catch(()=>{});
+ }
  const admitted=await controller.admitAiDispatch(c.scope,{eventId:c.eventId,runId:c.runId});
  logEvent('ai.dispatch.admit',{orgId:c.scope.organizationId,storeId:c.scope.storeId,conversationId:c.scope.conversationId,runId:c.runId,eventId:c.eventId,outcome:admitted.outcome});
  if(admitted.outcome==='conflict')return true;
@@ -91,8 +105,12 @@ async function dispatchOne(env:SupportBindings,c:AiDispatchClaim,deps:Dependenci
  if(result.status==='pending'||result.status==='unconfirmed')return false;
  return retry(result.status==='unavailable'?'unavailable':'runtime_failure');
 }
-/** One tick may finish classification and the answer together; a fixed 3s cut both model calls off. */
-export const DISPATCH_WINDOW_MS = 20_000;
+/** One scheduled tick processes a bounded slice. A timed-out dispatch keeps running and the next
+ * tick resumes from its persisted receipt, so a slow model call must never hold the controller's
+ * reply alarm for minutes. Keep this below the runtime's alarm budget. */
+export const DISPATCH_WINDOW_MS = 25_000;
+/** Give up on one input only after its own model deadline has elapsed. */
+const DISPATCH_MAX_AGE_MS = 660_000;
 export async function dispatchAiReceptions(env:SupportBindings,deps:Dependencies={},scopeFilter?:SyncScope,windowMs=DISPATCH_WINDOW_MS){
  if(!env.DB||!env.CONVERSATION_CONTROLLER)return;const claims=await claimAiDispatches(env.DB,Date.now(),50,scopeFilter);
  // A timed-out dispatch keeps running; the next tick resumes from its persisted receipt instead of
@@ -104,6 +122,7 @@ export async function dispatchAiReceptions(env:SupportBindings,deps:Dependencies
    const remaining=deadline-Date.now();if(remaining<=0)return;
    let timer:ReturnType<typeof setTimeout>|undefined;
    try{await Promise.race([(async()=>{const done=await dispatchOne(env,claim,deps);await finishAiDispatch(env.DB!,claim,done,Date.now());})(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('AI_DISPATCH_TIMEOUT')),remaining);})]);}
+   catch(error){logFailure('ai.dispatch.window',error,{orgId:claim.scope.organizationId,storeId:claim.scope.storeId,conversationId:claim.scope.conversationId,runId:claim.runId});}
    finally{clearTimeout(timer);}
   }));
  }

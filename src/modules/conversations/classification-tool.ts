@@ -12,7 +12,10 @@ const toolInput=v.strictObject({stage:v.picklist(['presale','order','aftersale',
  language:v.optional(v.picklist(['ru','zh-CN','en','unknown']),'unknown'),
  customerRequestedHuman:v.optional(v.boolean(),false)});
 export function createClassificationTool(value:AiIntakeRun,controller:ClassificationController){
- const run=v.parse(aiIntakeRunSchema,structuredClone(value)),request=controller.recordAiClassification.bind(controller);
+ const run=v.parse(aiIntakeRunSchema,structuredClone(value));
+ // A Workers RPC stub resolves every property access as a method name, so `.bind` itself becomes
+ // an RPC call to "bind" and the receiver rejects it. Wrap the call explicitly instead.
+ const request=(scope:ControlScope,runId:string,input:AiClassification)=>controller.recordAiClassification(scope,runId,input);
  return defineTool({name:'submit_classification',description:'Submit the customer message stage, language and whether a human was requested. Use unknown when unsure. The application selects a policy or hands off. This tool does not grant order access or send a customer message.',
   input:toolInput,output,durable:true,timeoutMs:10000,
   async run({data,step,signal}){

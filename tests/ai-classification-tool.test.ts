@@ -12,6 +12,15 @@ function fixture(){
   decision:{kind:'ready',nextRunId:crypto.randomUUID(),stage:'order',language:'ru',policyId:'policy',policyRevision:1},appliedState:{schemaVersion:2,lifecycle:'open',reception:'ai',assignedMemberId:null,workStatus:'needs_reply',version:2,sequence:2,controlEpoch:2,updatedAt:2}};
  return {run,classification,receipt,result:{outcome:'accepted',receipt}};
 }
+
+/** Workers RPC stubs turn every property access into a method name; `.bind` becomes an RPC call. */
+function rpcStub<T extends object>(target:T):T{
+ const method=(name:string)=>new Proxy((()=>{}) as unknown as object,{
+  get(_t,property){throw new TypeError(`The RPC receiver does not implement the method "${String(property)}"`);},
+  apply:(_t,_this,args:unknown[])=>(target as Record<string,(...input:unknown[])=>unknown>)[name](...args),
+ });
+ return new Proxy({} as T,{get:(_t,property)=>method(String(property))});
+}
 const context=(data:AiClassification)=>({data,toolCallId:'synthetic',step:{do:async<T>(_name:string,fn:()=>T|Promise<T>)=>fn()},log:{info(){},warn(){},error(){}}});
 test('classification preserves human requests and suggestion-only policies, and uses a fixed policy language',()=>{
  const f=fixture();f.run.admission.candidates[0].language='en';
@@ -34,4 +43,11 @@ test('classification never confirms mismatched receipts or lost acknowledgements
  const lost=m.createClassificationTool(f.run,{async recordAiClassification(){throw new Error('lost response');}});assert.equal((await lost.run(context(f.classification)) as any).output.status,'unconfirmed');
  const denied=m.createClassificationTool(f.run,{async recordAiClassification(){return {outcome:'conflict'};}});assert.equal((await denied.run(context(f.classification)) as any).output.status,'rejected');
  const aborted=m.createClassificationTool(f.run,{async recordAiClassification(){throw new Error('must not run');}});await assert.rejects(async()=>aborted.run({...context(f.classification),signal:AbortSignal.abort()}));
+});
+
+test('an RPC-stub controller works without invoking a ".bind" method',async()=>{
+ const m=await api(),f=fixture();let captured:unknown[]=[];
+ const tool=m.createClassificationTool(f.run,rpcStub({recordAiClassification:async(...args:unknown[])=>{captured=args;return f.result;}}));
+ assert.deepEqual(await tool.run(context(f.classification)),{output:{status:'committed',canSend:false,sent:false},terminate:true});
+ assert.deepEqual(captured,[f.run.scope,f.run.request.runId,f.classification]);
 });

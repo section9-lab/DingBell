@@ -127,6 +127,8 @@ export default {
         case 'ai-dispatch-admit':return Response.json(await stub.admitAiDispatch(input.scope,input.request));
 case 'ai-fallback-classification':return Response.json(await stub.recordFallbackClassification(input.scope,input.runId));
 case 'ai-note-failure':return Response.json(await stub.noteAiFailure(input.scope,input.eventId));
+case 'ai-reconcile-failure':return Response.json(await stub.noteReconcileFailure(input.scope,input.eventId));
+case 'ai-notice':return Response.json(await stub.sendFallbackNotice(input.scope,input.runId));
 case 'ai-restart-run':return Response.json(await stub.restartAiRun(input.scope,input.runId));
         case 'ai-dispatch-stop':return Response.json(await stub.stopAiDispatch(input.scope,input.request));
         case 'ai-reception-resume':return Response.json(await stub.resumeAiReception(input.scope,input.actor,input.request));
